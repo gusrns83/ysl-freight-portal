@@ -1,0 +1,13 @@
+{
+  "name": "YSL Agency Freight Portal",
+  "short_name": "YSL Portal",
+  "description": "한국-러시아 해상운임 통합 조회",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1D2B4F",
+  "theme_color": "#1D2B4F",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" }
+  ]
+}
