@@ -140,6 +140,13 @@ export default function App() {
 
   // Default margins (used for guest + admin)
   const [margins, setMargins] = useState({coc20:80,coc40:100,soc20:80,soc40:100});
+  const [areaM, setAreaM] = useState({});
+  const [polM, setPolM] = useState({});
+  const [marginTab, setMarginTab] = useState("global");
+  const [selArea, setSelArea] = useState("");
+  const [selPol, setSelPol] = useState("");
+  const [areaEdit, setAreaEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
+  const [polEdit, setPolEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [validity, setValidity] = useState({SNK:"June 1-30, 2026", DY:"June 1-30, 2026", CK:"June 1-30, 2026"});
   const [notice, setNotice] = useState("");
   const [noticeOn, setNoticeOn] = useState(false);
@@ -199,6 +206,12 @@ export default function App() {
   const updateMargins = async (id,data) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify(data)}); setEditC(null); loadClients(); };
   const toggleClient = async (id,cur) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify({is_active:!cur})}); loadClients(); };
 
+  const getM = (pol, area, type) => {
+    if (polM[pol]?.[type] != null) return polM[pol][type];
+    if (areaM[area]?.[type] != null) return areaM[area][type];
+    return margins[type];
+  };
+
   const uploadNoticeFile = async (file) => {
     setUploadLoading(true); setUploadMsg("");
     try {
@@ -241,10 +254,13 @@ export default function App() {
         saveSetting("validity_snk", validity.SNK),
         saveSetting("validity_dy", validity.DY),
         saveSetting("validity_ck", validity.CK),
+        saveSetting("global_margins", JSON.stringify(margins)),
+        saveSetting("area_margins", JSON.stringify(areaM)),
+        saveSetting("pol_margins", JSON.stringify(polM)),
       ]);
       setSaveMsg("저장 완료!");
       setTimeout(() => setSaveMsg(""), 2000);
-    } catch(e) { setSaveMsg("저장 실패"); }
+    } catch(e) { setSaveMsg("저장 실패: " + e.message); }
   };
 
   useEffect(() => {
@@ -257,12 +273,15 @@ export default function App() {
       if (s.validity_snk !== undefined) setValidity(p=>({...p, SNK: s.validity_snk}));
       if (s.validity_dy !== undefined) setValidity(p=>({...p, DY: s.validity_dy}));
       if (s.validity_ck !== undefined) setValidity(p=>({...p, CK: s.validity_ck}));
+      if (s.global_margins) { try { setMargins(JSON.parse(s.global_margins)); } catch(e){} }
+      if (s.area_margins) { try { setAreaM(JSON.parse(s.area_margins)); } catch(e){} }
+      if (s.pol_margins) { try { setPolM(JSON.parse(s.pol_margins)); } catch(e){} }
     }).catch(()=>{});
   }, []);
 
   const bNet = (row,t) => { let b=null,cr=null; CRS.forEach(k=>{const v=row.rates[k][t]; if(v!=null&&(b===null||v<b)){b=v;cr=k;}}); return {val:b,cr}; };
   const bDO = (row,city,si) => { const t=si===0?"coc20":"coc40"; let b=null,cr=null; CRS.forEach(k=>{const o=row.rates[k][t],d=DO[city]?.[k]; if(o!=null&&d){const tot=o+d[si]; if(b===null||tot<b){b=tot;cr=k;}}}); return {val:b,cr}; };
-  const cRent = (rPol,city,rRow) => { const fp=PM[rPol]; if(!fp||!fMap[fp])return []; const fr=fMap[fp]; return CRS.map(k=>{const s20=fr.rates[k].soc20,s40=fr.rates[k].soc40; const e20=s20!=null?s20+margins.soc20:null,e40=s40!=null?s40+margins.soc40:null; const r20=rRow.r20[city],r40=rRow.r40[city]; return {k,t20:e20!=null&&r20!=null?e20+r20:null,t40:e40!=null&&r40!=null?e40+r40:null};}).filter(x=>x.t20!=null||x.t40!=null); };
+  const cRent = (rPol,city,rRow) => { const fp=PM[rPol]; if(!fp||!fMap[fp])return []; const fr=fMap[fp]; return CRS.map(k=>{const s20=fr.rates[k].soc20,s40=fr.rates[k].soc40; const e20=s20!=null?s20+getM(fp,fr.area,"soc20"):null,e40=s40!=null?s40+getM(fp,fr.area,"soc40"):null; const r20=rRow.r20[city],r40=rRow.r40[city]; return {k,t20:e20!=null&&r20!=null?e20+r20:null,t40:e40!=null&&r40!=null?e40+r40:null};}).filter(x=>x.t20!=null||x.t40!=null); };
   const bRent = (rPol,city,rRow,si) => { const all=cRent(rPol,city,rRow); let b=null,cr=null; all.forEach(x=>{const v=si===0?x.t20:x.t40; if(v!=null&&(b===null||v<b)){b=v;cr=x.k;}}); return {val:b,cr}; };
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
@@ -355,7 +374,7 @@ export default function App() {
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-            {types.map(t=>{ const b=bNet(row,t); const sell=b.val!=null?b.val+margins[t]:null; const show=isAdmin?b.val:sell;
+            {types.map(t=>{ const b=bNet(row,t); const sell=b.val!=null?b.val+getM(row.pol,row.area,t):null; const show=isAdmin?b.val:sell;
               return <div key={t} style={{textAlign:"right"}}>
                 <div style={{fontSize:10,color:"#9ca3af"}}>{t.includes("20")?"20'":"40'"}</div>
                 <div style={{fontSize:14,fontWeight:700,color:isAdmin?"#374151":"#1d4ed8"}}>{show!=null?`$${n(show)}`:"—"}</div>
@@ -382,8 +401,8 @@ export default function App() {
                         {validity[k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[k]}</span>}
                       </div>
                     </td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{isAdmin?n(v20):(v20?n(v20+margins[t20]):"—")}</td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{isAdmin?n(v40):(v40?n(v40+margins[t40]):"—")}</td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{isAdmin?n(v20):(v20?n(v20+getM(row.pol,row.area,t20)):"—")}</td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{isAdmin?n(v40):(v40?n(v40+getM(row.pol,row.area,t40)):"—")}</td>
                   </tr>; })}
               </tbody>
             </table>
@@ -572,13 +591,105 @@ export default function App() {
         <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px"}}>
           <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD)</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
-              {["coc20","coc40","soc20","soc40"].map(t=>(
-                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
-                  <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
-                    style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
+            {/* Tab selector */}
+            <div style={{display:"flex",background:"#fef3c7",borderRadius:8,padding:2,marginBottom:10}}>
+              {[["global","전체"],["area","지역별"],["pol","도시별"]].map(([k,l])=>(
+                <button key={k} onClick={()=>setMarginTab(k)} style={{flex:1,padding:"6px",fontSize:11,fontWeight:600,borderRadius:6,background:marginTab===k?"#fff":"transparent",border:"none",cursor:"pointer",color:marginTab===k?"#92400e":"#b45309"}}>{l}</button>
               ))}
             </div>
+
+            {/* 전체 마진 */}
+            {marginTab==="global" && (
+              <div>
+                <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>모든 구간에 적용되는 기본 마진</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+                  {["coc20","coc40","soc20","soc40"].map(t=>(
+                    <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                      <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
+                        style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 지역별 마진 */}
+            {marginTab==="area" && (
+              <div>
+                <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>지역별 마진 (전체 마진보다 우선 적용)</div>
+                <select value={selArea} onChange={e=>{setSelArea(e.target.value); const m=areaM[e.target.value]; setAreaEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""}); }}
+                  style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
+                  <option value="">-- 지역 선택 --</option>
+                  {areas.map(a=><option key={a} value={a}>{a} {areaM[a]?"✅":""}</option>)}
+                </select>
+                {selArea && <>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                    {["coc20","coc40","soc20","soc40"].map(t=>(
+                      <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                        <input type="number" placeholder={String(margins[t])} value={areaEdit[t]} onChange={e=>setAreaEdit(p=>({...p,[t]:e.target.value}))}
+                          style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={()=>{const m={coc20:parseInt(areaEdit.coc20)||margins.coc20,coc40:parseInt(areaEdit.coc40)||margins.coc40,soc20:parseInt(areaEdit.soc20)||margins.soc20,soc40:parseInt(areaEdit.soc40)||margins.soc40}; setAreaM(p=>({...p,[selArea]:m}));}}
+                      style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
+                    <button onClick={()=>{setAreaM(p=>{const n={...p};delete n[selArea];return n;});setAreaEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
+                      style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
+                  </div>
+                </>}
+                {Object.keys(areaM).length>0 && (
+                  <div style={{marginTop:8,padding:"8px",background:"#fef3c7",borderRadius:6}}>
+                    <div style={{fontSize:10,color:"#92400e",fontWeight:700,marginBottom:4}}>적용된 지역 마진:</div>
+                    {Object.entries(areaM).map(([area,m])=>(
+                      <div key={area} style={{fontSize:11,color:"#78350f",marginBottom:2}}>
+                        <b>{area}</b>: COC {m.coc20}/{m.coc40} SOC {m.soc20}/{m.soc40}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 도시별 마진 */}
+            {marginTab==="pol" && (
+              <div>
+                <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>도시별 마진 (최우선 적용)</div>
+                <select value={selPol} onChange={e=>{setSelPol(e.target.value); const m=polM[e.target.value]; setPolEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""});}}
+                  style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
+                  <option value="">-- POL 선택 --</option>
+                  {fData.map(d=><option key={d.pol} value={d.pol}>{d.pol} {polM[d.pol]?"✅":""}</option>)}
+                </select>
+                {selPol && <>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                    {["coc20","coc40","soc20","soc40"].map(t=>(
+                      <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                        <input type="number" placeholder={String(getM(selPol,fData.find(d=>d.pol===selPol)?.area||"",t))} value={polEdit[t]} onChange={e=>setPolEdit(p=>({...p,[t]:e.target.value}))}
+                          style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={()=>{const area=fData.find(d=>d.pol===selPol)?.area||""; const m={coc20:parseInt(polEdit.coc20)||getM(selPol,area,"coc20"),coc40:parseInt(polEdit.coc40)||getM(selPol,area,"coc40"),soc20:parseInt(polEdit.soc20)||getM(selPol,area,"soc20"),soc40:parseInt(polEdit.soc40)||getM(selPol,area,"soc40")}; setPolM(p=>({...p,[selPol]:m}));}}
+                      style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
+                    <button onClick={()=>{setPolM(p=>{const n={...p};delete n[selPol];return n;});setPolEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
+                      style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
+                  </div>
+                </>}
+                {Object.keys(polM).length>0 && (
+                  <div style={{marginTop:8,padding:"8px",background:"#fef3c7",borderRadius:6,maxHeight:120,overflowY:"auto"}}>
+                    <div style={{fontSize:10,color:"#92400e",fontWeight:700,marginBottom:4}}>적용된 도시 마진:</div>
+                    {Object.entries(polM).map(([pol,m])=>(
+                      <div key={pol} style={{fontSize:11,color:"#78350f",marginBottom:2}}>
+                        <b>{pol}</b>: COC {m.coc20}/{m.coc40} SOC {m.soc20}/{m.soc40}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button onClick={saveAllSettings}
+              style={{width:"100%",marginTop:10,padding:"8px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>
+              {saveMsg || "💾 전체 설정 저장"}
+            </button>
           </div>
           <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:8}}>VALIDITY (선사별)</div>
