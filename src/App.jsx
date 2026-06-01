@@ -317,12 +317,14 @@ export default function App() {
     );
   };
 
+  const [doCityOpen, setDoCityOpen] = useState(null);
+
   const DOCrd = ({row,idx}) => {
     const open = exp===`d${idx}`;
     const b20=bDO(row,"mow",0),b40=bDO(row,"mow",1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>setExp(open?null:`d${idx}`)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+        <button onClick={()=>{setExp(open?null:`d${idx}`);setDoCityOpen(null);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
             <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
@@ -334,22 +336,62 @@ export default function App() {
           </div>
         </button>
         {open && (
-          <div style={{padding:"0 16px 16px",borderTop:"1px solid #f3f4f6"}}>
-            <table style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
-              <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
-                <th style={{textAlign:"left",fontWeight:500,padding:"4px 0"}}>City</th>
-                <th style={{textAlign:"right",fontWeight:500,padding:"4px 0"}}>20'</th><th style={{width:36,textAlign:"center",fontWeight:500,padding:"4px 0"}}>Cr</th>
-                <th style={{textAlign:"right",fontWeight:500,padding:"4px 0"}}>40'</th><th style={{width:36,textAlign:"center",fontWeight:500,padding:"4px 0"}}>Cr</th>
-              </tr></thead>
-              <tbody>
-                {DOC.map(({k,l})=>{ const c20=bDO(row,k,0),c40=bDO(row,k,1);
-                  return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
-                    <td style={{padding:"10px 0",fontWeight:600,color:"#374151"}}>{l}</td>
-                    {c20.val?<><td style={{textAlign:"right",padding:"10px 0",fontFamily:"monospace",fontWeight:700,color:"#111",cursor:"pointer"}} onClick={()=>openSC(c20.cr,"coc20",row.pol+" > "+l)}>${n(c20.val)}</td><td style={{textAlign:"center",padding:"10px 0"}}><Bg k={c20.cr}/></td></>:<><td style={{textAlign:"right",color:"#d1d5db"}}>—</td><td/></>}
-                    {c40.val?<><td style={{textAlign:"right",padding:"10px 0",fontFamily:"monospace",fontWeight:700,color:"#111",cursor:"pointer"}} onClick={()=>openSC(c40.cr,"coc40",row.pol+" > "+l)}>${n(c40.val)}</td><td style={{textAlign:"center",padding:"10px 0"}}><Bg k={c40.cr}/></td></>:<><td style={{textAlign:"right",color:"#d1d5db"}}>—</td><td/></>}
-                  </tr>; })}
-              </tbody>
-            </table>
+          <div style={{borderTop:"1px solid #f3f4f6",paddingBottom:8}}>
+            <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Drop off · City 선택</div>
+            {DOC.map(({k,l})=>{
+              const c20=bDO(row,k,0),c40=bDO(row,k,1);
+              const cityKey=`${idx}-${k}`,cOpen=doCityOpen===cityKey;
+              const t=k==="mow"||k==="spb"?"coc20":"coc20";
+              const carrierRows = CRS.map(cr=>{
+                const o20=row.rates[cr]["coc20"],o40=row.rates[cr]["coc40"];
+                const d=DO[k]?.[cr];
+                const tot20=o20!=null&&d?o20+d[0]:null;
+                const tot40=o40!=null&&d?o40+d[1]:null;
+                return {cr,tot20,tot40};
+              }).filter(x=>x.tot20!=null||x.tot40!=null);
+              return (
+                <div key={k}>
+                  <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} style={{width:"100%",display:"flex",alignItems:"center",padding:"10px 16px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left"}}>
+                    <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151"}}>{l}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#111"}}>{c20.val?`$${n(c20.val)}`:"—"}</div>
+                        {c20.cr&&<Bg k={c20.cr}/>}
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#111"}}>{c40.val?`$${n(c40.val)}`:"—"}</div>
+                        {c40.cr&&<Bg k={c40.cr}/>}
+                      </div>
+                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
+                    </div>
+                  </button>
+                  {cOpen && (
+                    <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
+                      {carrierRows.length===0
+                        ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
+                        : carrierRows.map(({cr,tot20,tot40})=>(
+                          <div key={cr} style={{display:"flex",alignItems:"center",padding:"10px 24px",borderBottom:"1px solid #e0f2fe"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
+                              <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span>
+                            </div>
+                            <div style={{textAlign:"right",marginRight:20,cursor:tot20?"pointer":"default"}} onClick={()=>tot20&&openSC(cr,"coc20",row.pol+" > "+l)}>
+                              <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
+                              <div style={{fontSize:14,fontWeight:700,color:tot20?"#0369a1":"#d1d5db",textDecoration:tot20?"underline":"none"}}>{tot20?`$${n(tot20)}`:"—"}</div>
+                            </div>
+                            <div style={{textAlign:"right",cursor:tot40?"pointer":"default"}} onClick={()=>tot40&&openSC(cr,"coc40",row.pol+" > "+l)}>
+                              <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
+                              <div style={{fontSize:14,fontWeight:700,color:tot40?"#0369a1":"#d1d5db",textDecoration:tot40?"underline":"none"}}>{tot40?`$${n(tot40)}`:"—"}</div>
+                            </div>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
