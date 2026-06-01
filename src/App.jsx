@@ -273,6 +273,23 @@ export default function App() {
     if (areaM[area]?.[type] != null) return areaM[area][type];
     return margins[type];
   };
+  const applyPolMargin = (pol, type, value) => {
+    const v = parseInt(value, 10);
+    setPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: Number.isFinite(v) ? v : 0 } }));
+  };
+  const oceanDetail = (row, t) => {
+    const b = bNet(row, t);
+    const margin = getM(row.pol, row.area, t);
+    const cost = b.val;
+    return { sell: cost != null ? cost + margin : null, cost, margin, cr: b.cr };
+  };
+  const doDetail = (row, cityKey, si) => {
+    const t = si === 0 ? "coc20" : "coc40";
+    const b = bDO(row, cityKey, si);
+    const margin = getM(row.pol, row.area, t);
+    const cost = b.val;
+    return { sell: cost != null ? cost + margin : null, cost, margin, cr: b.cr };
+  };
 
   const uploadNoticeFile = async (file) => {
     setUploadLoading(true); setUploadMsg("");
@@ -345,6 +362,17 @@ export default function App() {
   const bDO = (row,city,si) => { const t=si===0?"coc20":"coc40"; let b=null,cr=null; CRS.forEach(k=>{const o=row.rates[k][t],d=DO[city]?.[k]; if(o!=null&&d){const tot=o+d[si]; if(b===null||tot<b){b=tot;cr=k;}}}); return {val:b,cr}; };
   const cRent = (rPol,city,rRow) => { const fp=PM[rPol]; if(!fp||!fMap[fp])return []; const fr=fMap[fp]; return CRS.map(k=>{const s20=fr.rates[k].soc20,s40=fr.rates[k].soc40; const e20=s20!=null?s20+getM(fp,fr.area,"soc20"):null,e40=s40!=null?s40+getM(fp,fr.area,"soc40"):null; const r20=rRow.r20[city],r40=rRow.r40[city]; return {k,t20:e20!=null&&r20!=null?e20+r20:null,t40:e40!=null&&r40!=null?e40+r40:null};}).filter(x=>x.t20!=null||x.t40!=null); };
   const bRent = (rPol,city,rRow,si) => { const all=cRent(rPol,city,rRow); let b=null,cr=null; all.forEach(x=>{const v=si===0?x.t20:x.t40; if(v!=null&&(b===null||v<b)){b=v;cr=x.k;}}); return {val:b,cr}; };
+  const rentDetail = (rPol,city,rRow,si) => {
+    const fp=PM[rPol], fr=fp?fMap[fp]:null;
+    const t=si===0?"soc20":"soc40";
+    const rental=si===0?rRow.r20[city]:rRow.r40[city];
+    const b=bRent(rPol,city,rRow,si);
+    const margin=fr?getM(fp,fr.area,t):0;
+    if(!fr||!b.cr) return {sell:rental,cost:rental,margin:0,cr:b.cr};
+    const soc=fr.rates[b.cr][t];
+    const cost=soc!=null&&rental!=null?soc+rental:null;
+    return {sell:b.val,cost,margin,cr:b.cr};
+  };
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
 
@@ -443,29 +471,80 @@ export default function App() {
     </div>
   );
 
+  const AdminPriceCols = ({d20,d40,prefix="MOW"}) => (
+    <div style={{display:"flex",gap:12,alignItems:"flex-start",flexShrink:0}}>
+      {[{l:"매출가",c:"#b45309",v20:d20.sell,v40:d40.sell,cr:d20.cr,vc:"#111"},
+        {l:"매입가",c:"#2563eb",v20:d20.cost,v40:d40.cost,cr:null,vc:"#374151"},
+        {l:"마진",c:"#7c3aed",v20:d20.margin,v40:d40.margin,cr:null,vc:"#7c3aed"}].map(col=>(
+        <div key={col.l} style={{textAlign:"right",minWidth:54}}>
+          <div style={{fontSize:9,fontWeight:700,color:col.c,marginBottom:4}}>{col.l}</div>
+          <div style={{fontSize:10,color:"#9ca3af"}}>{prefix?`${prefix} 20'`:"20'"}</div>
+          <div style={{fontSize:13,fontWeight:700,color:col.vc}}>{col.v20!=null?`$${n(col.v20)}`:"—"}</div>
+          <div style={{fontSize:10,color:"#9ca3af",marginTop:4}}>40'</div>
+          <div style={{fontSize:13,fontWeight:700,color:col.vc}}>{col.v40!=null?`$${n(col.v40)}`:"—"}</div>
+          {col.cr&&<div style={{marginTop:4}}><Bg k={col.cr}/></div>}
+        </div>
+      ))}
+    </div>
+  );
+
+  const PolMarginBar = ({pol,area,types}) => (
+    <div style={{padding:"10px 16px",background:"#fffbeb",borderBottom:"1px solid #fde68a"}} onClick={e=>e.stopPropagation()}>
+      <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:6}}>{pol} · 마진 조정 (USD)</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+        {types.map(t=>(
+          <div key={t}>
+            <div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+            <input type="number" value={getM(pol,area,t)} onChange={e=>applyPolMargin(pol,t,e.target.value)}
+              style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/>
+          </div>
+        ))}
+      </div>
+      <div style={{fontSize:9,color:"#9ca3af",marginTop:6}}>도시별 마진 · 상단 「설정 저장」으로 DB 반영</div>
+    </div>
+  );
+
   // ── CARDS ──
   const OCard = ({row,idx}) => {
     const types = ctype==="coc"?["coc20","coc40"]:["soc20","soc40"];
     const open = exp===`o${idx}`;
+    const d20=oceanDetail(row,types[0]),d40=oceanDetail(row,types[1]);
+    const t20=types[0],t40=types[1];
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>setExp(open?null:`o${idx}`)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+        <button onClick={()=>setExp(open?null:`o${idx}`)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
             <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-            {types.map(t=>{ const b=bNet(row,t); const sell=b.val!=null?b.val+getM(row.pol,row.area,t):null; const show=isAdmin?b.val:sell;
-              return <div key={t} style={{textAlign:"right"}}>
-                <div style={{fontSize:10,color:"#9ca3af"}}>{t.includes("20")?"20'":"40'"}</div>
-                <div style={{fontSize:14,fontWeight:700,color:isAdmin?"#374151":"#1d4ed8"}}>{show!=null?`$${n(show)}`:"—"}</div>
-                <Bg k={b.cr}/>
-              </div>; })}
-            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
-          </div>
+          {isAdmin
+            ? <AdminPriceCols d20={d20} d40={d40} prefix=""/>
+            : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div><Bg k={d20.cr}/></div>
+                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div><Bg k={d40.cr}/></div>
+              </div>}
+          <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
         </button>
         {open && (
-          <div style={{padding:"0 16px 16px",borderTop:"1px solid #f3f4f6"}}>
+          <div style={{borderTop:"1px solid #f3f4f6"}}>
+            {isAdmin && <PolMarginBar pol={row.pol} area={row.area} types={types}/>}
+            <div style={{padding:"0 16px 16px"}}>
+            {isAdmin ? (
+              <div style={{marginTop:12}}>
+                {CRS.map(k=>{ const v20=row.rates[k][t20],v40=row.rates[k][t40]; if(!v20&&!v40)return null;
+                  const cd20={sell:v20!=null?v20+getM(row.pol,row.area,t20):null,cost:v20,margin:getM(row.pol,row.area,t20),cr:k};
+                  const cd40={sell:v40!=null?v40+getM(row.pol,row.area,t40):null,cost:v40,margin:getM(row.pol,row.area,t40),cr:k};
+                  return (
+                    <div key={k} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f9fafb"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,flex:1,minWidth:0,flexWrap:"wrap"}}>
+                        <Bg k={k}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
+                        {validity[k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[k]}</span>}
+                      </div>
+                      <AdminPriceCols d20={cd20} d40={cd40} prefix=""/>
+                    </div>
+                  ); })}
+              </div>
+            ) : (
             <table style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
               <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
                 <th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Carrier</th>
@@ -473,7 +552,7 @@ export default function App() {
                 <th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>40'</th>
               </tr></thead>
               <tbody>
-                {CRS.map(k=>{ const t20=ctype==="coc"?"coc20":"soc20",t40=ctype==="coc"?"coc40":"soc40"; const v20=row.rates[k][t20],v40=row.rates[k][t40]; if(!v20&&!v40)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
+                {CRS.map(k=>{ const v20=row.rates[k][t20],v40=row.rates[k][t40]; if(!v20&&!v40)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
                     <td style={{padding:"8px 0"}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
@@ -482,11 +561,13 @@ export default function App() {
                         {validity[k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[k]}</span>}
                       </div>
                     </td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{isAdmin?n(v20):(v20?n(v20+getM(row.pol,row.area,t20)):"—")}</td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{isAdmin?n(v40):(v40?n(v40+getM(row.pol,row.area,t40)):"—")}</td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{v20?n(v20+getM(row.pol,row.area,t20)):"—"}</td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{v40?n(v40+getM(row.pol,row.area,t40)):"—"}</td>
                   </tr>; })}
               </tbody>
             </table>
+            )}
+            </div>
           </div>
         )}
       </div>
@@ -497,73 +578,76 @@ export default function App() {
 
   const DOCrd = ({row,idx}) => {
     const open = exp===`d${idx}`;
-    const b20=bDO(row,"mow",0),b40=bDO(row,"mow",1);
+    const doTypes=["coc20","coc40"];
+    const d20=doDetail(row,"mow",0),d40=doDetail(row,"mow",1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>{setExp(open?null:`d${idx}`);setDoCityOpen(null);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+        <button onClick={()=>{setExp(open?null:`d${idx}`);setDoCityOpen(null);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
             <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-            {b20.val&&<><div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>${n(b20.val)}</div><Bg k={b20.cr}/></div>
-            <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>${n(b40.val)}</div><Bg k={b40.cr}/></div></>}
-            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
-          </div>
+          {isAdmin
+            ? <AdminPriceCols d20={d20} d40={d40} prefix="MOW"/>
+            : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                {d20.sell!=null&&<><div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>${n(d20.sell)}</div><Bg k={d20.cr}/></div>
+                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div><Bg k={d40.cr}/></div></>}
+              </div>}
+          <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6",paddingBottom:8}}>
+            {isAdmin && <PolMarginBar pol={row.pol} area={row.area} types={doTypes}/>}
             <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Drop off · City 선택</div>
             {DOC.map(({k,l})=>{
-              const c20=bDO(row,k,0),c40=bDO(row,k,1);
+              const cd20=doDetail(row,k,0),cd40=doDetail(row,k,1);
               const cityKey=`${idx}-${k}`,cOpen=doCityOpen===cityKey;
-              const t=k==="mow"||k==="spb"?"coc20":"coc20";
               const carrierRows = CRS.map(cr=>{
                 const o20=row.rates[cr]["coc20"],o40=row.rates[cr]["coc40"];
                 const d=DO[k]?.[cr];
-                const tot20=o20!=null&&d?o20+d[0]:null;
-                const tot40=o40!=null&&d?o40+d[1]:null;
-                return {cr,tot20,tot40};
-              }).filter(x=>x.tot20!=null||x.tot40!=null);
+                const cost20=o20!=null&&d?o20+d[0]:null,cost40=o40!=null&&d?o40+d[1]:null;
+                const m20=getM(row.pol,row.area,"coc20"),m40=getM(row.pol,row.area,"coc40");
+                return {cr,cost20,cost40,sell20:cost20!=null?cost20+m20:null,sell40:cost40!=null?cost40+m40:null,m20,m40};
+              }).filter(x=>x.cost20!=null||x.cost40!=null);
               return (
                 <div key={k}>
-                  <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 16px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left"}}>
+                  <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 16px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:8}}>
                     <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151"}}>{l}</span>
-                    <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-                      <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
-                        <div style={{fontSize:14,fontWeight:700,color:"#111"}}>{c20.val?`$${n(c20.val)}`:"—"}</div>
-                        {c20.cr&&<Bg k={c20.cr}/>}
-                      </div>
-                      <div style={{textAlign:"right"}}>
-                        <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
-                        <div style={{fontSize:14,fontWeight:700,color:"#111"}}>{c40.val?`$${n(c40.val)}`:"—"}</div>
-                        {c40.cr&&<Bg k={c40.cr}/>}
-                      </div>
-                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
-                    </div>
+                    {isAdmin
+                      ? <AdminPriceCols d20={cd20} d40={cd40} prefix=""/>
+                      : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                          <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{cd20.sell!=null?`$${n(cd20.sell)}`:"—"}</div>{cd20.cr&&<Bg k={cd20.cr}/>}</div>
+                          <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{cd40.sell!=null?`$${n(cd40.sell)}`:"—"}</div>{cd40.cr&&<Bg k={cd40.cr}/>}</div>
+                        </div>}
+                    <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
                   </button>
                   {cOpen && (
                     <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
                       {carrierRows.length===0
                         ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
-                        : carrierRows.map(({cr,tot20,tot40})=>(
-                          <div key={cr} style={{display:"flex",alignItems:"center",padding:"7px 24px",borderBottom:"1px solid #e0f2fe"}}>
-                            <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
+                        : carrierRows.map(({cr,cost20,cost40,sell20,sell40,m20,m40})=>{
+                          const cdC20={sell:sell20,cost:cost20,margin:m20,cr};
+                          const cdC40={sell:sell40,cost:cost40,margin:m40,cr};
+                          return (
+                          <div key={cr} style={{display:"flex",alignItems:"center",padding:"7px 16px 7px 24px",borderBottom:"1px solid #e0f2fe",gap:8}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
                               <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span>
                               {validity[cr] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[cr]}</span>}
                             </div>
-                            <div style={{textAlign:"right",marginRight:20,cursor:tot20?"pointer":"default"}} onClick={()=>tot20&&openSC(cr,"coc20",row.pol+" > "+l)}>
+                            {isAdmin
+                              ? <AdminPriceCols d20={cdC20} d40={cdC40} prefix=""/>
+                              : <>
+                            <div style={{textAlign:"right",marginRight:20,cursor:sell20?"pointer":"default"}} onClick={()=>sell20&&openSC(cr,"coc20",row.pol+" > "+l)}>
                               <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
-                              <div style={{fontSize:14,fontWeight:700,color:tot20?"#0369a1":"#d1d5db",textDecoration:tot20?"underline":"none"}}>{tot20?`$${n(tot20)}`:"—"}</div>
+                              <div style={{fontSize:14,fontWeight:700,color:sell20?"#0369a1":"#d1d5db",textDecoration:sell20?"underline":"none"}}>{sell20?`$${n(sell20)}`:"—"}</div>
                             </div>
-                            <div style={{textAlign:"right",cursor:tot40?"pointer":"default"}} onClick={()=>tot40&&openSC(cr,"coc40",row.pol+" > "+l)}>
+                            <div style={{textAlign:"right",cursor:sell40?"pointer":"default"}} onClick={()=>sell40&&openSC(cr,"coc40",row.pol+" > "+l)}>
                               <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
-                              <div style={{fontSize:14,fontWeight:700,color:tot40?"#0369a1":"#d1d5db",textDecoration:tot40?"underline":"none"}}>{tot40?`$${n(tot40)}`:"—"}</div>
+                              <div style={{fontSize:14,fontWeight:700,color:sell40?"#0369a1":"#d1d5db",textDecoration:sell40?"underline":"none"}}>{sell40?`$${n(sell40)}`:"—"}</div>
                             </div>
+                            </>}
                           </div>
-                        ))
-                      }
+                        );})}
                     </div>
                   )}
                 </div>
@@ -577,48 +661,65 @@ export default function App() {
 
   const RCrd = ({row,idx}) => {
     const open = exp===`r${idx}`;
-    const m20=bRent(row.pol,"Moscow",row,0),m40=bRent(row.pol,"Moscow",row,1);
+    const mow="Moscow";
+    const freightPol=row.displayPol||PM[row.pol]||row.pol;
+    const d20=rentDetail(row.pol,mow,row,0),d40=rentDetail(row.pol,mow,row,1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+        <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
             <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.displayPol || row.pol}</span>
           </div>
-          <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-            <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{m20.val?`$${n(m20.val)}`:`$${n(row.r20["Moscow"])}`}</div>{m20.cr&&<Bg k={m20.cr}/>}</div>
-            <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{m40.val?`$${n(m40.val)}`:`$${n(row.r40["Moscow"])}`}</div>{m40.cr&&<Bg k={m40.cr}/>}</div>
-            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
-          </div>
+          {isAdmin
+            ? <AdminPriceCols d20={d20} d40={d40}/>
+            : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>{d20.cr&&<Bg k={d20.cr}/>}</div>
+                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>{d40.cr&&<Bg k={d40.cr}/>}</div>
+              </div>}
+          <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6",paddingBottom:8}}>
+            {isAdmin && <PolMarginBar pol={freightPol} area={row.area} types={["soc20","soc40"]}/>}
             <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Rental · Return City (Drop off 순서)</div>
             {RENT_CITY_ORDER.map(city=>{
-              const b20=bRent(row.pol,city,row,0),b40=bRent(row.pol,city,row,1);
+              const cd20=rentDetail(row.pol,city,row,0),cd40=rentDetail(row.pol,city,row,1);
               const key=`${idx}-${city}`,cOpen=cityOpen===key;
               const carriers=cOpen?cRent(row.pol,city,row):[];
               const cityLabel=RC_LABEL[city]||city;
+              const fp=PM[row.pol],fr=fp?fMap[fp]:null;
               return (
                 <div key={city}>
-                  <button onClick={()=>setCityOpen(cOpen?null:key)} style={{width:"100%",display:"flex",alignItems:"center",padding:"10px 16px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left"}}>
-                    <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151"}}>{cityLabel}</span>
-                    <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-                      <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{b20.val?`$${n(b20.val)}`:"—"}</div>{b20.val&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r20[city])}</div>}{b20.cr&&<Bg k={b20.cr}/>}</div>
-                      <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{b40.val?`$${n(b40.val)}`:"—"}</div>{b40.val&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r40[city])}</div>}{b40.cr&&<Bg k={b40.cr}/>}</div>
-                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
-                    </div>
+                  <button onClick={()=>setCityOpen(cOpen?null:key)} style={{width:"100%",display:"flex",alignItems:"center",padding:"10px 16px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:8}}>
+                    <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
+                    {isAdmin
+                      ? <AdminPriceCols d20={cd20} d40={cd40} prefix=""/>
+                      : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                          <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{cd20.sell!=null?`$${n(cd20.sell)}`:"—"}</div>{cd20.sell!=null&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r20[city])}</div>}{cd20.cr&&<Bg k={cd20.cr}/>}</div>
+                          <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{cd40.sell!=null?`$${n(cd40.sell)}`:"—"}</div>{cd40.sell!=null&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r40[city])}</div>}{cd40.cr&&<Bg k={cd40.cr}/>}</div>
+                        </div>}
+                    <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
                   </button>
                   {cOpen && (
                     <div style={{background:"#faf5ff",borderBottom:"1px solid #ede9fe"}}>
                       {carriers.length===0?<div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
-                        :carriers.map(c=>(
-                        <div key={c.k} style={{display:"flex",alignItems:"center",padding:"10px 24px",borderBottom:"1px solid #ede9fe"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
+                        :carriers.map(c=>{
+                        const m20=fr?getM(fp,fr.area,"soc20"):0,m40=fr?getM(fp,fr.area,"soc40"):0;
+                        const soc20=fr?.rates[c.k]?.soc20,soc40=fr?.rates[c.k]?.soc40;
+                        const r20=row.r20[city],r40=row.r40[city];
+                        const cost20=soc20!=null&&r20!=null?soc20+r20:null,cost40=soc40!=null&&r40!=null?soc40+r40:null;
+                        const cdC20={sell:c.t20,cost:cost20,margin:m20,cr:c.k},cdC40={sell:c.t40,cost:cost40,margin:m40,cr:c.k};
+                        return (
+                        <div key={c.k} style={{display:"flex",alignItems:"center",padding:"10px 16px 10px 24px",borderBottom:"1px solid #ede9fe",gap:8}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
                             <Bg k={c.k}/>
                             <span style={{fontSize:11,color:"#6b7280"}}>{CN[c.k]}</span>
                             {validity[c.k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[c.k]}</span>}
                           </div>
+                          {isAdmin
+                            ? <AdminPriceCols d20={cdC20} d40={cdC40} prefix=""/>
+                            : <>
                           <div style={{textAlign:"right",marginRight:20,cursor:c.t20?"pointer":"default"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
                             <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
                             <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t20?"underline":"none"}}>{c.t20?`$${n(c.t20)}`:"—"}</div>
@@ -629,8 +730,9 @@ export default function App() {
                             <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t40?"underline":"none"}}>{c.t40?`$${n(c.t40)}`:"—"}</div>
                             {c.t40&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r40[city])}</div>}
                           </div>
+                          </>}
                         </div>
-                      ))}
+                      );})}
                     </div>
                   )}
                 </div>
@@ -872,105 +974,3 @@ export default function App() {
 
       {/* CONTENT */}
       <div style={{maxWidth:640,margin:"12px auto",padding:"0 16px 120px"}}>
-        <div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>{`${tab==="rental"?rFilt.length:filt.length} routes`}</div>
-        {tab==="ocean" && filt.map((row,i)=><OCard key={i} row={row} idx={i}/>)}
-        {tab==="dropoff" && filt.map((row,i)=><DOCrd key={i} row={row} idx={i}/>)}
-        {tab==="rental" && rFilt.map((row,i)=><RCrd key={i} row={row} idx={i}/>)}
-      </div>
-
-      <div style={{maxWidth:640,margin:"0 auto",padding:16,textAlign:"center"}}>
-        <span style={{fontSize:10,color:"#d1d5db"}}>YSL Agency Far East · Rates subject to change</span>
-      </div>
-
-      {/* LOGIN MODAL */}
-      {showLoginModal && (
-        <div style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowLoginModal(false)}>
-          <div style={{background:"#fff",borderRadius:20,padding:24,width:"100%",maxWidth:360,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}} onClick={e=>e.stopPropagation()}>
-            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
-              <Logo size={40}/>
-              <div><div style={{fontSize:16,fontWeight:700,color:"#111"}}>YSL Agency</div><div style={{fontSize:11,color:"#9ca3af"}}>Login</div></div>
-              <button onClick={()=>setShowLoginModal(false)} style={{marginLeft:"auto",fontSize:18,color:"#9ca3af",background:"none",border:"none",cursor:"pointer",lineHeight:1}}>&#10005;</button>
-            </div>
-            {/* Tab */}
-            <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:16}}>
-              {[["client","Client"],["admin","Admin"]].map(([k,l])=>(
-                <button key={k} onClick={()=>{setLoginTab(k);setLoginErr("");}} style={{flex:1,padding:"7px",fontSize:12,fontWeight:600,borderRadius:8,background:loginTab===k?"#fff":"transparent",border:"none",cursor:"pointer",color:loginTab===k?"#111":"#9ca3af"}}>{l}</button>
-              ))}
-            </div>
-            {loginTab==="client" ? (
-              <div>
-                <input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}
-                  style={{width:"100%",padding:"11px 14px",fontSize:14,border:"1px solid #e5e7eb",borderRadius:10,marginBottom:10,boxSizing:"border-box",outline:"none"}}/>
-                <input type="password" placeholder="Password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doLogin()}
-                  style={{width:"100%",padding:"11px 14px",fontSize:14,border:"1px solid #e5e7eb",borderRadius:10,marginBottom:14,boxSizing:"border-box",outline:"none"}}/>
-                {loginErr&&<div style={{fontSize:12,color:"#ef4444",marginBottom:10}}>{loginErr}</div>}
-                <button onClick={doLogin} disabled={loginLoading}
-                  style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer",opacity:loginLoading?0.6:1}}>
-                  {loginLoading?"Checking...":"Login"}
-                </button>
-              </div>
-            ) : (
-              <div>
-                <input type="password" placeholder="Admin PIN" value={pin} onChange={e=>setPin(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doAdminLogin()} autoFocus
-                  style={{width:"100%",padding:"11px 14px",fontSize:22,fontWeight:700,letterSpacing:10,textAlign:"center",border:"1px solid #e5e7eb",borderRadius:10,marginBottom:14,boxSizing:"border-box",outline:"none"}}/>
-                {loginErr&&<div style={{fontSize:12,color:"#ef4444",marginBottom:10}}>{loginErr}</div>}
-                <button onClick={doAdminLogin}
-                  style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
-                  Admin Login
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* NOTICE POPUP */}
-      {noticeOn && (notice || noticeFileUrl) && showNotice && (
-        <div style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:480,maxHeight:"85vh",boxShadow:"0 20px 60px rgba(0,0,0,0.25)",overflow:"hidden",display:"flex",flexDirection:"column"}}>
-            <div style={{background:"#1D2B4F",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-              <div style={{display:"flex",alignItems:"center",gap:10}}>
-                <span style={{fontSize:18}}>📢</span>
-                <span style={{fontSize:14,fontWeight:700,color:"#fff"}}>Notice</span>
-              </div>
-              <button onClick={()=>setShowNotice(false)} style={{color:"#9ca3af",background:"none",border:"none",cursor:"pointer",fontSize:20,lineHeight:1}}>✕</button>
-            </div>
-            <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
-              {notice && <div style={{fontSize:13,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap",marginBottom:noticeFileUrl?16:0}}>{notice}</div>}
-              {noticeFileUrl && (() => {
-                const ext = noticeFileUrl.split(".").pop().toLowerCase();
-                if (ext==="pdf") return (
-                  <div style={{width:"100%",borderRadius:8,overflow:"hidden",border:"1px solid #e5e7eb"}}>
-                    <iframe src={noticeFileUrl} style={{width:"100%",height:400,border:"none"}} title="notice"/>
-                  </div>
-                );
-                return <img src={noticeFileUrl} alt="notice" style={{width:"100%",borderRadius:8,border:"1px solid #e5e7eb"}}/>;
-              })()}
-            </div>
-            <div style={{padding:"12px 20px",borderTop:"1px solid #f3f4f6",flexShrink:0}}>
-              <button onClick={()=>setShowNotice(false)}
-                style={{width:"100%",padding:"11px",fontSize:13,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
-                확인
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* S/C POPUP */}
-      {sc && (
-        <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center",background:"rgba(0,0,0,0.3)"}} onClick={()=>setSc(null)}>
-          <div style={{width:"100%",maxWidth:480,background:"#fff",borderRadius:"20px 20px 0 0",padding:"20px 20px 32px",boxShadow:"0 -20px 60px rgba(0,0,0,0.2)"}} onClick={e=>e.stopPropagation()}>
-            <div style={{width:40,height:4,background:"#e5e7eb",borderRadius:2,margin:"0 auto 16px"}}/>
-            <div style={{fontSize:10,color:"#9ca3af",fontWeight:500,marginBottom:4}}>S/C NUMBER · {sc.k} · {sc.size}</div>
-            <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>{sc.route}</div>
-            <div style={{display:"flex",alignItems:"center",gap:8,background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:12}}>
-              <span style={{flex:1,fontSize:18,fontFamily:"monospace",fontWeight:700,color:"#111",letterSpacing:2}}>{sc.sc}</span>
-              <button onClick={copySC} style={{padding:"8px 16px",fontSize:12,fontWeight:600,color:"#fff",background:sc.copied?"#16a34a":"#111827",border:"none",borderRadius:8,cursor:"pointer"}}>{sc.copied?"Copied":"Copy"}</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
