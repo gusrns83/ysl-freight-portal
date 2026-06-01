@@ -122,13 +122,36 @@ const Bg = ({k}) => {
 };
 
 const TabIconOcean = ({color}) => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M3 17h18"/><path d="M5 17l1.5-6.5h11L19 17"/><path d="M12 11V7"/><path d="M9.5 7 12 4l2.5 3"/>
+  <svg width="22" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M2 19h20"/>
+    <path d="M4 19l1.2-4h13.6L20 19" fill={color} fillOpacity="0.08"/>
+    <rect x="5" y="11" width="3.2" height="3.2" fill={color} fillOpacity="0.22" stroke={color}/>
+    <rect x="9.2" y="11" width="3.2" height="3.2" fill={color} fillOpacity="0.22" stroke={color}/>
+    <rect x="13.4" y="11" width="3.2" height="3.2" fill={color} fillOpacity="0.22" stroke={color}/>
+    <rect x="7" y="7.5" width="3.2" height="2.8" fill={color} fillOpacity="0.14" stroke={color}/>
+    <rect x="11.2" y="7.5" width="3.2" height="2.8" fill={color} fillOpacity="0.14" stroke={color}/>
+    <path d="M17.5 8.5h2.5v6.5h-2.5"/><path d="M18.2 7.5h1.2v1.2"/>
   </svg>
 );
 const TabIconDropoff = ({color}) => (
-  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M2 13.5 3.2 9h4.3l.9 4.5H2z"/><path d="M5.5 9V7.2L7 6v3"/><path d="M9.5 12h2.5"/><path d="M12 12v-1l1 1-1 1"/><path d="M15.5 12.5H20l1.2 2v2.5H14v-5z"/><path d="M20.5 14.5H22l1-1.8V11h-2.5l-.5 3.5"/><circle cx="16" cy="17" r="1" fill={color} stroke="none"/><circle cx="21" cy="17" r="1" fill={color} stroke="none"/>
+  <svg width="28" height="20" viewBox="0 0 28 24" fill="none" aria-hidden>
+    <g stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 18h12"/>
+      <path d="M2.5 18l.8-3.2h8.4l.8 3.2" fill={color} fillOpacity="0.08"/>
+      <rect x="3.2" y="11.2" width="2.2" height="2.2" fill={color} fillOpacity="0.22"/>
+      <rect x="6" y="11.2" width="2.2" height="2.2" fill={color} fillOpacity="0.22"/>
+      <rect x="8.8" y="11.2" width="2.2" height="2.2" fill={color} fillOpacity="0.22"/>
+      <path d="M10.8 9h1.8v5.2h-1.8"/>
+    </g>
+    <g>
+      <rect x="15.5" y="11" width="11" height="8.5" rx="0.4" fill="#DC2626"/>
+      <path d="M15.5 11h11v2H15.5" fill="#B91C1C"/>
+      <path d="M15.5 17.2h11v2.3H15.5" fill="#B91C1C"/>
+      <rect x="19.2" y="6.2" width="3.6" height="4.8" fill="#DC2626"/>
+      <path d="M18.8 6.2h4.4l-.6 1.2h-3.2z" fill="#EAB308"/>
+      <circle cx="21" cy="8.2" r="0.9" fill="#FEF08A" stroke="#CA8A04" strokeWidth="0.5"/>
+      <path d="M16.2 13.2h1.2v4.8h-1.2M24.1 13.2h1.2v4.8h-1.2" fill="#FECACA" opacity="0.5"/>
+    </g>
   </svg>
 );
 const TabIconRental = ({color}) => (
