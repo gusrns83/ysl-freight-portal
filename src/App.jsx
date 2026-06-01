@@ -144,6 +144,9 @@ export default function App() {
   const [notice, setNotice] = useState("");
   const [noticeOn, setNoticeOn] = useState(false);
   const [showNotice, setShowNotice] = useState(true);
+  const [noticeFileUrl, setNoticeFileUrl] = useState("");
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
 
   // App state
   const [search, setSearch] = useState("");
@@ -193,6 +196,25 @@ export default function App() {
   const saveClient = async () => { await api("clients",{method:"POST",body:JSON.stringify(newC)}); setAddForm(false); setNewC({company_name:"",email:"",password_hash:"",margin_coc20:80,margin_coc40:100,margin_soc20:80,margin_soc40:100,notes:""}); loadClients(); };
   const updateMargins = async (id,data) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify(data)}); setEditC(null); loadClients(); };
   const toggleClient = async (id,cur) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify({is_active:!cur})}); loadClients(); };
+
+  const uploadNoticeFile = async (file) => {
+    setUploadLoading(true); setUploadMsg("");
+    try {
+      const ext = file.name.split(".").pop().toLowerCase();
+      const fname = `notice_${Date.now()}.${ext}`;
+      const res = await fetch(`${SB_URL}/storage/v1/object/notices/${fname}`, {
+        method: "POST",
+        headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
+        body: file,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const url = `${SB_URL}/storage/v1/object/public/notices/${fname}`;
+      setNoticeFileUrl(url);
+      setUploadMsg("업로드 완료!");
+      setTimeout(() => setUploadMsg(""), 2000);
+    } catch(e) { setUploadMsg("업로드 실패: " + e.message); }
+    setUploadLoading(false);
+  };
 
   const bNet = (row,t) => { let b=null,cr=null; CRS.forEach(k=>{const v=row.rates[k][t]; if(v!=null&&(b===null||v<b)){b=v;cr=k;}}); return {val:b,cr}; };
   const bDO = (row,city,si) => { const t=si===0?"coc20":"coc40"; let b=null,cr=null; CRS.forEach(k=>{const o=row.rates[k][t],d=DO[city]?.[k]; if(o!=null&&d){const tot=o+d[si]; if(b===null||tot<b){b=tot;cr=k;}}}); return {val:b,cr}; };
@@ -525,13 +547,26 @@ export default function App() {
               <div style={{fontSize:10,fontWeight:700,color:"#6b21a8"}}>NOTICE / GRI 공지</div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 <span style={{fontSize:11,color:"#7c3aed"}}>{noticeOn?"ON":"OFF"}</span>
-                <div onClick={()=>setNoticeOn(p=>!p)} style={{width:36,height:20,borderRadius:10,background:noticeOn?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
+                <div onClick={()=>{setNoticeOn(p=>!p);setShowNotice(true);}} style={{width:36,height:20,borderRadius:10,background:noticeOn?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative"}}>
                   <div style={{position:"absolute",top:2,left:noticeOn?18:2,width:16,height:16,borderRadius:8,background:"#fff",transition:"left 0.2s"}}/>
                 </div>
               </div>
             </div>
-            <textarea value={notice} onChange={e=>setNotice(e.target.value)} placeholder="공지 내용 입력 (선사 GRI, 스케줄 변경 등)"
-              style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:6,boxSizing:"border-box",minHeight:80,resize:"vertical",fontFamily:"inherit"}}/>
+            <textarea value={notice} onChange={e=>setNotice(e.target.value)} placeholder="공지 텍스트 입력 (선사 GRI, 스케줄 변경 등)"
+              style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:6,boxSizing:"border-box",minHeight:60,resize:"vertical",fontFamily:"inherit",marginBottom:8}}/>
+            <div style={{fontSize:10,fontWeight:700,color:"#6b21a8",marginBottom:6}}>공문 파일 첨부 (PDF / 이미지)</div>
+            <label style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"#fff",border:"1px dashed #c4b5fd",borderRadius:8,cursor:"pointer"}}>
+              <span style={{fontSize:20}}>📎</span>
+              <span style={{fontSize:12,color:"#7c3aed"}}>{uploadLoading ? "업로드 중..." : "파일 선택"}</span>
+              <input type="file" accept=".pdf,image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&uploadNoticeFile(e.target.files[0])} disabled={uploadLoading}/>
+            </label>
+            {uploadMsg && <div style={{fontSize:11,color:uploadMsg.includes("완료")?"#16a34a":"#dc2626",marginTop:4}}>{uploadMsg}</div>}
+            {noticeFileUrl && (
+              <div style={{marginTop:8,padding:"8px 10px",background:"#fff",border:"1px solid #c4b5fd",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span style={{fontSize:11,color:"#7c3aed",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"80%"}}>{noticeFileUrl.split("/").pop()}</span>
+                <button onClick={()=>setNoticeFileUrl("")} style={{fontSize:11,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -642,20 +677,29 @@ export default function App() {
       )}
 
       {/* NOTICE POPUP */}
-      {noticeOn && notice && showNotice && (
+      {noticeOn && (notice || noticeFileUrl) && showNotice && (
         <div style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:400,boxShadow:"0 20px 60px rgba(0,0,0,0.25)",overflow:"hidden"}}>
-            <div style={{background:"#1D2B4F",padding:"16px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:480,maxHeight:"85vh",boxShadow:"0 20px 60px rgba(0,0,0,0.25)",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+            <div style={{background:"#1D2B4F",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:18}}>📢</span>
                 <span style={{fontSize:14,fontWeight:700,color:"#fff"}}>Notice</span>
               </div>
-              <button onClick={()=>setShowNotice(false)} style={{color:"#9ca3af",background:"none",border:"none",cursor:"pointer",fontSize:18,lineHeight:1}}>✕</button>
+              <button onClick={()=>setShowNotice(false)} style={{color:"#9ca3af",background:"none",border:"none",cursor:"pointer",fontSize:20,lineHeight:1}}>✕</button>
             </div>
-            <div style={{padding:"20px 20px 8px"}}>
-              <div style={{fontSize:13,color:"#374151",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{notice}</div>
+            <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
+              {notice && <div style={{fontSize:13,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap",marginBottom:noticeFileUrl?16:0}}>{notice}</div>}
+              {noticeFileUrl && (() => {
+                const ext = noticeFileUrl.split(".").pop().toLowerCase();
+                if (ext==="pdf") return (
+                  <div style={{width:"100%",borderRadius:8,overflow:"hidden",border:"1px solid #e5e7eb"}}>
+                    <iframe src={noticeFileUrl} style={{width:"100%",height:400,border:"none"}} title="notice"/>
+                  </div>
+                );
+                return <img src={noticeFileUrl} alt="notice" style={{width:"100%",borderRadius:8,border:"1px solid #e5e7eb"}}/>;
+              })()}
             </div>
-            <div style={{padding:"16px 20px"}}>
+            <div style={{padding:"12px 20px",borderTop:"1px solid #f3f4f6",flexShrink:0}}>
               <button onClick={()=>setShowNotice(false)}
                 style={{width:"100%",padding:"11px",fontSize:13,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
                 확인
