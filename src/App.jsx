@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 
 const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
@@ -100,7 +100,7 @@ const RN = [
 const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN","Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK","Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)"};
 const DO = {mow:{SNK:[1100,1400],DY:[800,1400],CK:[950,1300]},spb:{SNK:[700,1000],DY:null,CK:null},nsb:{SNK:[700,1000],DY:[400,600],CK:[400,600]},ekb:{SNK:null,DY:null,CK:[550,800]}};
 const CRS = ["SNK","DY","CK"];
-const CN = {SNK:"Janggeum",DY:"Dongyoung",CK:"Cheonkyung"};
+const CN = {SNK:"Sinokor",DY:"Dongyoung",CK:"CK Line"};
 const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
 const n = v => v != null ? v.toLocaleString() : "—";
 
@@ -121,54 +121,6 @@ const Bg = ({k}) => {
   return <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,...styles[k]}}>{k}</span>;
 };
 
-const TabIconOcean = ({color}) => (
-  <svg width="22" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-    <path d="M2 19h20"/>
-    <path d="M4 19l1.2-4h13.6L20 19" fill={color} fillOpacity="0.08"/>
-    <rect x="5" y="11" width="3.2" height="3.2" fill={color} fillOpacity="0.22" stroke={color}/>
-    <rect x="9.2" y="11" width="3.2" height="3.2" fill={color} fillOpacity="0.22" stroke={color}/>
-    <rect x="13.4" y="11" width="3.2" height="3.2" fill={color} fillOpacity="0.22" stroke={color}/>
-    <rect x="7" y="7.5" width="3.2" height="2.8" fill={color} fillOpacity="0.14" stroke={color}/>
-    <rect x="11.2" y="7.5" width="3.2" height="2.8" fill={color} fillOpacity="0.14" stroke={color}/>
-    <path d="M17.5 8.5h2.5v6.5h-2.5"/><path d="M18.2 7.5h1.2v1.2"/>
-  </svg>
-);
-const TabIconDropoff = ({color}) => (
-  <svg width="28" height="20" viewBox="0 0 28 24" fill="none" aria-hidden>
-    <g stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M1 18h12"/>
-      <path d="M2.5 18l.8-3.2h8.4l.8 3.2" fill={color} fillOpacity="0.08"/>
-      <rect x="3.2" y="11.2" width="2.2" height="2.2" fill={color} fillOpacity="0.22"/>
-      <rect x="6" y="11.2" width="2.2" height="2.2" fill={color} fillOpacity="0.22"/>
-      <rect x="8.8" y="11.2" width="2.2" height="2.2" fill={color} fillOpacity="0.22"/>
-      <path d="M10.8 9h1.8v5.2h-1.8"/>
-    </g>
-    <g>
-      <rect x="15.5" y="11" width="11" height="8.5" rx="0.4" fill="#DC2626"/>
-      <path d="M15.5 11h11v2H15.5" fill="#B91C1C"/>
-      <path d="M15.5 17.2h11v2.3H15.5" fill="#B91C1C"/>
-      <rect x="19.2" y="6.2" width="3.6" height="4.8" fill="#DC2626"/>
-      <path d="M18.8 6.2h4.4l-.6 1.2h-3.2z" fill="#EAB308"/>
-      <circle cx="21" cy="8.2" r="0.9" fill="#FEF08A" stroke="#CA8A04" strokeWidth="0.5"/>
-      <path d="M16.2 13.2h1.2v4.8h-1.2M24.1 13.2h1.2v4.8h-1.2" fill="#FECACA" opacity="0.5"/>
-    </g>
-  </svg>
-);
-const TabIconRental = ({color}) => (
-  <svg width="20" height="13" viewBox="0 0 36 22" fill="none" aria-hidden>
-    <rect x="1" y="4" width="34" height="16" rx="1" fill={color} opacity="0.12" stroke={color} strokeWidth="1.5"/>
-    <line x1="1" y1="4" x2="1" y2="20" stroke={color} strokeWidth="2"/><line x1="35" y1="4" x2="35" y2="20" stroke={color} strokeWidth="2"/>
-    <line x1="8" y1="4" x2="8" y2="20" stroke={color} strokeWidth="1"/><line x1="15" y1="4" x2="15" y2="20" stroke={color} strokeWidth="1"/>
-    <line x1="22" y1="4" x2="22" y2="20" stroke={color} strokeWidth="1"/><line x1="29" y1="4" x2="29" y2="20" stroke={color} strokeWidth="1"/>
-    <rect x="1" y="4" width="34" height="3" fill={color} opacity="0.28"/><circle cx="4" cy="21" r="1.5" fill={color}/><circle cx="32" cy="21" r="1.5" fill={color}/>
-  </svg>
-);
-const MAIN_TABS = [
-  {id:"ocean",label:"Ocean Freight",Icon:TabIconOcean},
-  {id:"dropoff",label:"Ocean+Drop off",Icon:TabIconDropoff},
-  {id:"rental",label:"Rental+Ocean",Icon:TabIconRental},
-];
-
 export default function App() {
   const fData = useMemo(() => FR.map(r => ({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})), []);
   const rData = useMemo(() => RN.map(r => { const r20={},r40={}; RC.forEach((c,i)=>{r20[c]=r[1+i];r40[c]=r[13+i];}); return {pol:r[0],r20,r40}; }), []);
@@ -188,6 +140,22 @@ export default function App() {
 
   // Default margins (used for guest + admin)
   const [margins, setMargins] = useState({coc20:80,coc40:100,soc20:80,soc40:100});
+  const [areaM, setAreaM] = useState({});
+  const [polM, setPolM] = useState({});
+  const [marginTab, setMarginTab] = useState("global");
+  const [selArea, setSelArea] = useState("");
+  const [selPol, setSelPol] = useState("");
+  const [areaEdit, setAreaEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
+  const [polEdit, setPolEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
+  const [validity, setValidity] = useState({SNK:"June 1-30, 2026", DY:"June 1-30, 2026", CK:"June 1-30, 2026"});
+  const [notice, setNotice] = useState("");
+  const [noticeOn, setNoticeOn] = useState(false);
+  const [showNotice, setShowNotice] = useState(true);
+  const [noticeFileUrl, setNoticeFileUrl] = useState("");
+  const [uploadLoading, setUploadLoading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
+  const [dragOver, setDragOver] = useState(false);
 
   // App state
   const [search, setSearch] = useState("");
@@ -238,9 +206,82 @@ export default function App() {
   const updateMargins = async (id,data) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify(data)}); setEditC(null); loadClients(); };
   const toggleClient = async (id,cur) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify({is_active:!cur})}); loadClients(); };
 
+  const getM = (pol, area, type) => {
+    if (polM[pol]?.[type] != null) return polM[pol][type];
+    if (areaM[area]?.[type] != null) return areaM[area][type];
+    return margins[type];
+  };
+
+  const uploadNoticeFile = async (file) => {
+    setUploadLoading(true); setUploadMsg("");
+    try {
+      const ext = file.name.split(".").pop().toLowerCase();
+      const fname = `notice_${Date.now()}.${ext}`;
+      const res = await fetch(`${SB_URL}/storage/v1/object/Notices/${fname}`, {
+        method: "POST",
+        headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
+        body: file,
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const url = `${SB_URL}/storage/v1/object/public/Notices/${fname}`;
+      setNoticeFileUrl(url);
+      setUploadMsg("업로드 완료!");
+      setTimeout(() => setUploadMsg(""), 2000);
+    } catch(e) { setUploadMsg("업로드 실패: " + e.message); }
+    setUploadLoading(false);
+  };
+
+  const saveSetting = async (key, value) => {
+    const res = await fetch(`${SB_URL}/rest/v1/settings`, {
+      method: "POST",
+      headers: {
+        "apikey": SB_KEY,
+        "Authorization": `Bearer ${SB_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify({ key, value: String(value) }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  };
+
+  const saveAllSettings = async () => {
+    try {
+      await Promise.all([
+        saveSetting("notice_text", notice),
+        saveSetting("notice_on", noticeOn),
+        saveSetting("notice_file_url", noticeFileUrl),
+        saveSetting("validity_snk", validity.SNK),
+        saveSetting("validity_dy", validity.DY),
+        saveSetting("validity_ck", validity.CK),
+        saveSetting("global_margins", JSON.stringify(margins)),
+        saveSetting("area_margins", JSON.stringify(areaM)),
+        saveSetting("pol_margins", JSON.stringify(polM)),
+      ]);
+      setSaveMsg("저장 완료!");
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch(e) { setSaveMsg("저장 실패: " + e.message); }
+  };
+
+  useEffect(() => {
+    api("settings?select=*").then(rows => {
+      if (!rows.length) return;
+      const s = Object.fromEntries(rows.map(r=>[r.key, r.value]));
+      if (s.notice_text !== undefined) setNotice(s.notice_text);
+      if (s.notice_on !== undefined) setNoticeOn(s.notice_on === "true");
+      if (s.notice_file_url !== undefined) setNoticeFileUrl(s.notice_file_url);
+      if (s.validity_snk !== undefined) setValidity(p=>({...p, SNK: s.validity_snk}));
+      if (s.validity_dy !== undefined) setValidity(p=>({...p, DY: s.validity_dy}));
+      if (s.validity_ck !== undefined) setValidity(p=>({...p, CK: s.validity_ck}));
+      if (s.global_margins) { try { setMargins(JSON.parse(s.global_margins)); } catch(e){} }
+      if (s.area_margins) { try { setAreaM(JSON.parse(s.area_margins)); } catch(e){} }
+      if (s.pol_margins) { try { setPolM(JSON.parse(s.pol_margins)); } catch(e){} }
+    }).catch(()=>{});
+  }, []);
+
   const bNet = (row,t) => { let b=null,cr=null; CRS.forEach(k=>{const v=row.rates[k][t]; if(v!=null&&(b===null||v<b)){b=v;cr=k;}}); return {val:b,cr}; };
   const bDO = (row,city,si) => { const t=si===0?"coc20":"coc40"; let b=null,cr=null; CRS.forEach(k=>{const o=row.rates[k][t],d=DO[city]?.[k]; if(o!=null&&d){const tot=o+d[si]; if(b===null||tot<b){b=tot;cr=k;}}}); return {val:b,cr}; };
-  const cRent = (rPol,city,rRow) => { const fp=PM[rPol]; if(!fp||!fMap[fp])return []; const fr=fMap[fp]; return CRS.map(k=>{const s20=fr.rates[k].soc20,s40=fr.rates[k].soc40; const e20=s20!=null?s20+margins.soc20:null,e40=s40!=null?s40+margins.soc40:null; const r20=rRow.r20[city],r40=rRow.r40[city]; return {k,t20:e20!=null&&r20!=null?e20+r20:null,t40:e40!=null&&r40!=null?e40+r40:null};}).filter(x=>x.t20!=null||x.t40!=null); };
+  const cRent = (rPol,city,rRow) => { const fp=PM[rPol]; if(!fp||!fMap[fp])return []; const fr=fMap[fp]; return CRS.map(k=>{const s20=fr.rates[k].soc20,s40=fr.rates[k].soc40; const e20=s20!=null?s20+getM(fp,fr.area,"soc20"):null,e40=s40!=null?s40+getM(fp,fr.area,"soc40"):null; const r20=rRow.r20[city],r40=rRow.r40[city]; return {k,t20:e20!=null&&r20!=null?e20+r20:null,t40:e40!=null&&r40!=null?e40+r40:null};}).filter(x=>x.t20!=null||x.t40!=null); };
   const bRent = (rPol,city,rRow,si) => { const all=cRent(rPol,city,rRow); let b=null,cr=null; all.forEach(x=>{const v=si===0?x.t20:x.t40; if(v!=null&&(b===null||v<b)){b=v;cr=x.k;}}); return {val:b,cr}; };
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
@@ -333,7 +374,7 @@ export default function App() {
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-            {types.map(t=>{ const b=bNet(row,t); const sell=b.val!=null?b.val+margins[t]:null; const show=isAdmin?b.val:sell;
+            {types.map(t=>{ const b=bNet(row,t); const sell=b.val!=null?b.val+getM(row.pol,row.area,t):null; const show=isAdmin?b.val:sell;
               return <div key={t} style={{textAlign:"right"}}>
                 <div style={{fontSize:10,color:"#9ca3af"}}>{t.includes("20")?"20'":"40'"}</div>
                 <div style={{fontSize:14,fontWeight:700,color:isAdmin?"#374151":"#1d4ed8"}}>{show!=null?`$${n(show)}`:"—"}</div>
@@ -353,9 +394,15 @@ export default function App() {
               <tbody>
                 {CRS.map(k=>{ const t20=ctype==="coc"?"coc20":"soc20",t40=ctype==="coc"?"coc40":"soc40"; const v20=row.rates[k][t20],v40=row.rates[k][t40]; if(!v20&&!v40)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
-                    <td style={{padding:"8px 0"}}><Bg k={k}/><span style={{fontSize:11,color:"#6b7280",marginLeft:4}}>{CN[k]}</span></td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{isAdmin?n(v20):(v20?n(v20+margins[t20]):"—")}</td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{isAdmin?n(v40):(v40?n(v40+margins[t40]):"—")}</td>
+                    <td style={{padding:"8px 0"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                        <Bg k={k}/>
+                        <span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
+                        {validity[k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[k]}</span>}
+                      </div>
+                    </td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{isAdmin?n(v20):(v20?n(v20+getM(row.pol,row.area,t20)):"—")}</td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{isAdmin?n(v40):(v40?n(v40+getM(row.pol,row.area,t40)):"—")}</td>
                   </tr>; })}
               </tbody>
             </table>
@@ -365,12 +412,14 @@ export default function App() {
     );
   };
 
+  const [doCityOpen, setDoCityOpen] = useState(null);
+
   const DOCrd = ({row,idx}) => {
     const open = exp===`d${idx}`;
     const b20=bDO(row,"mow",0),b40=bDO(row,"mow",1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>setExp(open?null:`d${idx}`)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
+        <button onClick={()=>{setExp(open?null:`d${idx}`);setDoCityOpen(null);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
           <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
             <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
@@ -382,22 +431,63 @@ export default function App() {
           </div>
         </button>
         {open && (
-          <div style={{padding:"0 16px 16px",borderTop:"1px solid #f3f4f6"}}>
-            <table style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
-              <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
-                <th style={{textAlign:"left",fontWeight:500,padding:"4px 0"}}>City</th>
-                <th style={{textAlign:"right",fontWeight:500,padding:"4px 0"}}>20'</th><th style={{width:36,textAlign:"center",fontWeight:500,padding:"4px 0"}}>Cr</th>
-                <th style={{textAlign:"right",fontWeight:500,padding:"4px 0"}}>40'</th><th style={{width:36,textAlign:"center",fontWeight:500,padding:"4px 0"}}>Cr</th>
-              </tr></thead>
-              <tbody>
-                {DOC.map(({k,l})=>{ const c20=bDO(row,k,0),c40=bDO(row,k,1);
-                  return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
-                    <td style={{padding:"10px 0",fontWeight:600,color:"#374151"}}>{l}</td>
-                    {c20.val?<><td style={{textAlign:"right",padding:"10px 0",fontFamily:"monospace",fontWeight:700,color:"#111",cursor:"pointer"}} onClick={()=>openSC(c20.cr,"coc20",row.pol+" > "+l)}>${n(c20.val)}</td><td style={{textAlign:"center",padding:"10px 0"}}><Bg k={c20.cr}/></td></>:<><td style={{textAlign:"right",color:"#d1d5db"}}>—</td><td/></>}
-                    {c40.val?<><td style={{textAlign:"right",padding:"10px 0",fontFamily:"monospace",fontWeight:700,color:"#111",cursor:"pointer"}} onClick={()=>openSC(c40.cr,"coc40",row.pol+" > "+l)}>${n(c40.val)}</td><td style={{textAlign:"center",padding:"10px 0"}}><Bg k={c40.cr}/></td></>:<><td style={{textAlign:"right",color:"#d1d5db"}}>—</td><td/></>}
-                  </tr>; })}
-              </tbody>
-            </table>
+          <div style={{borderTop:"1px solid #f3f4f6",paddingBottom:8}}>
+            <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Drop off · City 선택</div>
+            {DOC.map(({k,l})=>{
+              const c20=bDO(row,k,0),c40=bDO(row,k,1);
+              const cityKey=`${idx}-${k}`,cOpen=doCityOpen===cityKey;
+              const t=k==="mow"||k==="spb"?"coc20":"coc20";
+              const carrierRows = CRS.map(cr=>{
+                const o20=row.rates[cr]["coc20"],o40=row.rates[cr]["coc40"];
+                const d=DO[k]?.[cr];
+                const tot20=o20!=null&&d?o20+d[0]:null;
+                const tot40=o40!=null&&d?o40+d[1]:null;
+                return {cr,tot20,tot40};
+              }).filter(x=>x.tot20!=null||x.tot40!=null);
+              return (
+                <div key={k}>
+                  <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 16px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left"}}>
+                    <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151"}}>{l}</span>
+                    <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#111"}}>{c20.val?`$${n(c20.val)}`:"—"}</div>
+                        {c20.cr&&<Bg k={c20.cr}/>}
+                      </div>
+                      <div style={{textAlign:"right"}}>
+                        <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
+                        <div style={{fontSize:14,fontWeight:700,color:"#111"}}>{c40.val?`$${n(c40.val)}`:"—"}</div>
+                        {c40.cr&&<Bg k={c40.cr}/>}
+                      </div>
+                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
+                    </div>
+                  </button>
+                  {cOpen && (
+                    <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
+                      {carrierRows.length===0
+                        ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
+                        : carrierRows.map(({cr,tot20,tot40})=>(
+                          <div key={cr} style={{display:"flex",alignItems:"center",padding:"7px 24px",borderBottom:"1px solid #e0f2fe"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
+                              <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span>
+                              {validity[cr] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[cr]}</span>}
+                            </div>
+                            <div style={{textAlign:"right",marginRight:20,cursor:tot20?"pointer":"default"}} onClick={()=>tot20&&openSC(cr,"coc20",row.pol+" > "+l)}>
+                              <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
+                              <div style={{fontSize:14,fontWeight:700,color:tot20?"#0369a1":"#d1d5db",textDecoration:tot20?"underline":"none"}}>{tot20?`$${n(tot20)}`:"—"}</div>
+                            </div>
+                            <div style={{textAlign:"right",cursor:tot40?"pointer":"default"}} onClick={()=>tot40&&openSC(cr,"coc40",row.pol+" > "+l)}>
+                              <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
+                              <div style={{fontSize:14,fontWeight:700,color:tot40?"#0369a1":"#d1d5db",textDecoration:tot40?"underline":"none"}}>{tot40?`$${n(tot40)}`:"—"}</div>
+                            </div>
+                          </div>
+                        ))
+                      }
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -439,7 +529,11 @@ export default function App() {
                       {carriers.length===0?<div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
                         :carriers.map(c=>(
                         <div key={c.k} style={{display:"flex",alignItems:"center",padding:"10px 24px",borderBottom:"1px solid #ede9fe"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}><Bg k={c.k}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[c.k]}</span></div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
+                            <Bg k={c.k}/>
+                            <span style={{fontSize:11,color:"#6b7280"}}>{CN[c.k]}</span>
+                            {validity[c.k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[c.k]}</span>}
+                          </div>
                           <div style={{textAlign:"right",marginRight:20,cursor:c.t20?"pointer":"default"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
                             <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
                             <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t20?"underline":"none"}}>{c.t20?`$${n(c.t20)}`:"—"}</div>
@@ -495,15 +589,157 @@ export default function App() {
       {/* ADMIN MARGIN PANEL */}
       {isAdmin && (
         <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px"}}>
-          <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD) — Admin</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
-              {["coc20","coc40","soc20","soc40"].map(t=>(
-                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
-                  <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
-                    style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
+          <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:8}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD)</div>
+            {/* Tab selector */}
+            <div style={{display:"flex",background:"#fef3c7",borderRadius:8,padding:2,marginBottom:10}}>
+              {[["global","전체"],["area","지역별"],["pol","도시별"]].map(([k,l])=>(
+                <button key={k} onClick={()=>setMarginTab(k)} style={{flex:1,padding:"6px",fontSize:11,fontWeight:600,borderRadius:6,background:marginTab===k?"#fff":"transparent",border:"none",cursor:"pointer",color:marginTab===k?"#92400e":"#b45309"}}>{l}</button>
               ))}
             </div>
+
+            {/* 전체 마진 */}
+            {marginTab==="global" && (
+              <div>
+                <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>모든 구간에 적용되는 기본 마진</div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+                  {["coc20","coc40","soc20","soc40"].map(t=>(
+                    <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                      <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
+                        style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* 지역별 마진 */}
+            {marginTab==="area" && (
+              <div>
+                <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>지역별 마진 (전체 마진보다 우선 적용)</div>
+                <select value={selArea} onChange={e=>{setSelArea(e.target.value); const m=areaM[e.target.value]; setAreaEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""}); }}
+                  style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
+                  <option value="">-- 지역 선택 --</option>
+                  {areas.map(a=><option key={a} value={a}>{a} {areaM[a]?"✅":""}</option>)}
+                </select>
+                {selArea && <>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                    {["coc20","coc40","soc20","soc40"].map(t=>(
+                      <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                        <input type="number" placeholder={String(margins[t])} value={areaEdit[t]} onChange={e=>setAreaEdit(p=>({...p,[t]:e.target.value}))}
+                          style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={()=>{const m={coc20:parseInt(areaEdit.coc20)||margins.coc20,coc40:parseInt(areaEdit.coc40)||margins.coc40,soc20:parseInt(areaEdit.soc20)||margins.soc20,soc40:parseInt(areaEdit.soc40)||margins.soc40}; setAreaM(p=>({...p,[selArea]:m}));}}
+                      style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
+                    <button onClick={()=>{setAreaM(p=>{const n={...p};delete n[selArea];return n;});setAreaEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
+                      style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
+                  </div>
+                </>}
+                {Object.keys(areaM).length>0 && (
+                  <div style={{marginTop:8,padding:"8px",background:"#fef3c7",borderRadius:6}}>
+                    <div style={{fontSize:10,color:"#92400e",fontWeight:700,marginBottom:4}}>적용된 지역 마진:</div>
+                    {Object.entries(areaM).map(([area,m])=>(
+                      <div key={area} style={{fontSize:11,color:"#78350f",marginBottom:2}}>
+                        <b>{area}</b>: COC {m.coc20}/{m.coc40} SOC {m.soc20}/{m.soc40}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* 도시별 마진 */}
+            {marginTab==="pol" && (
+              <div>
+                <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>도시별 마진 (최우선 적용)</div>
+                <select value={selPol} onChange={e=>{setSelPol(e.target.value); const m=polM[e.target.value]; setPolEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""});}}
+                  style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
+                  <option value="">-- POL 선택 --</option>
+                  {fData.map(d=><option key={d.pol} value={d.pol}>{d.pol} {polM[d.pol]?"✅":""}</option>)}
+                </select>
+                {selPol && <>
+                  <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+                    {["coc20","coc40","soc20","soc40"].map(t=>(
+                      <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                        <input type="number" placeholder={String(getM(selPol,fData.find(d=>d.pol===selPol)?.area||"",t))} value={polEdit[t]} onChange={e=>setPolEdit(p=>({...p,[t]:e.target.value}))}
+                          style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
+                    ))}
+                  </div>
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={()=>{const area=fData.find(d=>d.pol===selPol)?.area||""; const m={coc20:parseInt(polEdit.coc20)||getM(selPol,area,"coc20"),coc40:parseInt(polEdit.coc40)||getM(selPol,area,"coc40"),soc20:parseInt(polEdit.soc20)||getM(selPol,area,"soc20"),soc40:parseInt(polEdit.soc40)||getM(selPol,area,"soc40")}; setPolM(p=>({...p,[selPol]:m}));}}
+                      style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
+                    <button onClick={()=>{setPolM(p=>{const n={...p};delete n[selPol];return n;});setPolEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
+                      style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
+                  </div>
+                </>}
+                {Object.keys(polM).length>0 && (
+                  <div style={{marginTop:8,padding:"8px",background:"#fef3c7",borderRadius:6,maxHeight:120,overflowY:"auto"}}>
+                    <div style={{fontSize:10,color:"#92400e",fontWeight:700,marginBottom:4}}>적용된 도시 마진:</div>
+                    {Object.entries(polM).map(([pol,m])=>(
+                      <div key={pol} style={{fontSize:11,color:"#78350f",marginBottom:2}}>
+                        <b>{pol}</b>: COC {m.coc20}/{m.coc40} SOC {m.soc20}/{m.soc40}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <button onClick={saveAllSettings}
+              style={{width:"100%",marginTop:10,padding:"8px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>
+              {saveMsg || "💾 전체 설정 저장"}
+            </button>
+          </div>
+          <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:8}}>VALIDITY (선사별)</div>
+            {CRS.map(k=>(
+              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                <Bg k={k}/>
+                <span style={{fontSize:11,color:"#374151",width:60}}>{CN[k]}</span>
+                <input value={validity[k]} onChange={e=>setValidity(p=>({...p,[k]:e.target.value}))} placeholder="e.g. June 1-30, 2026"
+                  style={{flex:1,padding:"6px 10px",fontSize:12,fontWeight:600,color:"#166534",background:"#fff",border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box"}}/>
+              </div>
+            ))}
+            <button onClick={saveAllSettings}
+              style={{width:"100%",marginTop:4,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#16a34a",border:"none",borderRadius:6,cursor:"pointer"}}>
+              {saveMsg || "💾 저장"}
+            </button>
+          </div>
+          <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:10,padding:12,marginBottom:8}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#6b21a8"}}>NOTICE / GRI 공지</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:11,color:"#7c3aed"}}>{noticeOn?"ON":"OFF"}</span>
+                <div onClick={()=>setNoticeOn(p=>!p)} style={{width:36,height:20,borderRadius:10,background:noticeOn?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative"}}>
+                  <div style={{position:"absolute",top:2,left:noticeOn?18:2,width:16,height:16,borderRadius:8,background:"#fff",transition:"left 0.2s"}}/>
+                </div>
+              </div>
+            </div>
+            <textarea value={notice} onChange={e=>setNotice(e.target.value)} placeholder="공지 텍스트 입력 (선사 GRI, 스케줄 변경 등)"
+              style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:6,boxSizing:"border-box",minHeight:80,resize:"vertical",fontFamily:"inherit",marginBottom:8}}/>
+            <div style={{fontSize:10,fontWeight:700,color:"#6b21a8",marginBottom:6}}>공문 파일 첨부 (PDF / 이미지)</div>
+            <label
+              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+              onDragLeave={()=>setDragOver(false)}
+              onDrop={e=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer.files[0];if(f)uploadNoticeFile(f);}}
+              style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"16px 12px",background:dragOver?"#ede9fe":"#fff",border:`2px dashed ${dragOver?"#7c3aed":"#c4b5fd"}`,borderRadius:8,cursor:"pointer",transition:"all 0.2s"}}>
+              <span style={{fontSize:24}}>📎</span>
+              <span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>{uploadLoading?"업로드 중...":"파일 선택 또는 드래그 앤 드롭"}</span>
+              <span style={{fontSize:11,color:"#a78bfa"}}>PDF, JPG, PNG 지원</span>
+              <input type="file" accept=".pdf,image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&uploadNoticeFile(e.target.files[0])} disabled={uploadLoading}/>
+            </label>
+            {uploadMsg && <div style={{fontSize:11,marginTop:6,color:uploadMsg.includes("완료")?"#16a34a":"#dc2626"}}>{uploadMsg}</div>}
+            {noticeFileUrl && (
+              <div style={{marginTop:8,padding:"8px 10px",background:"#fff",border:"1px solid #c4b5fd",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+                <span style={{fontSize:11,color:"#7c3aed",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"80%"}}>✅ {noticeFileUrl.split("/").pop()}</span>
+                <button onClick={()=>setNoticeFileUrl("")} style={{fontSize:11,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
+              </div>
+            )}
+            <button onClick={saveAllSettings}
+              style={{width:"100%",marginTop:10,padding:"9px",fontSize:12,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:8,cursor:"pointer"}}>
+              {saveMsg || "💾 설정 저장"}
+            </button>
           </div>
         </div>
       )}
@@ -526,16 +762,24 @@ export default function App() {
       {/* TABS */}
       <div style={{maxWidth:640,margin:"0 auto",padding:"0 16px"}}>
         <div style={{display:"flex",borderBottom:"1px solid #e5e7eb"}}>
-          {MAIN_TABS.map(({id,label,Icon})=>{
-            const active=tab===id;
-            const color=active?"#111":"#9ca3af";
-            return (
-              <button key={id} onClick={()=>{setTab(id);setExp(null);setCityOpen(null);}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"10px 4px",fontSize:11,fontWeight:600,background:"none",border:"none",borderBottom:`2px solid ${active?"#111":"transparent"}`,color,cursor:"pointer"}}>
-                <Icon color={color}/>
-                <span>{label}</span>
-              </button>
-            );
-          })}
+          {[["ocean","Ocean Freight"],["dropoff","Ocean+Drop off"]].map(([k,l])=>(
+            <button key={k} onClick={()=>{setTab(k);setExp(null);}} style={{flex:1,textAlign:"center",padding:"10px 4px",fontSize:11,fontWeight:600,background:"none",border:"none",borderBottom:`2px solid ${tab===k?"#111":"transparent"}`,color:tab===k?"#111":"#9ca3af",cursor:"pointer"}}>{l}</button>
+          ))}
+          <button onClick={()=>{setTab("rental");setExp(null);setCityOpen(null);}} style={{flex:1,textAlign:"center",padding:"10px 4px",fontSize:11,fontWeight:600,background:"none",border:"none",borderBottom:`2px solid ${tab==="rental"?"#111":"transparent"}`,color:tab==="rental"?"#111":"#9ca3af",cursor:"pointer"}}>
+            <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
+              <svg width="18" height="11" viewBox="0 0 36 22" fill="none">
+                <rect x="1" y="4" width="34" height="16" rx="1" fill="#3b82f6" opacity="0.15" stroke="#3b82f6" strokeWidth="1.5"/>
+                <line x1="1" y1="4" x2="1" y2="20" stroke="#3b82f6" strokeWidth="2"/>
+                <line x1="35" y1="4" x2="35" y2="20" stroke="#3b82f6" strokeWidth="2"/>
+                <line x1="8" y1="4" x2="8" y2="20" stroke="#3b82f6" strokeWidth="1"/>
+                <line x1="15" y1="4" x2="15" y2="20" stroke="#3b82f6" strokeWidth="1"/>
+                <line x1="22" y1="4" x2="22" y2="20" stroke="#3b82f6" strokeWidth="1"/>
+                <line x1="29" y1="4" x2="29" y2="20" stroke="#3b82f6" strokeWidth="1"/>
+                <rect x="1" y="4" width="34" height="3" fill="#3b82f6" opacity="0.3"/>
+              </svg>
+              <span>Rental+Ocean</span>
+            </div>
+          </button>
         </div>
       </div>
 
@@ -601,6 +845,39 @@ export default function App() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* NOTICE POPUP */}
+      {noticeOn && (notice || noticeFileUrl) && showNotice && (
+        <div style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:480,maxHeight:"85vh",boxShadow:"0 20px 60px rgba(0,0,0,0.25)",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+            <div style={{background:"#1D2B4F",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>📢</span>
+                <span style={{fontSize:14,fontWeight:700,color:"#fff"}}>Notice</span>
+              </div>
+              <button onClick={()=>setShowNotice(false)} style={{color:"#9ca3af",background:"none",border:"none",cursor:"pointer",fontSize:20,lineHeight:1}}>✕</button>
+            </div>
+            <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
+              {notice && <div style={{fontSize:13,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap",marginBottom:noticeFileUrl?16:0}}>{notice}</div>}
+              {noticeFileUrl && (() => {
+                const ext = noticeFileUrl.split(".").pop().toLowerCase();
+                if (ext==="pdf") return (
+                  <div style={{width:"100%",borderRadius:8,overflow:"hidden",border:"1px solid #e5e7eb"}}>
+                    <iframe src={noticeFileUrl} style={{width:"100%",height:400,border:"none"}} title="notice"/>
+                  </div>
+                );
+                return <img src={noticeFileUrl} alt="notice" style={{width:"100%",borderRadius:8,border:"1px solid #e5e7eb"}}/>;
+              })()}
+            </div>
+            <div style={{padding:"12px 20px",borderTop:"1px solid #f3f4f6",flexShrink:0}}>
+              <button onClick={()=>setShowNotice(false)}
+                style={{width:"100%",padding:"11px",fontSize:13,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
+                확인
+              </button>
+            </div>
           </div>
         </div>
       )}
