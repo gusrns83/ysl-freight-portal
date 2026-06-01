@@ -140,6 +140,10 @@ export default function App() {
 
   // Default margins (used for guest + admin)
   const [margins, setMargins] = useState({coc20:80,coc40:100,soc20:80,soc40:100});
+  const [validity, setValidity] = useState({SNK:"June 1-30, 2026", DY:"June 1-30, 2026", CK:"June 1-30, 2026"});
+  const [notice, setNotice] = useState("");
+  const [noticeOn, setNoticeOn] = useState(false);
+  const [showNotice, setShowNotice] = useState(true);
 
   // App state
   const [search, setSearch] = useState("");
@@ -305,7 +309,13 @@ export default function App() {
               <tbody>
                 {CRS.map(k=>{ const t20=ctype==="coc"?"coc20":"soc20",t40=ctype==="coc"?"coc40":"soc40"; const v20=row.rates[k][t20],v40=row.rates[k][t40]; if(!v20&&!v40)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
-                    <td style={{padding:"8px 0"}}><Bg k={k}/><span style={{fontSize:11,color:"#6b7280",marginLeft:4}}>{CN[k]}</span></td>
+                    <td style={{padding:"8px 0"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                        <Bg k={k}/>
+                        <span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
+                        {validity[k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[k]}</span>}
+                      </div>
+                    </td>
                     <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{isAdmin?n(v20):(v20?n(v20+margins[t20]):"—")}</td>
                     <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{isAdmin?n(v40):(v40?n(v40+margins[t40]):"—")}</td>
                   </tr>; })}
@@ -489,8 +499,8 @@ export default function App() {
       {/* ADMIN MARGIN PANEL */}
       {isAdmin && (
         <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px"}}>
-          <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD) — Admin</div>
+          <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:8}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD)</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
               {["coc20","coc40","soc20","soc40"].map(t=>(
                 <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
@@ -498,6 +508,30 @@ export default function App() {
                     style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
               ))}
             </div>
+          </div>
+          <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:8}}>VALIDITY (선사별)</div>
+            {CRS.map(k=>(
+              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                <Bg k={k}/>
+                <span style={{fontSize:11,color:"#374151",width:60}}>{CN[k]}</span>
+                <input value={validity[k]} onChange={e=>setValidity(p=>({...p,[k]:e.target.value}))} placeholder="e.g. June 1-30, 2026"
+                  style={{flex:1,padding:"6px 10px",fontSize:12,fontWeight:600,color:"#166534",background:"#fff",border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box"}}/>
+              </div>
+            ))}
+          </div>
+          <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:10,padding:12,marginBottom:8}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+              <div style={{fontSize:10,fontWeight:700,color:"#6b21a8"}}>NOTICE / GRI 공지</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:11,color:"#7c3aed"}}>{noticeOn?"ON":"OFF"}</span>
+                <div onClick={()=>setNoticeOn(p=>!p)} style={{width:36,height:20,borderRadius:10,background:noticeOn?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative",transition:"background 0.2s"}}>
+                  <div style={{position:"absolute",top:2,left:noticeOn?18:2,width:16,height:16,borderRadius:8,background:"#fff",transition:"left 0.2s"}}/>
+                </div>
+              </div>
+            </div>
+            <textarea value={notice} onChange={e=>setNotice(e.target.value)} placeholder="공지 내용 입력 (선사 GRI, 스케줄 변경 등)"
+              style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:6,boxSizing:"border-box",minHeight:80,resize:"vertical",fontFamily:"inherit"}}/>
           </div>
         </div>
       )}
@@ -603,6 +637,30 @@ export default function App() {
                 </button>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* NOTICE POPUP */}
+      {noticeOn && notice && showNotice && (
+        <div style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:400,boxShadow:"0 20px 60px rgba(0,0,0,0.25)",overflow:"hidden"}}>
+            <div style={{background:"#1D2B4F",padding:"16px 20px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <div style={{display:"flex",alignItems:"center",gap:10}}>
+                <span style={{fontSize:18}}>📢</span>
+                <span style={{fontSize:14,fontWeight:700,color:"#fff"}}>Notice</span>
+              </div>
+              <button onClick={()=>setShowNotice(false)} style={{color:"#9ca3af",background:"none",border:"none",cursor:"pointer",fontSize:18,lineHeight:1}}>✕</button>
+            </div>
+            <div style={{padding:"20px 20px 8px"}}>
+              <div style={{fontSize:13,color:"#374151",lineHeight:1.7,whiteSpace:"pre-wrap"}}>{notice}</div>
+            </div>
+            <div style={{padding:"16px 20px"}}>
+              <button onClick={()=>setShowNotice(false)}
+                style={{width:"100%",padding:"11px",fontSize:13,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
+                확인
+              </button>
+            </div>
           </div>
         </div>
       )}
