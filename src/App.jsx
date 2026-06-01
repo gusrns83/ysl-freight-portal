@@ -204,6 +204,7 @@ export default function App() {
   const [margins, setMargins] = useState({coc20:80,coc40:100,soc20:80,soc40:100});
   const [areaM, setAreaM] = useState({});
   const [polM, setPolM] = useState({});
+  const [polCostO, setPolCostO] = useState({});
   const [marginTab, setMarginTab] = useState("global");
   const [selArea, setSelArea] = useState("");
   const [selPol, setSelPol] = useState("");
@@ -277,19 +278,6 @@ export default function App() {
     const v = parseInt(value, 10);
     setPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: Number.isFinite(v) ? v : 0 } }));
   };
-  const oceanDetail = (row, t) => {
-    const b = bNet(row, t);
-    const margin = getM(row.pol, row.area, t);
-    const cost = b.val;
-    return { sell: cost != null ? cost + margin : null, cost, margin, cr: b.cr };
-  };
-  const doDetail = (row, cityKey, si) => {
-    const t = si === 0 ? "coc20" : "coc40";
-    const b = bDO(row, cityKey, si);
-    const margin = getM(row.pol, row.area, t);
-    const cost = b.val;
-    return { sell: cost != null ? cost + margin : null, cost, margin, cr: b.cr };
-  };
 
   const uploadNoticeFile = async (file) => {
     setUploadLoading(true); setUploadMsg("");
@@ -336,6 +324,7 @@ export default function App() {
         saveSetting("global_margins", JSON.stringify(margins)),
         saveSetting("area_margins", JSON.stringify(areaM)),
         saveSetting("pol_margins", JSON.stringify(polM)),
+        saveSetting("pol_costs", JSON.stringify(polCostO)),
       ]);
       setSaveMsg("저장 완료!");
       setTimeout(() => setSaveMsg(""), 2000);
@@ -355,23 +344,164 @@ export default function App() {
       if (s.global_margins) { try { setMargins(JSON.parse(s.global_margins)); } catch(e){} }
       if (s.area_margins) { try { setAreaM(JSON.parse(s.area_margins)); } catch(e){} }
       if (s.pol_margins) { try { setPolM(JSON.parse(s.pol_margins)); } catch(e){} }
+      if (s.pol_costs) { try { setPolCostO(JSON.parse(s.pol_costs)); } catch(e){} }
     }).catch(()=>{});
   }, []);
 
-  const bNet = (row,t) => { let b=null,cr=null; CRS.forEach(k=>{const v=row.rates[k][t]; if(v!=null&&(b===null||v<b)){b=v;cr=k;}}); return {val:b,cr}; };
-  const bDO = (row,city,si) => { const t=si===0?"coc20":"coc40"; let b=null,cr=null; CRS.forEach(k=>{const o=row.rates[k][t],d=DO[city]?.[k]; if(o!=null&&d){const tot=o+d[si]; if(b===null||tot<b){b=tot;cr=k;}}}); return {val:b,cr}; };
-  const cRent = (rPol,city,rRow) => { const fp=PM[rPol]; if(!fp||!fMap[fp])return []; const fr=fMap[fp]; return CRS.map(k=>{const s20=fr.rates[k].soc20,s40=fr.rates[k].soc40; const e20=s20!=null?s20+getM(fp,fr.area,"soc20"):null,e40=s40!=null?s40+getM(fp,fr.area,"soc40"):null; const r20=rRow.r20[city],r40=rRow.r40[city]; return {k,t20:e20!=null&&r20!=null?e20+r20:null,t40:e40!=null&&r40!=null?e40+r40:null};}).filter(x=>x.t20!=null||x.t40!=null); };
-  const bRent = (rPol,city,rRow,si) => { const all=cRent(rPol,city,rRow); let b=null,cr=null; all.forEach(x=>{const v=si===0?x.t20:x.t40; if(v!=null&&(b===null||v<b)){b=v;cr=x.k;}}); return {val:b,cr}; };
-  const rentDetail = (rPol,city,rRow,si) => {
-    const fp=PM[rPol], fr=fp?fMap[fp]:null;
-    const t=si===0?"soc20":"soc40";
-    const rental=si===0?rRow.r20[city]:rRow.r40[city];
-    const b=bRent(rPol,city,rRow,si);
-    const margin=fr?getM(fp,fr.area,t):0;
-    if(!fr||!b.cr) return {sell:rental,cost:rental,margin:0,cr:b.cr};
-    const soc=fr.rates[b.cr][t];
-    const cost=soc!=null&&rental!=null?soc+rental:null;
-    return {sell:b.val,cost,margin,cr:b.cr};
+  const sz = si => (si === 0 ? "c20" : "c40");
+  const mkPrice = (cost, margin, cr) => ({
+    cost: cost ?? null,
+    margin: margin ?? 0,
+    sell: cost != null ? cost + (margin ?? 0) : null,
+    cr,
+  });
+  const getCarrierRate = (row, cr, t) => {
+    const ov = polCostO[row.pol]?.carrier?.[cr]?.[t];
+    return ov != null ? ov : row.rates[cr][t];
+  };
+  const applyCarrierRate = (pol, cr, t, value) => {
+    const v = parseInt(value, 10);
+    if (!Number.isFinite(v)) return;
+    setPolCostO(p => ({
+      ...p,
+      [pol]: {
+        ...(p[pol] || {}),
+        carrier: { ...(p[pol]?.carrier || {}), [cr]: { ...(p[pol]?.carrier?.[cr] || {}), [t]: v } },
+      },
+    }));
+  };
+  const getDropCityCost = (row, cityKey, si) => {
+    const ov = polCostO[row.pol]?.drop?.[cityKey]?.[sz(si)];
+    if (ov != null) return ov;
+    return bDO(row, cityKey, si).val;
+  };
+  const applyDropCityCost = (pol, cityKey, si, value) => {
+    const v = parseInt(value, 10);
+    if (!Number.isFinite(v)) return;
+    setPolCostO(p => ({
+      ...p,
+      [pol]: {
+        ...(p[pol] || {}),
+        drop: { ...(p[pol]?.drop || {}), [cityKey]: { ...(p[pol]?.drop?.[cityKey] || {}), [sz(si)]: v } },
+      },
+    }));
+  };
+  const getRentCityCost = (freightPol, rPol, city, rRow, si) => {
+    const ov = polCostO[freightPol]?.rent?.[city]?.[sz(si)];
+    if (ov != null) return ov;
+    const fp = PM[rPol], fr = fp ? fMap[fp] : null;
+    const t = si === 0 ? "soc20" : "soc40";
+    const rental = si === 0 ? rRow.r20[city] : rRow.r40[city];
+    const b = bRent(rPol, city, rRow, si);
+    if (!fr || !b.cr) return rental ?? null;
+    const soc = getCarrierRate(fr, b.cr, t);
+    return soc != null && rental != null ? soc + rental : null;
+  };
+  const applyRentCityCost = (freightPol, city, si, value) => {
+    const v = parseInt(value, 10);
+    if (!Number.isFinite(v)) return;
+    setPolCostO(p => ({
+      ...p,
+      [freightPol]: {
+        ...(p[freightPol] || {}),
+        rent: { ...(p[freightPol]?.rent || {}), [city]: { ...(p[freightPol]?.rent?.[city] || {}), [sz(si)]: v } },
+      },
+    }));
+  };
+  const clearPolCost = (pol, kind, key, cityKey) => {
+    setPolCostO(p => {
+      const next = { ...p, [pol]: { ...(p[pol] || {}) } };
+      if (kind === "carrier" && key) {
+        const c = { ...(next[pol].carrier || {}) };
+        delete c[key];
+        next[pol].carrier = c;
+      } else if (kind === "drop" && cityKey) {
+        const d = { ...(next[pol].drop || {}) };
+        delete d[cityKey];
+        next[pol].drop = d;
+      } else if (kind === "rent" && cityKey) {
+        const r = { ...(next[pol].rent || {}) };
+        delete r[cityKey];
+        next[pol].rent = r;
+      }
+      return next;
+    });
+  };
+
+  const bNet = (row, t) => {
+    let b = null, cr = null;
+    CRS.forEach(k => {
+      const v = getCarrierRate(row, k, t);
+      if (v != null && (b === null || v < b)) { b = v; cr = k; }
+    });
+    return { val: b, cr };
+  };
+  const bDO = (row, city, si) => {
+    const t = si === 0 ? "coc20" : "coc40";
+    let b = null, cr = null;
+    CRS.forEach(k => {
+      const o = getCarrierRate(row, k, t);
+      const d = DO[city]?.[k];
+      if (o != null && d) {
+        const tot = o + d[si];
+        if (b === null || tot < b) { b = tot; cr = k; }
+      }
+    });
+    return { val: b, cr };
+  };
+  const cRent = (rPol, city, rRow) => {
+    const fp = PM[rPol];
+    if (!fp || !fMap[fp]) return [];
+    const fr = fMap[fp];
+    const r20 = rRow.r20[city], r40 = rRow.r40[city];
+    return CRS.map(k => {
+      const s20 = getCarrierRate(fr, k, "soc20");
+      const s40 = getCarrierRate(fr, k, "soc40");
+      const m20 = getM(fp, fr.area, "soc20");
+      const m40 = getM(fp, fr.area, "soc40");
+      const cost20 = s20 != null && r20 != null ? s20 + r20 : null;
+      const cost40 = s40 != null && r40 != null ? s40 + r40 : null;
+      return {
+        k,
+        cost20, cost40, m20, m40,
+        t20: cost20 != null ? cost20 + m20 : null,
+        t40: cost40 != null ? cost40 + m40 : null,
+      };
+    }).filter(x => x.t20 != null || x.t40 != null);
+  };
+  const bRent = (rPol, city, rRow, si) => {
+    const all = cRent(rPol, city, rRow);
+    let b = null, cr = null;
+    all.forEach(x => {
+      const v = si === 0 ? x.t20 : x.t40;
+      if (v != null && (b === null || v < b)) { b = v; cr = x.k; }
+    });
+    return { val: b, cr };
+  };
+  const rentDetail = (rPol, city, rRow, si) => {
+    const fp = PM[rPol], fr = fp ? fMap[fp] : null;
+    const t = si === 0 ? "soc20" : "soc40";
+    const margin = fr ? getM(fp, fr.area, t) : 0;
+    const b = bRent(rPol, city, rRow, si);
+    const cost = getRentCityCost(fp || rPol, rPol, city, rRow, si);
+    return mkPrice(cost, margin, b.cr);
+  };
+  const oceanDetail = (row, t) => {
+    const b = bNet(row, t);
+    return mkPrice(b.val, getM(row.pol, row.area, t), b.cr);
+  };
+  const doDetail = (row, cityKey, si) => {
+    const t = si === 0 ? "coc20" : "coc40";
+    const b = bDO(row, cityKey, si);
+    const cost = getDropCityCost(row, cityKey, si);
+    return mkPrice(cost, getM(row.pol, row.area, t), b.cr);
+  };
+  const dropCarrierDetail = (row, cityKey, cr, si) => {
+    const t = si === 0 ? "coc20" : "coc40";
+    const o = getCarrierRate(row, cr, t);
+    const d = DO[cityKey]?.[cr];
+    const cost = o != null && d ? o + d[si] : null;
+    return mkPrice(cost, getM(row.pol, row.area, t), cr);
   };
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
@@ -471,26 +601,49 @@ export default function App() {
     </div>
   );
 
-  const AdminPriceCols = ({d20,d40,prefix="MOW"}) => (
-    <div style={{display:"flex",gap:12,alignItems:"flex-start",flexShrink:0}}>
-      {[{l:"매출가",c:"#b45309",v20:d20.sell,v40:d40.sell,cr:d20.cr,vc:"#111"},
-        {l:"매입가",c:"#2563eb",v20:d20.cost,v40:d40.cost,cr:null,vc:"#374151"},
-        {l:"마진",c:"#7c3aed",v20:d20.margin,v40:d40.margin,cr:null,vc:"#7c3aed"}].map(col=>(
-        <div key={col.l} style={{textAlign:"right",minWidth:54}}>
+  const costInp = { width:"100%",padding:"4px 6px",fontSize:12,fontWeight:700,color:"#1e40af",background:"#fff",border:"1px solid #93c5fd",borderRadius:5,boxSizing:"border-box",textAlign:"right" };
+
+  const AdminPriceCols = ({d20,d40,prefix="MOW",editable,onCost20,onCost40}) => (
+    <div style={{display:"flex",gap:12,alignItems:"flex-start",flexShrink:0}} onClick={e=>e.stopPropagation()}>
+      {[{l:"매출가",c:"#b45309",k:"sell",cr:d20.cr,vc:"#111"},
+        {l:"매입가",c:"#2563eb",k:"cost",cr:null,vc:"#374151"},
+        {l:"마진",c:"#7c3aed",k:"margin",cr:null,vc:"#7c3aed"}].map(col=>(
+        <div key={col.l} style={{textAlign:"right",minWidth:col.k==="cost"&&editable?62:54}}>
           <div style={{fontSize:9,fontWeight:700,color:col.c,marginBottom:4}}>{col.l}</div>
           <div style={{fontSize:10,color:"#9ca3af"}}>{prefix?`${prefix} 20'`:"20'"}</div>
-          <div style={{fontSize:13,fontWeight:700,color:col.vc}}>{col.v20!=null?`$${n(col.v20)}`:"—"}</div>
+          {col.k==="cost"&&editable ? (
+            <input type="number" value={d20.cost??""} placeholder="auto" onChange={e=>onCost20?.(e.target.value)} style={costInp}/>
+          ) : (
+            <div style={{fontSize:13,fontWeight:700,color:col.vc}}>{d20[col.k]!=null?`$${n(d20[col.k])}`:"—"}</div>
+          )}
           <div style={{fontSize:10,color:"#9ca3af",marginTop:4}}>40'</div>
-          <div style={{fontSize:13,fontWeight:700,color:col.vc}}>{col.v40!=null?`$${n(col.v40)}`:"—"}</div>
+          {col.k==="cost"&&editable ? (
+            <input type="number" value={d40.cost??""} placeholder="auto" onChange={e=>onCost40?.(e.target.value)} style={costInp}/>
+          ) : (
+            <div style={{fontSize:13,fontWeight:700,color:col.vc}}>{d40[col.k]!=null?`$${n(d40[col.k])}`:"—"}</div>
+          )}
           {col.cr&&<div style={{marginTop:4}}><Bg k={col.cr}/></div>}
         </div>
       ))}
     </div>
   );
 
-  const PolMarginBar = ({pol,area,types}) => (
+  const PolAdjustBar = ({pol,area,types,costHint,onCost20,onCost40,onClearCost}) => (
     <div style={{padding:"10px 16px",background:"#fffbeb",borderBottom:"1px solid #fde68a"}} onClick={e=>e.stopPropagation()}>
-      <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:6}}>{pol} · 마진 조정 (USD)</div>
+      <div style={{fontSize:10,fontWeight:700,color:"#1e40af",marginBottom:6}}>{pol} · 매입가 조정 (USD)</div>
+      {costHint && <div style={{fontSize:9,color:"#6b7280",marginBottom:6}}>{costHint}</div>}
+      {onCost20 ? (
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+          <div><div style={{fontSize:10,color:"#2563eb",marginBottom:2}}>20' 매입</div>
+            <input type="number" placeholder="자동" onChange={e=>onCost20(e.target.value)} style={{...costInp,width:"100%"}}/></div>
+          <div><div style={{fontSize:10,color:"#2563eb",marginBottom:2}}>40' 매입</div>
+            <input type="number" placeholder="자동" onChange={e=>onCost40(e.target.value)} style={{...costInp,width:"100%"}}/></div>
+        </div>
+      ) : (
+        <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>매입가: 카드·선사 행의 파란 칸에서 직접 입력</div>
+      )}
+      {onClearCost && <button type="button" onClick={onClearCost} style={{fontSize:10,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:4,padding:"4px 8px",cursor:"pointer",marginBottom:10}}>매입가 초기화</button>}
+      <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:6}}>마진 조정 (USD)</div>
       <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
         {types.map(t=>(
           <div key={t}>
@@ -500,7 +653,7 @@ export default function App() {
           </div>
         ))}
       </div>
-      <div style={{fontSize:9,color:"#9ca3af",marginTop:6}}>도시별 마진 · 상단 「설정 저장」으로 DB 반영</div>
+      <div style={{fontSize:9,color:"#9ca3af",marginTop:6}}>매입가·마진 변경 후 상단 「설정 저장」</div>
     </div>
   );
 
@@ -518,7 +671,9 @@ export default function App() {
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
           </div>
           {isAdmin
-            ? <AdminPriceCols d20={d20} d40={d40} prefix=""/>
+            ? <AdminPriceCols d20={d20} d40={d40} prefix="" editable
+                onCost20={v=>d20.cr&&applyCarrierRate(row.pol,d20.cr,t20,v)}
+                onCost40={v=>d40.cr&&applyCarrierRate(row.pol,d40.cr,t40,v)}/>
             : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
                 <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div><Bg k={d20.cr}/></div>
                 <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div><Bg k={d40.cr}/></div>
@@ -527,20 +682,22 @@ export default function App() {
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6"}}>
-            {isAdmin && <PolMarginBar pol={row.pol} area={row.area} types={types}/>}
+            {isAdmin && <PolAdjustBar pol={row.pol} area={row.area} types={types} onClearCost={()=>clearPolCost(row.pol,"carrier")}/>}
             <div style={{padding:"0 16px 16px"}}>
             {isAdmin ? (
               <div style={{marginTop:12}}>
-                {CRS.map(k=>{ const v20=row.rates[k][t20],v40=row.rates[k][t40]; if(!v20&&!v40)return null;
-                  const cd20={sell:v20!=null?v20+getM(row.pol,row.area,t20):null,cost:v20,margin:getM(row.pol,row.area,t20),cr:k};
-                  const cd40={sell:v40!=null?v40+getM(row.pol,row.area,t40):null,cost:v40,margin:getM(row.pol,row.area,t40),cr:k};
+                {CRS.map(k=>{ const v20=getCarrierRate(row,k,t20),v40=getCarrierRate(row,k,t40); if(v20==null&&v40==null)return null;
+                  const cd20=mkPrice(v20,getM(row.pol,row.area,t20),k);
+                  const cd40=mkPrice(v40,getM(row.pol,row.area,t40),k);
                   return (
                     <div key={k} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f9fafb"}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,flex:1,minWidth:0,flexWrap:"wrap"}}>
                         <Bg k={k}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
                         {validity[k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[k]}</span>}
                       </div>
-                      <AdminPriceCols d20={cd20} d40={cd40} prefix=""/>
+                      <AdminPriceCols d20={cd20} d40={cd40} prefix="" editable
+                        onCost20={v=>applyCarrierRate(row.pol,k,t20,v)}
+                        onCost40={v=>applyCarrierRate(row.pol,k,t40,v)}/>
                     </div>
                   ); })}
               </div>
@@ -588,7 +745,9 @@ export default function App() {
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
           </div>
           {isAdmin
-            ? <AdminPriceCols d20={d20} d40={d40} prefix="MOW"/>
+            ? <AdminPriceCols d20={d20} d40={d40} prefix="MOW" editable
+                onCost20={v=>applyDropCityCost(row.pol,"mow",0,v)}
+                onCost40={v=>applyDropCityCost(row.pol,"mow",1,v)}/>
             : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
                 {d20.sell!=null&&<><div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>${n(d20.sell)}</div><Bg k={d20.cr}/></div>
                 <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div><Bg k={d40.cr}/></div></>}
@@ -597,24 +756,25 @@ export default function App() {
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6",paddingBottom:8}}>
-            {isAdmin && <PolMarginBar pol={row.pol} area={row.area} types={doTypes}/>}
+            {isAdmin && <PolAdjustBar pol={row.pol} area={row.area} types={doTypes} costHint="Moscow 합계 매입가 (아래 도시·선사 행에서도 수정)"
+              onCost20={v=>applyDropCityCost(row.pol,"mow",0,v)} onCost40={v=>applyDropCityCost(row.pol,"mow",1,v)}
+              onClearCost={()=>clearPolCost(row.pol,"drop",null,"mow")}/>}
             <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Drop off · City 선택</div>
             {DOC.map(({k,l})=>{
               const cd20=doDetail(row,k,0),cd40=doDetail(row,k,1);
               const cityKey=`${idx}-${k}`,cOpen=doCityOpen===cityKey;
               const carrierRows = CRS.map(cr=>{
-                const o20=row.rates[cr]["coc20"],o40=row.rates[cr]["coc40"];
-                const d=DO[k]?.[cr];
-                const cost20=o20!=null&&d?o20+d[0]:null,cost40=o40!=null&&d?o40+d[1]:null;
-                const m20=getM(row.pol,row.area,"coc20"),m40=getM(row.pol,row.area,"coc40");
-                return {cr,cost20,cost40,sell20:cost20!=null?cost20+m20:null,sell40:cost40!=null?cost40+m40:null,m20,m40};
-              }).filter(x=>x.cost20!=null||x.cost40!=null);
+                const cdC20=dropCarrierDetail(row,k,cr,0),cdC40=dropCarrierDetail(row,k,cr,1);
+                return {cr,cdC20,cdC40};
+              }).filter(x=>x.cdC20.cost!=null||x.cdC40.cost!=null);
               return (
                 <div key={k}>
                   <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 16px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:8}}>
                     <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151"}}>{l}</span>
                     {isAdmin
-                      ? <AdminPriceCols d20={cd20} d40={cd40} prefix=""/>
+                      ? <AdminPriceCols d20={cd20} d40={cd40} prefix="" editable
+                          onCost20={v=>applyDropCityCost(row.pol,k,0,v)}
+                          onCost40={v=>applyDropCityCost(row.pol,k,1,v)}/>
                       : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
                           <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{cd20.sell!=null?`$${n(cd20.sell)}`:"—"}</div>{cd20.cr&&<Bg k={cd20.cr}/>}</div>
                           <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{cd40.sell!=null?`$${n(cd40.sell)}`:"—"}</div>{cd40.cr&&<Bg k={cd40.cr}/>}</div>
@@ -625,29 +785,28 @@ export default function App() {
                     <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
                       {carrierRows.length===0
                         ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
-                        : carrierRows.map(({cr,cost20,cost40,sell20,sell40,m20,m40})=>{
-                          const cdC20={sell:sell20,cost:cost20,margin:m20,cr};
-                          const cdC40={sell:sell40,cost:cost40,margin:m40,cr};
-                          return (
+                        : carrierRows.map(({cr,cdC20,cdC40})=>(
                           <div key={cr} style={{display:"flex",alignItems:"center",padding:"7px 16px 7px 24px",borderBottom:"1px solid #e0f2fe",gap:8}}>
                             <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
                               <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span>
                               {validity[cr] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[cr]}</span>}
                             </div>
                             {isAdmin
-                              ? <AdminPriceCols d20={cdC20} d40={cdC40} prefix=""/>
+                              ? <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable
+                                  onCost20={v=>{applyCarrierRate(row.pol,cr,"coc20",v);}}
+                                  onCost40={v=>{applyCarrierRate(row.pol,cr,"coc40",v);}}/>
                               : <>
-                            <div style={{textAlign:"right",marginRight:20,cursor:sell20?"pointer":"default"}} onClick={()=>sell20&&openSC(cr,"coc20",row.pol+" > "+l)}>
+                            <div style={{textAlign:"right",marginRight:20,cursor:cdC20.sell?"pointer":"default"}} onClick={()=>cdC20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
                               <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
-                              <div style={{fontSize:14,fontWeight:700,color:sell20?"#0369a1":"#d1d5db",textDecoration:sell20?"underline":"none"}}>{sell20?`$${n(sell20)}`:"—"}</div>
+                              <div style={{fontSize:14,fontWeight:700,color:cdC20.sell?"#0369a1":"#d1d5db",textDecoration:cdC20.sell?"underline":"none"}}>{cdC20.sell?`$${n(cdC20.sell)}`:"—"}</div>
                             </div>
-                            <div style={{textAlign:"right",cursor:sell40?"pointer":"default"}} onClick={()=>sell40&&openSC(cr,"coc40",row.pol+" > "+l)}>
+                            <div style={{textAlign:"right",cursor:cdC40.sell?"pointer":"default"}} onClick={()=>cdC40.sell&&openSC(cr,"coc40",row.pol+" > "+l)}>
                               <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
-                              <div style={{fontSize:14,fontWeight:700,color:sell40?"#0369a1":"#d1d5db",textDecoration:sell40?"underline":"none"}}>{sell40?`$${n(sell40)}`:"—"}</div>
+                              <div style={{fontSize:14,fontWeight:700,color:cdC40.sell?"#0369a1":"#d1d5db",textDecoration:cdC40.sell?"underline":"none"}}>{cdC40.sell?`$${n(cdC40.sell)}`:"—"}</div>
                             </div>
                             </>}
                           </div>
-                        );})}
+                        ))}
                     </div>
                   )}
                 </div>
@@ -672,7 +831,9 @@ export default function App() {
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.displayPol || row.pol}</span>
           </div>
           {isAdmin
-            ? <AdminPriceCols d20={d20} d40={d40}/>
+            ? <AdminPriceCols d20={d20} d40={d40} prefix="MOW" editable
+                onCost20={v=>applyRentCityCost(freightPol,"Moscow",0,v)}
+                onCost40={v=>applyRentCityCost(freightPol,"Moscow",1,v)}/>
             : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
                 <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>{d20.cr&&<Bg k={d20.cr}/>}</div>
                 <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>{d40.cr&&<Bg k={d40.cr}/>}</div>
@@ -681,7 +842,9 @@ export default function App() {
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6",paddingBottom:8}}>
-            {isAdmin && <PolMarginBar pol={freightPol} area={row.area} types={["soc20","soc40"]}/>}
+            {isAdmin && <PolAdjustBar pol={freightPol} area={row.area} types={["soc20","soc40"]} costHint="Moscow 합계 매입가 (SOC+렌탈)"
+              onCost20={v=>applyRentCityCost(freightPol,"Moscow",0,v)} onCost40={v=>applyRentCityCost(freightPol,"Moscow",1,v)}
+              onClearCost={()=>clearPolCost(freightPol,"rent",null,"Moscow")}/>}
             <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Rental · Return City (Drop off 순서)</div>
             {RENT_CITY_ORDER.map(city=>{
               const cd20=rentDetail(row.pol,city,row,0),cd40=rentDetail(row.pol,city,row,1);
@@ -694,7 +857,9 @@ export default function App() {
                   <button onClick={()=>setCityOpen(cOpen?null:key)} style={{width:"100%",display:"flex",alignItems:"center",padding:"10px 16px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:8}}>
                     <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
                     {isAdmin
-                      ? <AdminPriceCols d20={cd20} d40={cd40} prefix=""/>
+                      ? <AdminPriceCols d20={cd20} d40={cd40} prefix="" editable
+                          onCost20={v=>applyRentCityCost(freightPol,city,0,v)}
+                          onCost40={v=>applyRentCityCost(freightPol,city,1,v)}/>
                       : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
                           <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{cd20.sell!=null?`$${n(cd20.sell)}`:"—"}</div>{cd20.sell!=null&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r20[city])}</div>}{cd20.cr&&<Bg k={cd20.cr}/>}</div>
                           <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{cd40.sell!=null?`$${n(cd40.sell)}`:"—"}</div>{cd40.sell!=null&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r40[city])}</div>}{cd40.cr&&<Bg k={cd40.cr}/>}</div>
@@ -705,11 +870,8 @@ export default function App() {
                     <div style={{background:"#faf5ff",borderBottom:"1px solid #ede9fe"}}>
                       {carriers.length===0?<div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
                         :carriers.map(c=>{
-                        const m20=fr?getM(fp,fr.area,"soc20"):0,m40=fr?getM(fp,fr.area,"soc40"):0;
-                        const soc20=fr?.rates[c.k]?.soc20,soc40=fr?.rates[c.k]?.soc40;
-                        const r20=row.r20[city],r40=row.r40[city];
-                        const cost20=soc20!=null&&r20!=null?soc20+r20:null,cost40=soc40!=null&&r40!=null?soc40+r40:null;
-                        const cdC20={sell:c.t20,cost:cost20,margin:m20,cr:c.k},cdC40={sell:c.t40,cost:cost40,margin:m40,cr:c.k};
+                        const cdC20=mkPrice(c.cost20,c.m20,c.k);
+                        const cdC40=mkPrice(c.cost40,c.m40,c.k);
                         return (
                         <div key={c.k} style={{display:"flex",alignItems:"center",padding:"10px 16px 10px 24px",borderBottom:"1px solid #ede9fe",gap:8}}>
                           <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
@@ -718,7 +880,9 @@ export default function App() {
                             {validity[c.k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[c.k]}</span>}
                           </div>
                           {isAdmin
-                            ? <AdminPriceCols d20={cdC20} d40={cdC40} prefix=""/>
+                            ? <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable
+                                onCost20={v=>fp&&applyCarrierRate(fp,c.k,"soc20",v)}
+                                onCost40={v=>fp&&applyCarrierRate(fp,c.k,"soc40",v)}/>
                             : <>
                           <div style={{textAlign:"right",marginRight:20,cursor:c.t20?"pointer":"default"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
                             <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
