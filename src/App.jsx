@@ -1,4 +1,24 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+
+const SUPABASE_URL = "https://mmswsopevmyreoygovpa.supabase.co";
+const SUPABASE_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
+const ADMIN_PIN = "0000";
+
+const supaFetch = async (path, options = {}) => {
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+    headers: {
+      "apikey": SUPABASE_KEY,
+      "Authorization": `Bearer ${SUPABASE_KEY}`,
+      "Content-Type": "application/json",
+      "Prefer": "return=representation",
+      ...options.headers,
+    },
+    ...options,
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const text = await res.text();
+  return text ? JSON.parse(text) : [];
+};
 
 const CARRIERS = { SNK: "장금상선", DY: "동영", CK: "천경" };
 const CK_KEYS = ["SNK", "DY", "CK"];
@@ -97,16 +117,15 @@ const RENTAL=[
 ];
 const POL_MAP={
   "Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN",
-  "Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA",
-  "Chongqing":"CHONGQING","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG",
-  "Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA",
-  "Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA",
-  "Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK",
+  "Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING",
+  "Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE",
+  "Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG",
+  "Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK",
   "Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)",
 };
+
 const $n=v=>v!=null?v.toLocaleString():"—";
-const Badge=({k})=>{ if(!k) return null; const c={SNK:"bg-blue-100 text-blue-700",DY:"bg-emerald-100 text-emerald-700",CK:"bg-orange-100 text-orange-700"}; return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${c[k]}`}>{k}</span>; };
-const PIN="0000";
+const Badge=({k})=>{ if(!k)return null; const c={SNK:"bg-blue-100 text-blue-700",DY:"bg-emerald-100 text-emerald-700",CK:"bg-orange-100 text-orange-700"}; return <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${c[k]}`}>{k}</span>; };
 
 export default function App(){
   const freight=useMemo(()=>FREIGHT.map(r=>({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})),[]);
@@ -114,9 +133,24 @@ export default function App(){
   const areas=useMemo(()=>[...new Set(freight.map(d=>d.area))],[freight]);
   const fByPol=useMemo(()=>Object.fromEntries(freight.map(d=>[d.pol,d])),[freight]);
 
-  const [isAdmin,setIsAdmin]=useState(false);
+  // Auth state
+  const [mode,setMode]=useState("login"); // login | client | admin
+  const [client,setClient]=useState(null);
+  const [loginEmail,setLoginEmail]=useState("");
+  const [loginPw,setLoginPw]=useState("");
+  const [loginErr,setLoginErr]=useState("");
+  const [loginLoading,setLoginLoading]=useState(false);
   const [pinInput,setPinInput]=useState("");
   const [pinModal,setPinModal]=useState(false);
+
+  // Admin client management
+  const [clients,setClients]=useState([]);
+  const [showClients,setShowClients]=useState(false);
+  const [editClient,setEditClient]=useState(null);
+  const [newClient,setNewClient]=useState({company_name:"",email:"",password_hash:"",margin_coc20:80,margin_coc40:100,margin_soc20:80,margin_soc40:100,notes:""});
+  const [showNewForm,setShowNewForm]=useState(false);
+
+  // App state
   const [search,setSearch]=useState("");
   const [areaF,setAreaF]=useState("ALL");
   const [tab,setTab]=useState("ocean");
@@ -126,36 +160,201 @@ export default function App(){
   const [cityOpen,setCityOpen]=useState(null);
   const [sc,setSc]=useState(null);
 
+  const isAdmin=mode==="admin";
+
+  // Login handler
+  const handleLogin=async()=>{
+    setLoginLoading(true); setLoginErr("");
+    try{
+      const data=await supaFetch(`clients?email=eq.${encodeURIComponent(loginEmail)}&password_hash=eq.${encodeURIComponent(loginPw)}&is_active=eq.true&select=*`);
+      if(data.length===0){ setLoginErr("이메일 또는 비밀번호가 올바르지 않습니다."); }
+      else{
+        const c=data[0];
+        setClient(c);
+        setMargins({coc20:c.margin_coc20,coc40:c.margin_coc40,soc20:c.margin_soc20,soc40:c.margin_soc40});
+        setMode("client");
+      }
+    }catch(e){ setLoginErr("서버 오류가 발생했습니다."); }
+    setLoginLoading(false);
+  };
+
+  const handleAdminPin=()=>{
+    if(pinInput===ADMIN_PIN){ setMode("admin"); setMargins({coc20:80,coc40:100,soc20:80,soc40:100}); setPinModal(false); }
+    else{ alert("PIN 오류"); setPinInput(""); }
+  };
+
+  const loadClients=async()=>{
+    const data=await supaFetch("clients?select=*&order=created_at.desc");
+    setClients(data);
+  };
+
+  const saveClient=async()=>{
+    await supaFetch("clients",{ method:"POST", body:JSON.stringify(newClient) });
+    setShowNewForm(false); setNewClient({company_name:"",email:"",password_hash:"",margin_coc20:80,margin_coc40:100,margin_soc20:80,margin_soc40:100,notes:""});
+    loadClients();
+  };
+
+  const updateClient=async(id,data)=>{
+    await supaFetch(`clients?id=eq.${id}`,{ method:"PATCH", body:JSON.stringify(data) });
+    setEditClient(null); loadClients();
+  };
+
+  const toggleActive=async(id,cur)=>{ await supaFetch(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify({is_active:!cur})}); loadClients(); };
+
+  // Freight helpers
   const bestNet=(row,type)=>{let b=null,cr=null;CK_KEYS.forEach(k=>{const v=row.rates[k][type];if(v!=null&&(b===null||v<b)){b=v;cr=k;}});return{val:b,cr};};
   const bestDO=(row,city,si)=>{const t=si===0?"coc20":"coc40";let b=null,cr=null;CK_KEYS.forEach(k=>{const o=row.rates[k][t],d=DROPOFF[city]?.[k];if(o!=null&&d){const tot=o+d[si];if(b===null||tot<b){b=tot;cr=k;}}});return{val:b,cr};};
-
   const carrierRentals=(rPol,city,rRow)=>{
-    const fp=POL_MAP[rPol]; if(!fp||!fByPol[fp]) return [];
+    const fp=POL_MAP[rPol]; if(!fp||!fByPol[fp])return [];
     const fRow=fByPol[fp];
     return CK_KEYS.map(k=>{
-      const s20=fRow.rates[k].soc20, s40=fRow.rates[k].soc40;
-      const sell20=s20!=null?s20+margins.soc20:null, sell40=s40!=null?s40+margins.soc40:null;
-      const r20=rRow.r20[city], r40=rRow.r40[city];
-      return{k, t20:sell20!=null&&r20!=null?sell20+r20:null, t40:sell40!=null&&r40!=null?sell40+r40:null};
+      const s20=fRow.rates[k].soc20,s40=fRow.rates[k].soc40;
+      const sell20=s20!=null?s20+margins.soc20:null,sell40=s40!=null?s40+margins.soc40:null;
+      const r20=rRow.r20[city],r40=rRow.r40[city];
+      return{k,t20:sell20!=null&&r20!=null?sell20+r20:null,t40:sell40!=null&&r40!=null?sell40+r40:null};
     }).filter(x=>x.t20!=null||x.t40!=null);
   };
   const bestRental=(rPol,city,rRow,si)=>{
-    const all=carrierRentals(rPol,city,rRow); let b=null,cr=null;
+    const all=carrierRentals(rPol,city,rRow);let b=null,cr=null;
     all.forEach(x=>{const v=si===0?x.t20:x.t40;if(v!=null&&(b===null||v<b)){b=v;cr=x.k;}});
     return{val:b,cr};
   };
-
   const openSC=(k,type,route)=>setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,type:type.includes("coc")?"COC":"SOC",size:type.includes("20")?"20'":"40'"});
   const copySC=()=>{
     if(!sc)return;
     try{const t=document.createElement("textarea");t.value=sc.sc;t.style.position="fixed";t.style.left="-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){}
     setSc({...sc,copied:true});setTimeout(()=>setSc(null),1500);
   };
-
-  const filtered=useMemo(()=>{let d=freight;if(areaF!=="ALL")d=d.filter(r=>r.area===areaF);if(search)d=d.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())||r.area.toLowerCase().includes(search.toLowerCase()));return d;},[freight,areaF,search]);
+  const filtered=useMemo(()=>{let d=freight;if(areaF!=="ALL")d=d.filter(r=>r.area===areaF);if(search)d=d.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase()));return d;},[freight,areaF,search]);
   const filteredRental=useMemo(()=>search?rental.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())):rental,[rental,search]);
 
-  // ─── Ocean Card ───────────────────────────────────────────────────────────
+  // ── LOGIN SCREEN ──────────────────────────────
+  if(mode==="login") return(
+    <div className="min-h-screen bg-gray-50 flex flex-col items-center justify-center px-4" style={{fontFamily:"-apple-system,'Apple SD Gothic Neo',sans-serif"}}>
+      <div className="w-full max-w-sm">
+        <div className="flex flex-col items-center mb-8">
+          <svg width="64" height="64" viewBox="0 0 100 100" className="mb-3">
+            <circle cx="50" cy="50" r="49" fill="#1D2B4F" stroke="#2C3E6B" strokeWidth="2"/>
+            <circle cx="50" cy="50" r="40" fill="#E8A817"/>
+            <polygon points="50,10 55,40 50,32 45,40" fill="#C0392B"/>
+            <polygon points="50,90 55,60 50,68 45,60" fill="#C0392B"/>
+            <polygon points="10,50 40,45 32,50 40,55" fill="#C0392B"/>
+            <polygon points="90,50 60,45 68,50 60,55" fill="#C0392B"/>
+            <polygon points="22,22 40,40 34,36 36,34" fill="#C0392B"/>
+            <polygon points="78,78 60,60 66,64 64,66" fill="#C0392B"/>
+            <polygon points="78,22 60,40 64,34 66,36" fill="#C0392B"/>
+            <polygon points="22,78 40,60 36,66 34,64" fill="#C0392B"/>
+            <circle cx="50" cy="50" r="7" fill="white"/>
+            <circle cx="50" cy="50" r="3.5" fill="#C0392B"/>
+          </svg>
+          <h1 className="text-xl font-bold text-gray-900">YSL Agency</h1>
+          <p className="text-sm text-gray-400 mt-1">Freight Rate Portal</p>
+        </div>
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-6">
+          <h2 className="text-sm font-bold text-gray-700 mb-4">고객사 로그인</h2>
+          <input type="email" placeholder="이메일" value={loginEmail} onChange={e=>setLoginEmail(e.target.value)}
+            className="w-full px-4 py-3 text-sm border border-gray-200 rounded-xl mb-3 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+          <input type="password" placeholder="비밀번호" value={loginPw} onChange={e=>setLoginPw(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&handleLogin()}
+            className="w-full px-4 py-3 text-sm border border-gray-200 rounded-xl mb-4 focus:outline-none focus:ring-2 focus:ring-blue-300"/>
+          {loginErr&&<p className="text-xs text-red-500 mb-3">{loginErr}</p>}
+          <button onClick={handleLogin} disabled={loginLoading}
+            className="w-full py-3 bg-gray-900 text-white text-sm font-semibold rounded-xl active:scale-95 transition-all">
+            {loginLoading?"확인 중...":"로그인"}
+          </button>
+          <div className="mt-4 pt-4 border-t border-gray-100 text-center">
+            <button onClick={()=>setPinModal(true)} className="text-xs text-gray-400">관리자 접속</button>
+          </div>
+        </div>
+        <p className="text-center text-xs text-gray-300 mt-6">YSL Agency Far East · June 2026</p>
+      </div>
+      {pinModal&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+        <div className="bg-white rounded-xl p-6 w-72 shadow-2xl">
+          <h3 className="text-sm font-bold text-gray-800 mb-4">관리자 PIN</h3>
+          <input type="password" value={pinInput} onChange={e=>setPinInput(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&handleAdminPin()} autoFocus placeholder="PIN"
+            className="w-full px-4 py-2.5 text-center text-lg font-bold tracking-[0.5em] border border-gray-200 rounded-lg focus:outline-none"/>
+          <div className="flex gap-2 mt-4">
+            <button onClick={()=>setPinModal(false)} className="flex-1 py-2 text-xs text-gray-400 bg-gray-100 rounded-lg">취소</button>
+            <button onClick={handleAdminPin} className="flex-1 py-2 text-xs text-white bg-gray-900 rounded-lg">확인</button>
+          </div>
+        </div>
+      </div>}
+    </div>
+  );
+
+  // ── ADMIN CLIENT MANAGEMENT ───────────────────
+  if(isAdmin&&showClients) return(
+    <div className="min-h-screen bg-gray-50" style={{fontFamily:"-apple-system,'Apple SD Gothic Neo',sans-serif"}}>
+      <div className="sticky top-0 z-30 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+        <button onClick={()=>setShowClients(false)} className="text-sm text-gray-500">← 뒤로</button>
+        <h1 className="text-sm font-bold text-gray-900">고객사 관리</h1>
+        <button onClick={()=>{setShowNewForm(true);loadClients();}} className="text-sm text-blue-600 font-semibold">+ 추가</button>
+      </div>
+      <div className="max-w-2xl mx-auto px-4 pt-4 pb-20">
+        {showNewForm&&<div className="bg-white border border-blue-200 rounded-xl p-4 mb-4">
+          <div className="text-sm font-bold text-blue-700 mb-3">새 고객사 추가</div>
+          {[["company_name","회사명"],["email","이메일"],["password_hash","비밀번호"]].map(([k,l])=>
+            <input key={k} placeholder={l} value={newClient[k]} onChange={e=>setNewClient(p=>({...p,[k]:e.target.value}))}
+              className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg mb-2 focus:outline-none"/>
+          )}
+          <div className="grid grid-cols-4 gap-2 mb-3">
+            {["coc20","coc40","soc20","soc40"].map(t=><div key={t}>
+              <label className="text-[10px] text-gray-500">{TYPE_LABELS[t]}</label>
+              <input type="number" value={newClient[`margin_${t}`]} onChange={e=>setNewClient(p=>({...p,[`margin_${t}`]:parseInt(e.target.value)||0}))}
+                className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none"/>
+            </div>)}
+          </div>
+          <input placeholder="메모" value={newClient.notes} onChange={e=>setNewClient(p=>({...p,notes:e.target.value}))}
+            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg mb-3 focus:outline-none"/>
+          <div className="flex gap-2">
+            <button onClick={()=>setShowNewForm(false)} className="flex-1 py-2 text-xs text-gray-400 bg-gray-100 rounded-lg">취소</button>
+            <button onClick={saveClient} className="flex-1 py-2 text-xs text-white bg-blue-600 rounded-lg">저장</button>
+          </div>
+        </div>}
+        <button onClick={loadClients} className="w-full py-2 text-xs text-gray-500 bg-white border border-gray-200 rounded-lg mb-3">목록 새로고침</button>
+        {clients.map(c=><div key={c.id} className="bg-white border border-gray-200 rounded-xl p-4 mb-3">
+          {editClient?.id===c.id?(
+            <div>
+              <div className="grid grid-cols-4 gap-2 mb-3">
+                {["coc20","coc40","soc20","soc40"].map(t=><div key={t}>
+                  <label className="text-[10px] text-gray-500">{TYPE_LABELS[t]}</label>
+                  <input type="number" value={editClient[`margin_${t}`]} onChange={e=>setEditClient(p=>({...p,[`margin_${t}`]:parseInt(e.target.value)||0}))}
+                    className="w-full px-2 py-1.5 text-sm border border-gray-200 rounded-lg focus:outline-none"/>
+                </div>)}
+              </div>
+              <div className="flex gap-2">
+                <button onClick={()=>setEditClient(null)} className="flex-1 py-2 text-xs text-gray-400 bg-gray-100 rounded-lg">취소</button>
+                <button onClick={()=>updateClient(c.id,{margin_coc20:editClient.margin_coc20,margin_coc40:editClient.margin_coc40,margin_soc20:editClient.margin_soc20,margin_soc40:editClient.margin_soc40})}
+                  className="flex-1 py-2 text-xs text-white bg-blue-600 rounded-lg">저장</button>
+              </div>
+            </div>
+          ):(
+            <div>
+              <div className="flex items-center justify-between mb-2">
+                <div>
+                  <span className="font-semibold text-sm text-gray-900">{c.company_name}</span>
+                  <span className={`ml-2 text-[10px] px-2 py-0.5 rounded-full ${c.is_active?"bg-green-100 text-green-700":"bg-red-100 text-red-500"}`}>{c.is_active?"활성":"비활성"}</span>
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={()=>setEditClient(c)} className="text-xs text-blue-600 border border-blue-200 px-2 py-1 rounded-lg">마진수정</button>
+                  <button onClick={()=>toggleActive(c.id,c.is_active)} className={`text-xs px-2 py-1 rounded-lg border ${c.is_active?"text-red-500 border-red-200":"text-green-600 border-green-200"}`}>{c.is_active?"비활성화":"활성화"}</button>
+                </div>
+              </div>
+              <div className="text-xs text-gray-400 mb-1">{c.email}</div>
+              <div className="flex gap-3 text-[11px] text-gray-500">
+                <span>COC 20': +{c.margin_coc20}</span><span>COC 40': +{c.margin_coc40}</span>
+                <span>SOC 20': +{c.margin_soc20}</span><span>SOC 40': +{c.margin_soc40}</span>
+              </div>
+              {c.notes&&<div className="text-xs text-gray-400 mt-1">{c.notes}</div>}
+            </div>
+          )}
+        </div>)}
+      </div>
+    </div>
+  );
+
+  // ── MAIN APP ──────────────────────────────────
   const OceanCard=({row,idx})=>{
     const types=ctype==="coc"?["coc20","coc40"]:["soc20","soc40"];
     const open=expanded===`o${idx}`;
@@ -196,18 +395,10 @@ export default function App(){
             </tr>;
           })}
         </tbody></table>
-        {isAdmin&&<div className="mt-3 pt-3 border-t border-dashed border-gray-200">
-          <div className="text-[10px] text-gray-400 mb-1">SELLING</div>
-          <div className="flex gap-4">{types.map(t=>{const b=bestNet(row,t);return <div key={t} className="flex items-center gap-1 text-xs">
-            <span className="text-gray-400">{t.includes("20")?"20'":"40'"}:</span>
-            <span className="font-bold text-red-600">${b.val!=null?$n(b.val+margins[t]):"—"}</span><Badge k={b.cr}/>
-          </div>;})}</div>
-        </div>}
       </div>}
     </div>;
   };
 
-  // ─── Drop-off Card ────────────────────────────────────────────────────────
   const DOCard=({row,idx})=>{
     const open=expanded===`d${idx}`;
     const b20=bestDO(row,"mow",0),b40=bestDO(row,"mow",1);
@@ -218,40 +409,21 @@ export default function App(){
           <span className="font-semibold text-gray-800 text-sm truncate">{row.pol}</span>
         </div>
         <div className="flex items-center gap-3 shrink-0">
-          {b20.val&&<><div className="text-right">
-            <div className="text-[10px] text-gray-400">MOW 20'</div>
-            <div className="text-sm font-bold text-gray-800">${$n(b20.val)}</div>
-            <div className="mt-0.5"><Badge k={b20.cr}/></div>
-          </div>
-          <div className="text-right">
-            <div className="text-[10px] text-gray-400">40'</div>
-            <div className="text-sm font-bold text-gray-800">${$n(b40.val)}</div>
-            <div className="mt-0.5"><Badge k={b40.cr}/></div>
-          </div></>}
+          {b20.val&&<><div className="text-right"><div className="text-[10px] text-gray-400">MOW 20'</div><div className="text-sm font-bold text-gray-800">${$n(b20.val)}</div><div className="mt-0.5"><Badge k={b20.cr}/></div></div>
+          <div className="text-right"><div className="text-[10px] text-gray-400">40'</div><div className="text-sm font-bold text-gray-800">${$n(b40.val)}</div><div className="mt-0.5"><Badge k={b40.cr}/></div></div></>}
           <svg className={`w-4 h-4 text-gray-400 shrink-0 ${open?"rotate-180":""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
         </div>
       </button>
       {open&&<div className="px-4 pb-4 border-t border-gray-100">
         <div className="mt-3 mb-2 text-[11px] font-bold text-gray-600">🚢+🚛 Ocean + Drop off 합산</div>
         <table className="w-full text-xs"><thead><tr className="text-gray-400 border-b border-gray-100">
-          <th className="text-left py-1.5">City</th><th className="text-right py-1.5">20'</th>
-          <th className="text-center py-1.5 w-9">선사</th><th className="text-right py-1.5">40'</th>
-          <th className="text-center py-1.5 w-9">선사</th>
+          <th className="text-left py-1.5">City</th><th className="text-right py-1.5">20'</th><th className="text-center py-1.5 w-9">선사</th><th className="text-right py-1.5">40'</th><th className="text-center py-1.5 w-9">선사</th>
         </tr></thead><tbody>
-          {DO_CITIES.map(city=>{
-            const c20=bestDO(row,city,0),c40=bestDO(row,city,1);
+          {DO_CITIES.map(city=>{const c20=bestDO(row,city,0),c40=bestDO(row,city,1);
             return <tr key={city} className="border-b border-gray-50">
               <td className="py-2.5 font-semibold text-gray-700">{DO_LABELS[city]}</td>
-              {c20.val?<>
-                <td className="text-right py-2.5 font-mono font-bold text-gray-800 cursor-pointer" onClick={()=>openSC(c20.cr,"coc20",row.pol+" → "+DO_LABELS[city])}>
-                  <span className="underline decoration-dotted underline-offset-2">${$n(c20.val)}</span></td>
-                <td className="text-center py-2.5"><Badge k={c20.cr}/></td>
-              </>:<><td className="text-right py-2.5 text-gray-300">—</td><td/></>}
-              {c40.val?<>
-                <td className="text-right py-2.5 font-mono font-bold text-gray-800 cursor-pointer" onClick={()=>openSC(c40.cr,"coc40",row.pol+" → "+DO_LABELS[city])}>
-                  <span className="underline decoration-dotted underline-offset-2">${$n(c40.val)}</span></td>
-                <td className="text-center py-2.5"><Badge k={c40.cr}/></td>
-              </>:<><td className="text-right py-2.5 text-gray-300">—</td><td/></>}
+              {c20.val?<><td className="text-right py-2.5 font-mono font-bold text-gray-800 cursor-pointer" onClick={()=>openSC(c20.cr,"coc20",row.pol+" → "+DO_LABELS[city])}><span className="underline decoration-dotted underline-offset-2">${$n(c20.val)}</span></td><td className="text-center py-2.5"><Badge k={c20.cr}/></td></>:<><td className="text-right py-2.5 text-gray-300">—</td><td/></>}
+              {c40.val?<><td className="text-right py-2.5 font-mono font-bold text-gray-800 cursor-pointer" onClick={()=>openSC(c40.cr,"coc40",row.pol+" → "+DO_LABELS[city])}><span className="underline decoration-dotted underline-offset-2">${$n(c40.val)}</span></td><td className="text-center py-2.5"><Badge k={c40.cr}/></td></>:<><td className="text-right py-2.5 text-gray-300">—</td><td/></>}
             </tr>;
           })}
         </tbody></table>
@@ -259,89 +431,48 @@ export default function App(){
     </div>;
   };
 
-  // ─── Rental Card ──────────────────────────────────────────────────────────
-  // 1단계: collapsed → MOW best total + 선사
-  // 2단계: city list → best total + 선사 + 렌탈비 작은글씨
-  // 3단계: carrier breakdown → 각 선사 total + 렌탈비 작은글씨 + S/C 팝업
   const RentalCard=({row,idx})=>{
     const open=expanded===`r${idx}`;
-    // 1단계: MOW 기준
-    const mow20=bestRental(row.pol,"Moscow",row,0);
-    const mow40=bestRental(row.pol,"Moscow",row,1);
+    const mow20=bestRental(row.pol,"Moscow",row,0),mow40=bestRental(row.pol,"Moscow",row,1);
     return <div className="border border-gray-200 rounded-lg mb-2 bg-white overflow-hidden" style={{boxShadow:"0 1px 3px rgba(0,0,0,.04)"}}>
-      {/* ── 1단계: 접힌 상태 (MOW 기준) ── */}
       <button onClick={()=>{setExpanded(open?null:`r${idx}`);setCityOpen(null);}} className="w-full flex items-center justify-between px-4 py-3 text-left">
         <span className="font-semibold text-gray-800 text-sm">{row.pol}</span>
         <div className="flex items-center gap-3 shrink-0">
-          <div className="text-right">
-            <div className="text-[10px] text-gray-400">MOW 20'</div>
-            <div className="text-sm font-bold text-purple-700">{mow20.val!=null?`$${$n(mow20.val)}`:`$${$n(row.r20["Moscow"])}`}</div>
-            {mow20.cr&&<div className="mt-0.5"><Badge k={mow20.cr}/></div>}
-          </div>
-          <div className="text-right">
-            <div className="text-[10px] text-gray-400">40'</div>
-            <div className="text-sm font-bold text-purple-700">{mow40.val!=null?`$${$n(mow40.val)}`:`$${$n(row.r40["Moscow"])}`}</div>
-            {mow40.cr&&<div className="mt-0.5"><Badge k={mow40.cr}/></div>}
-          </div>
+          <div className="text-right"><div className="text-[10px] text-gray-400">MOW 20'</div><div className="text-sm font-bold text-purple-700">{mow20.val!=null?`$${$n(mow20.val)}`:`$${$n(row.r20["Moscow"])}`}</div>{mow20.cr&&<div className="mt-0.5"><Badge k={mow20.cr}/></div>}</div>
+          <div className="text-right"><div className="text-[10px] text-gray-400">40'</div><div className="text-sm font-bold text-purple-700">{mow40.val!=null?`$${$n(mow40.val)}`:`$${$n(row.r40["Moscow"])}`}</div>{mow40.cr&&<div className="mt-0.5"><Badge k={mow40.cr}/></div>}</div>
           <svg className={`w-4 h-4 text-gray-400 ${open?"rotate-180":""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
         </div>
       </button>
-      {/* ── 2단계: 도시 목록 ── */}
       {open&&<div className="border-t border-gray-100 pb-2">
         <div className="px-4 pt-3 pb-1 text-[11px] font-bold text-gray-500">📦 SOC 매출운임 + 렌탈 합산 · 반납지 선택</div>
         {RENT_CITIES.map(city=>{
-          const b20=bestRental(row.pol,city,row,0);
-          const b40=bestRental(row.pol,city,row,1);
-          const key=`${idx}-${city}`;
-          const cOpen=cityOpen===key;
+          const b20=bestRental(row.pol,city,row,0),b40=bestRental(row.pol,city,row,1);
+          const key=`${idx}-${city}`,cOpen=cityOpen===key;
           const carriers=cOpen?carrierRentals(row.pol,city,row):[];
           return <div key={city}>
-            {/* 도시 행 — best 합산 + 선사 + 렌탈비(작은글씨) */}
-            <button onClick={()=>setCityOpen(cOpen?null:key)}
-              className={`w-full flex items-center px-4 py-2.5 border-b border-gray-50 text-left transition-colors ${cOpen?"bg-purple-50":""}`}>
+            <button onClick={()=>setCityOpen(cOpen?null:key)} className={`w-full flex items-center px-4 py-2.5 border-b border-gray-50 text-left ${cOpen?"bg-purple-50":""}`}>
               <span className="flex-1 text-[12px] font-semibold text-gray-700">{city}</span>
               <div className="flex items-center gap-3 shrink-0">
-                <div className="text-right">
-                  <div className="text-[10px] text-gray-400">20'</div>
-                  <div className="text-sm font-bold text-gray-800">{b20.val!=null?`$${$n(b20.val)}`:"—"}</div>
-                  {b20.val!=null&&<div className="text-[9px] text-gray-400">렌탈 ${$n(row.r20[city])}</div>}
-                  {b20.cr&&<div className="mt-0.5"><Badge k={b20.cr}/></div>}
-                </div>
-                <div className="text-right">
-                  <div className="text-[10px] text-gray-400">40'</div>
-                  <div className="text-sm font-bold text-gray-800">{b40.val!=null?`$${$n(b40.val)}`:"—"}</div>
-                  {b40.val!=null&&<div className="text-[9px] text-gray-400">렌탈 ${$n(row.r40[city])}</div>}
-                  {b40.cr&&<div className="mt-0.5"><Badge k={b40.cr}/></div>}
-                </div>
+                <div className="text-right"><div className="text-[10px] text-gray-400">20'</div><div className="text-sm font-bold text-gray-800">{b20.val!=null?`$${$n(b20.val)}`:"—"}</div>{b20.val!=null&&<div className="text-[9px] text-gray-400">렌탈 ${$n(row.r20[city])}</div>}{b20.cr&&<Badge k={b20.cr}/>}</div>
+                <div className="text-right"><div className="text-[10px] text-gray-400">40'</div><div className="text-sm font-bold text-gray-800">{b40.val!=null?`$${$n(b40.val)}`:"—"}</div>{b40.val!=null&&<div className="text-[9px] text-gray-400">렌탈 ${$n(row.r40[city])}</div>}{b40.cr&&<Badge k={b40.cr}/>}</div>
                 <svg className={`w-3.5 h-3.5 text-gray-400 ${cOpen?"rotate-180":""}`} fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7"/></svg>
               </div>
             </button>
-            {/* ── 3단계: 선사별 금액 + 렌탈비(작은글씨) + S/C 팝업 ── */}
             {cOpen&&<div className="bg-purple-50/50 border-b border-purple-100">
-              {carriers.length===0
-                ?<div className="px-6 py-2 text-[11px] text-gray-400 italic">SOC 해상운임 데이터 없음</div>
+              {carriers.length===0?<div className="px-6 py-2 text-[11px] text-gray-400 italic">SOC 데이터 없음</div>
                 :carriers.map(c=><div key={c.k} className="flex items-center px-6 py-2.5 border-b border-purple-100/40 last:border-0">
-                  <div className="flex items-center gap-2 flex-1 min-w-0">
-                    <Badge k={c.k}/><span className="text-[11px] text-gray-500 truncate">{CARRIERS[c.k]}</span>
-                  </div>
-                  {/* 20' */}
+                  <div className="flex items-center gap-2 flex-1"><Badge k={c.k}/><span className="text-[11px] text-gray-500">{CARRIERS[c.k]}</span></div>
                   <div className="text-right mr-5" onClick={()=>c.t20!=null&&openSC(c.k,"soc20",row.pol+" → "+city)}>
                     <div className="text-[10px] text-gray-400">20'</div>
-                    <div className={`text-sm font-bold text-purple-700 ${c.t20!=null?"cursor-pointer underline decoration-dotted underline-offset-2":""}`}>
-                      {c.t20!=null?`$${$n(c.t20)}`:"—"}
-                    </div>
+                    <div className={`text-sm font-bold text-purple-700 ${c.t20!=null?"cursor-pointer underline decoration-dotted underline-offset-2":""}`}>{c.t20!=null?`$${$n(c.t20)}`:"—"}</div>
                     {c.t20!=null&&<div className="text-[9px] text-gray-400">렌탈 ${$n(row.r20[city])}</div>}
                   </div>
-                  {/* 40' */}
                   <div className="text-right" onClick={()=>c.t40!=null&&openSC(c.k,"soc40",row.pol+" → "+city)}>
                     <div className="text-[10px] text-gray-400">40'</div>
-                    <div className={`text-sm font-bold text-purple-700 ${c.t40!=null?"cursor-pointer underline decoration-dotted underline-offset-2":""}`}>
-                      {c.t40!=null?`$${$n(c.t40)}`:"—"}
-                    </div>
+                    <div className={`text-sm font-bold text-purple-700 ${c.t40!=null?"cursor-pointer underline decoration-dotted underline-offset-2":""}`}>{c.t40!=null?`$${$n(c.t40)}`:"—"}</div>
                     {c.t40!=null&&<div className="text-[9px] text-gray-400">렌탈 ${$n(row.r40[city])}</div>}
                   </div>
-                </div>)
-              }
+                </div>)}
             </div>}
           </div>;
         })}
@@ -349,59 +480,53 @@ export default function App(){
     </div>;
   };
 
-  // ─── Main ─────────────────────────────────────────────────────────────────
   return <div className="min-h-screen bg-gray-50" style={{fontFamily:"-apple-system,'Apple SD Gothic Neo',sans-serif"}}>
     <div className="sticky top-0 z-30 bg-white border-b border-gray-200" style={{boxShadow:"0 1px 3px rgba(0,0,0,.06)"}}>
       <div className="max-w-2xl mx-auto px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <svg width="32" height="32" viewBox="0 0 100 100">
-            <circle cx="50" cy="50" r="49" fill="#1D2B4F" stroke="#2C3E6B" strokeWidth="2"/>
-            <circle cx="50" cy="50" r="40" fill="#E8A817"/>
-            <polygon points="50,10 55,40 50,32 45,40" fill="#C0392B"/>
-            <polygon points="50,90 55,60 50,68 45,60" fill="#C0392B"/>
-            <polygon points="10,50 40,45 32,50 40,55" fill="#C0392B"/>
-            <polygon points="90,50 60,45 68,50 60,55" fill="#C0392B"/>
-            <polygon points="22,22 40,40 34,36 36,34" fill="#C0392B"/>
-            <polygon points="78,78 60,60 66,64 64,66" fill="#C0392B"/>
-            <polygon points="78,22 60,40 64,34 66,36" fill="#C0392B"/>
-            <polygon points="22,78 40,60 36,66 34,64" fill="#C0392B"/>
-            <circle cx="50" cy="50" r="7" fill="white"/>
-            <circle cx="50" cy="50" r="3.5" fill="#C0392B"/>
+            <circle cx="50" cy="50" r="49" fill="#1D2B4F" stroke="#2C3E6B" strokeWidth="2"/><circle cx="50" cy="50" r="40" fill="#E8A817"/>
+            <polygon points="50,10 55,40 50,32 45,40" fill="#C0392B"/><polygon points="50,90 55,60 50,68 45,60" fill="#C0392B"/>
+            <polygon points="10,50 40,45 32,50 40,55" fill="#C0392B"/><polygon points="90,50 60,45 68,50 60,55" fill="#C0392B"/>
+            <polygon points="22,22 40,40 34,36 36,34" fill="#C0392B"/><polygon points="78,78 60,60 66,64 64,66" fill="#C0392B"/>
+            <polygon points="78,22 60,40 64,34 66,36" fill="#C0392B"/><polygon points="22,78 40,60 36,66 34,64" fill="#C0392B"/>
+            <circle cx="50" cy="50" r="7" fill="white"/><circle cx="50" cy="50" r="3.5" fill="#C0392B"/>
           </svg>
           <div><h1 className="text-sm font-bold text-gray-900 leading-none">YSL Agency</h1>
-            <p className="text-[10px] text-gray-400 mt-0.5">Freight Rate Portal · June 2026</p></div>
+            <p className="text-[10px] text-gray-400 mt-0.5">{isAdmin?"Admin Mode":client?.company_name||"Freight Portal"}</p></div>
         </div>
-        <button onClick={()=>{if(isAdmin){setIsAdmin(false);}else{setPinModal(true);setPinInput("");}}}
-          className={`text-[11px] font-medium px-3 py-1.5 rounded-full ${isAdmin?"bg-red-50 text-red-600 border border-red-200":"bg-gray-100 text-gray-500 border border-gray-200"}`}>
-          {isAdmin?"🔓 Admin":"🔒"}</button>
+        <div className="flex items-center gap-2">
+          {isAdmin&&<button onClick={()=>{setShowClients(true);loadClients();}} className="text-[11px] font-medium px-3 py-1.5 rounded-full bg-blue-50 text-blue-600 border border-blue-200">👥 고객사</button>}
+          <button onClick={()=>{setMode("login");setClient(null);setLoginEmail("");setLoginPw("");}}
+            className="text-[11px] font-medium px-3 py-1.5 rounded-full bg-gray-100 text-gray-500 border border-gray-200">
+            {isAdmin?"🔓 로그아웃":"로그아웃"}
+          </button>
+        </div>
       </div>
     </div>
 
-    {isAdmin&&<div className="max-w-2xl mx-auto px-4 pt-3">
-      <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
-        <div className="text-[10px] font-bold text-amber-700 mb-2">MARGIN (USD)</div>
-        <div className="grid grid-cols-4 gap-2">{Object.keys(margins).map(t=><div key={t}>
-          <label className="text-[10px] text-amber-600">{TYPE_LABELS[t]}</label>
-          <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
-            className="w-full mt-0.5 px-2 py-1.5 text-sm font-bold text-amber-800 bg-white border border-amber-300 rounded focus:outline-none"/>
-        </div>)}</div>
-      </div>
-    </div>}
+    {isAdmin&&<div className="max-w-2xl mx-auto px-4 pt-3"><div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
+      <div className="text-[10px] font-bold text-amber-700 mb-2">MARGIN (USD) — 관리자 기본값</div>
+      <div className="grid grid-cols-4 gap-2">{Object.keys(margins).map(t=><div key={t}>
+        <label className="text-[10px] text-amber-600">{TYPE_LABELS[t]}</label>
+        <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
+          className="w-full mt-0.5 px-2 py-1.5 text-sm font-bold text-amber-800 bg-white border border-amber-300 rounded focus:outline-none"/>
+      </div>)}</div>
+    </div></div>}
 
     <div className="max-w-2xl mx-auto px-4 pt-3 pb-2">
       <input placeholder="Search POL..." value={search} onChange={e=>setSearch(e.target.value)}
         className="w-full px-4 py-2.5 text-sm bg-white border border-gray-200 rounded-lg focus:outline-none placeholder-gray-300"/>
       {tab!=="rental"&&<div className="flex gap-1.5 mt-2 overflow-x-auto pb-1" style={{scrollbarWidth:"none"}}>
         {["ALL",...areas].map(a=><button key={a} onClick={()=>setAreaF(a)}
-          className={`text-[11px] font-medium px-3 py-1.5 rounded-full whitespace-nowrap ${a===areaF?"bg-gray-900 text-white":"bg-white text-gray-500 border border-gray-200"}`}>
-          {a==="ALL"?"All":a}</button>)}
+          className={`text-[11px] font-medium px-3 py-1.5 rounded-full whitespace-nowrap ${a===areaF?"bg-gray-900 text-white":"bg-white text-gray-500 border border-gray-200"}`}>{a==="ALL"?"All":a}</button>)}
       </div>}
     </div>
 
     <div className="max-w-2xl mx-auto px-4">
       <div className="flex border-b border-gray-200">
         {[["ocean","🚢 Ocean\nFreight"],["dropoff","🚛 Ocean+\nDrop off"]].map(([k,l])=>
-          <button key={k} onClick={()=>{setTab(k);setExpanded(null);setCityOpen(null);}}
+          <button key={k} onClick={()=>{setTab(k);setExpanded(null);}}
             className={`flex-1 text-center py-2 text-[11px] font-semibold border-b-2 leading-tight whitespace-pre-line ${tab===k?"border-gray-900 text-gray-900":"border-transparent text-gray-400"}`}>{l}</button>
         )}
         <button onClick={()=>{setTab("rental");setExpanded(null);setCityOpen(null);}}
@@ -415,7 +540,7 @@ export default function App(){
               <line x1="15" y1="4" x2="15" y2="20" stroke="currentColor" strokeWidth="1"/>
               <line x1="22" y1="4" x2="22" y2="20" stroke="currentColor" strokeWidth="1"/>
               <line x1="29" y1="4" x2="29" y2="20" stroke="currentColor" strokeWidth="1"/>
-              <rect x="1" y="4" width="34" height="3" rx="0" fill="currentColor" opacity="0.3"/>
+              <rect x="1" y="4" width="34" height="3" fill="currentColor" opacity="0.3"/>
               <circle cx="4" cy="21" r="1.5" fill="currentColor"/>
               <circle cx="32" cy="21" r="1.5" fill="currentColor"/>
             </svg>
@@ -451,26 +576,9 @@ export default function App(){
         <div className="text-xs text-gray-500 mb-3">{sc.route}</div>
         <div className="flex items-center gap-2 bg-gray-50 border border-gray-200 rounded-lg p-3">
           <span className="flex-1 text-lg font-mono font-bold text-gray-800 tracking-wide">{sc.sc}</span>
-          <button onClick={copySC} className={`px-4 py-2 rounded-lg text-xs font-semibold ${sc.copied?"bg-green-500 text-white":"bg-gray-900 text-white"}`}>
-            {sc.copied?"✓ Copied":"Copy"}</button>
+          <button onClick={copySC} className={`px-4 py-2 rounded-lg text-xs font-semibold ${sc.copied?"bg-green-500 text-white":"bg-gray-900 text-white"}`}>{sc.copied?"✓ Copied":"Copy"}</button>
         </div>
         <p className="text-[10px] text-gray-400 mt-3">선적지 에이전트에게 해당 S/C Number를 전달해 주세요.</p>
-      </div>
-    </div>}
-
-    {pinModal&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
-      <div className="bg-white rounded-xl p-6 w-72 shadow-2xl">
-        <h3 className="text-sm font-bold text-gray-800 mb-1">Admin Access</h3>
-        <p className="text-[11px] text-gray-400 mb-4">PIN 입력</p>
-        <input type="password" value={pinInput} onChange={e=>setPinInput(e.target.value)}
-          onKeyDown={e=>{ if(e.key==="Enter"){ if(pinInput===PIN){setIsAdmin(true);setPinModal(false);}else{alert("PIN 오류");setPinInput("");} }}}
-          autoFocus placeholder="PIN"
-          className="w-full px-4 py-2.5 text-center text-lg font-bold tracking-[0.5em] border border-gray-200 rounded-lg focus:outline-none"/>
-        <div className="flex gap-2 mt-4">
-          <button onClick={()=>setPinModal(false)} className="flex-1 py-2 text-xs font-medium text-gray-400 bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={()=>{ if(pinInput===PIN){setIsAdmin(true);setPinModal(false);}else{alert("PIN 오류");setPinInput("");} }}
-            className="flex-1 py-2 text-xs font-medium text-white bg-gray-900 rounded-lg">Confirm</button>
-        </div>
       </div>
     </div>}
   </div>;
