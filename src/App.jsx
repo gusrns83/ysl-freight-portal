@@ -121,6 +121,54 @@ const Bg = ({k}) => {
   return <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,...styles[k]}}>{k}</span>;
 };
 
+const TabIconOcean = ({color}) => (
+  <svg width="22" height="20" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+    <path d="M2 19h20"/>
+    <path d="M4 19l1.2-4h13.6L20 19" fill={color} fillOpacity="0.08"/>
+    <rect x="5" y="11" width="3.2" height="3.2" fill={color} fillOpacity="0.22" stroke={color}/>
+    <rect x="9.2" y="11" width="3.2" height="3.2" fill={color} fillOpacity="0.22" stroke={color}/>
+    <rect x="13.4" y="11" width="3.2" height="3.2" fill={color} fillOpacity="0.22" stroke={color}/>
+    <rect x="7" y="7.5" width="3.2" height="2.8" fill={color} fillOpacity="0.14" stroke={color}/>
+    <rect x="11.2" y="7.5" width="3.2" height="2.8" fill={color} fillOpacity="0.14" stroke={color}/>
+    <path d="M17.5 8.5h2.5v6.5h-2.5"/><path d="M18.2 7.5h1.2v1.2"/>
+  </svg>
+);
+const TabIconDropoff = ({color}) => (
+  <svg width="28" height="20" viewBox="0 0 28 24" fill="none" aria-hidden>
+    <g stroke={color} strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M1 18h12"/>
+      <path d="M2.5 18l.8-3.2h8.4l.8 3.2" fill={color} fillOpacity="0.08"/>
+      <rect x="3.2" y="11.2" width="2.2" height="2.2" fill={color} fillOpacity="0.22"/>
+      <rect x="6" y="11.2" width="2.2" height="2.2" fill={color} fillOpacity="0.22"/>
+      <rect x="8.8" y="11.2" width="2.2" height="2.2" fill={color} fillOpacity="0.22"/>
+      <path d="M10.8 9h1.8v5.2h-1.8"/>
+    </g>
+    <g>
+      <rect x="15.5" y="11" width="11" height="8.5" rx="0.4" fill="#DC2626"/>
+      <path d="M15.5 11h11v2H15.5" fill="#B91C1C"/>
+      <path d="M15.5 17.2h11v2.3H15.5" fill="#B91C1C"/>
+      <rect x="19.2" y="6.2" width="3.6" height="4.8" fill="#DC2626"/>
+      <path d="M18.8 6.2h4.4l-.6 1.2h-3.2z" fill="#EAB308"/>
+      <circle cx="21" cy="8.2" r="0.9" fill="#FEF08A" stroke="#CA8A04" strokeWidth="0.5"/>
+      <path d="M16.2 13.2h1.2v4.8h-1.2M24.1 13.2h1.2v4.8h-1.2" fill="#FECACA" opacity="0.5"/>
+    </g>
+  </svg>
+);
+const TabIconRental = ({color}) => (
+  <svg width="20" height="13" viewBox="0 0 36 22" fill="none" aria-hidden>
+    <rect x="1" y="4" width="34" height="16" rx="1" fill={color} opacity="0.12" stroke={color} strokeWidth="1.5"/>
+    <line x1="1" y1="4" x2="1" y2="20" stroke={color} strokeWidth="2"/><line x1="35" y1="4" x2="35" y2="20" stroke={color} strokeWidth="2"/>
+    <line x1="8" y1="4" x2="8" y2="20" stroke={color} strokeWidth="1"/><line x1="15" y1="4" x2="15" y2="20" stroke={color} strokeWidth="1"/>
+    <line x1="22" y1="4" x2="22" y2="20" stroke={color} strokeWidth="1"/><line x1="29" y1="4" x2="29" y2="20" stroke={color} strokeWidth="1"/>
+    <rect x="1" y="4" width="34" height="3" fill={color} opacity="0.28"/><circle cx="4" cy="21" r="1.5" fill={color}/><circle cx="32" cy="21" r="1.5" fill={color}/>
+  </svg>
+);
+const MAIN_TABS = [
+  {id:"ocean",label:"Ocean Freight",Icon:TabIconOcean},
+  {id:"dropoff",label:"Ocean+Drop off",Icon:TabIconDropoff},
+  {id:"rental",label:"Rental+Ocean",Icon:TabIconRental},
+];
+
 export default function App() {
   const fData = useMemo(() => FR.map(r => ({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})), []);
   const rData = useMemo(() => RN.map(r => { const r20={},r40={}; RC.forEach((c,i)=>{r20[c]=r[1+i];r40[c]=r[13+i];}); return {pol:r[0],r20,r40}; }), []);
@@ -762,24 +810,16 @@ export default function App() {
       {/* TABS */}
       <div style={{maxWidth:640,margin:"0 auto",padding:"0 16px"}}>
         <div style={{display:"flex",borderBottom:"1px solid #e5e7eb"}}>
-          {[["ocean","Ocean Freight"],["dropoff","Ocean+Drop off"]].map(([k,l])=>(
-            <button key={k} onClick={()=>{setTab(k);setExp(null);}} style={{flex:1,textAlign:"center",padding:"10px 4px",fontSize:11,fontWeight:600,background:"none",border:"none",borderBottom:`2px solid ${tab===k?"#111":"transparent"}`,color:tab===k?"#111":"#9ca3af",cursor:"pointer"}}>{l}</button>
-          ))}
-          <button onClick={()=>{setTab("rental");setExp(null);setCityOpen(null);}} style={{flex:1,textAlign:"center",padding:"10px 4px",fontSize:11,fontWeight:600,background:"none",border:"none",borderBottom:`2px solid ${tab==="rental"?"#111":"transparent"}`,color:tab==="rental"?"#111":"#9ca3af",cursor:"pointer"}}>
-            <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-              <svg width="18" height="11" viewBox="0 0 36 22" fill="none">
-                <rect x="1" y="4" width="34" height="16" rx="1" fill="#3b82f6" opacity="0.15" stroke="#3b82f6" strokeWidth="1.5"/>
-                <line x1="1" y1="4" x2="1" y2="20" stroke="#3b82f6" strokeWidth="2"/>
-                <line x1="35" y1="4" x2="35" y2="20" stroke="#3b82f6" strokeWidth="2"/>
-                <line x1="8" y1="4" x2="8" y2="20" stroke="#3b82f6" strokeWidth="1"/>
-                <line x1="15" y1="4" x2="15" y2="20" stroke="#3b82f6" strokeWidth="1"/>
-                <line x1="22" y1="4" x2="22" y2="20" stroke="#3b82f6" strokeWidth="1"/>
-                <line x1="29" y1="4" x2="29" y2="20" stroke="#3b82f6" strokeWidth="1"/>
-                <rect x="1" y="4" width="34" height="3" fill="#3b82f6" opacity="0.3"/>
-              </svg>
-              <span>Rental+Ocean</span>
-            </div>
-          </button>
+          {MAIN_TABS.map(({id,label,Icon})=>{
+            const active=tab===id;
+            const color=active?"#111":"#9ca3af";
+            return (
+              <button key={id} onClick={()=>{setTab(id);setExp(null);setCityOpen(null);}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"10px 4px",fontSize:11,fontWeight:600,background:"none",border:"none",borderBottom:`2px solid ${active?"#111":"transparent"}`,color,cursor:"pointer"}}>
+                <Icon color={color}/>
+                <span>{label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
