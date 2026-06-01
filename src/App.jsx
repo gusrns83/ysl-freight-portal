@@ -13,7 +13,7 @@ const api = async (path, opts = {}) => {
   return t ? JSON.parse(t) : [];
 };
 
-const AREAS = { KOREA:"KOREA", NC:"N.CHINA", SC:"S.CHINA", JP:"JAPAN", VN:"VIETNAM", TW:"TAIWAN", TH:"THAILAND", ID:"INDONESIA", OT:"OTHERS" };
+const RC = ["Moscow","Chelyabinsk","Novosibirsk","Irkutsk","Krasnoyarsk","Ekaterinburg","Vladivostok","St.Petersburg","Samara","Tolyatti","Kazan","Minsk"];
 const FR = [
   ["KOREA","BUSAN",950,1300,800,930,1000,1400,850,1150,1100,1650,1000,1500],
   ["KOREA","INCHEON",1250,1650,null,null,1150,1600,1000,1350,null,null,null,null],
@@ -64,7 +64,6 @@ const FR = [
   ["OTHERS","INDIA (CHENNAI)",2100,2750,2000,2550,null,null,null,null,null,null,null,null],
   ["OTHERS","JEBEL ALI",2600,3750,2500,3550,null,null,null,null,null,null,null,null],
 ];
-const RC = ["Moscow","Chelyabinsk","Novosibirsk","Irkutsk","Krasnoyarsk","Ekaterinburg","Vladivostok","St.Petersburg","Samara","Tolyatti","Kazan","Minsk"];
 const RN = [
   ["Shanghai",680,380,280,80,80,380,80,380,380,380,280,480,1075,975,875,675,675,825,775,775,975,975,875,925],
   ["Ningbo",680,380,280,80,80,380,80,380,380,380,280,480,1075,975,875,675,675,825,775,775,975,975,875,925],
@@ -102,8 +101,25 @@ const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin
 const DO = {mow:{SNK:[1100,1400],DY:[800,1400],CK:[950,1300]},spb:{SNK:[700,1000],DY:null,CK:null},nsb:{SNK:[700,1000],DY:[400,600],CK:[400,600]},ekb:{SNK:null,DY:null,CK:[550,800]}};
 const CRS = ["SNK","DY","CK"];
 const CN = {SNK:"Janggeum",DY:"Dongyoung",CK:"Cheonkyung"};
+const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
 const n = v => v != null ? v.toLocaleString() : "—";
-const Bg = ({k}) => { if(!k) return null; const c = {SNK:"background:#dbeafe;color:#1d4ed8",DY:"background:#d1fae5;color:#065f46",CK:"background:#ffedd5;color:#9a3412"}; return <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,...Object.fromEntries(c[k].split(";").map(s=>s.split(":").map(x=>x.trim())).map(([k,v])=>[k.replace(/-([a-z])/g,(_,l)=>l.toUpperCase()),v]))}}>{k}</span>; };
+
+const Logo = ({size=32}) => (
+  <svg width={size} height={size} viewBox="0 0 100 100">
+    <circle cx="50" cy="50" r="49" fill="#1D2B4F"/><circle cx="50" cy="50" r="40" fill="#E8A817"/>
+    <polygon points="50,10 55,40 50,32 45,40" fill="#C0392B"/><polygon points="50,90 55,60 50,68 45,60" fill="#C0392B"/>
+    <polygon points="10,50 40,45 32,50 40,55" fill="#C0392B"/><polygon points="90,50 60,45 68,50 60,55" fill="#C0392B"/>
+    <polygon points="22,22 40,40 34,36 36,34" fill="#C0392B"/><polygon points="78,78 60,60 66,64 64,66" fill="#C0392B"/>
+    <polygon points="78,22 60,40 64,34 66,36" fill="#C0392B"/><polygon points="22,78 40,60 36,66 34,64" fill="#C0392B"/>
+    <circle cx="50" cy="50" r="7" fill="white"/><circle cx="50" cy="50" r="3.5" fill="#C0392B"/>
+  </svg>
+);
+
+const Bg = ({k}) => {
+  if (!k) return null;
+  const styles = {SNK:{background:"#dbeafe",color:"#1d4ed8"},DY:{background:"#d1fae5",color:"#065f46"},CK:{background:"#ffedd5",color:"#9a3412"}};
+  return <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,...styles[k]}}>{k}</span>;
+};
 
 export default function App() {
   const fData = useMemo(() => FR.map(r => ({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})), []);
@@ -111,15 +127,21 @@ export default function App() {
   const areas = useMemo(() => [...new Set(fData.map(d=>d.area))], [fData]);
   const fMap = useMemo(() => Object.fromEntries(fData.map(d=>[d.pol,d])), [fData]);
 
-  const [mode, setMode] = useState("login");
+  // Auth
+  const [mode, setMode] = useState("guest"); // guest | client | admin
   const [client, setClient] = useState(null);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [loginTab, setLoginTab] = useState("client"); // client | admin
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
-  const [err, setErr] = useState("");
-  const [loading, setLoading] = useState(false);
   const [pin, setPin] = useState("");
-  const [pinModal, setPinModal] = useState(false);
+  const [loginErr, setLoginErr] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+
+  // Default margins (used for guest + admin)
   const [margins, setMargins] = useState({coc20:80,coc40:100,soc20:80,soc40:100});
+
+  // App state
   const [search, setSearch] = useState("");
   const [areaF, setAreaF] = useState("ALL");
   const [tab, setTab] = useState("ocean");
@@ -127,39 +149,45 @@ export default function App() {
   const [exp, setExp] = useState(null);
   const [cityOpen, setCityOpen] = useState(null);
   const [sc, setSc] = useState(null);
-  const [clients, setClients] = useState([]);
+
+  // Client mgmt
   const [showMgr, setShowMgr] = useState(false);
-  const [newC, setNewC] = useState({company_name:"",email:"",password_hash:"",margin_coc20:80,margin_coc40:100,margin_soc20:80,margin_soc40:100,notes:""});
+  const [clients, setClients] = useState([]);
   const [addForm, setAddForm] = useState(false);
   const [editC, setEditC] = useState(null);
+  const [newC, setNewC] = useState({company_name:"",email:"",password_hash:"",margin_coc20:80,margin_coc40:100,margin_soc20:80,margin_soc40:100,notes:""});
 
   const isAdmin = mode === "admin";
+  const isClient = mode === "client";
+  const isGuest = mode === "guest";
 
-  const login = async () => {
-    setLoading(true); setErr("");
+  const doLogin = async () => {
+    setLoginLoading(true); setLoginErr("");
     try {
       const d = await api(`clients?email=eq.${encodeURIComponent(email)}&password_hash=eq.${encodeURIComponent(pw)}&is_active=eq.true&select=*`);
-      if (!d.length) { setErr("Email or password incorrect"); }
+      if (!d.length) { setLoginErr("Email or password incorrect"); }
       else {
         const c = d[0];
         setClient(c);
         setMargins({coc20:c.margin_coc20,coc40:c.margin_coc40,soc20:c.margin_soc20,soc40:c.margin_soc40});
         setMode("client");
+        setShowLoginModal(false);
+        setEmail(""); setPw("");
       }
-    } catch(e) { setErr("Server error. Please try again."); }
-    setLoading(false);
+    } catch(e) { setLoginErr("Server error"); }
+    setLoginLoading(false);
   };
 
-  const adminLogin = () => {
-    if (pin === ADMIN_PIN) { setMode("admin"); setPinModal(false); setPin(""); }
-    else { alert("Wrong PIN"); setPin(""); }
+  const doAdminLogin = () => {
+    if (pin === ADMIN_PIN) { setMode("admin"); setShowLoginModal(false); setPin(""); setMargins({coc20:80,coc40:100,soc20:80,soc40:100}); }
+    else { setLoginErr("Wrong PIN"); }
   };
 
-  const logout = () => { setMode("login"); setClient(null); setEmail(""); setPw(""); setMargins({coc20:80,coc40:100,soc20:80,soc40:100}); };
+  const logout = () => { setMode("guest"); setClient(null); setMargins({coc20:80,coc40:100,soc20:80,soc40:100}); };
 
   const loadClients = async () => { const d = await api("clients?select=*&order=created_at.desc"); setClients(d); };
   const saveClient = async () => { await api("clients",{method:"POST",body:JSON.stringify(newC)}); setAddForm(false); setNewC({company_name:"",email:"",password_hash:"",margin_coc20:80,margin_coc40:100,margin_soc20:80,margin_soc40:100,notes:""}); loadClients(); };
-  const updateClient = async (id,data) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify(data)}); setEditC(null); loadClients(); };
+  const updateMargins = async (id,data) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify(data)}); setEditC(null); loadClients(); };
   const toggleClient = async (id,cur) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify({is_active:!cur})}); loadClients(); };
 
   const bNet = (row,t) => { let b=null,cr=null; CRS.forEach(k=>{const v=row.rates[k][t]; if(v!=null&&(b===null||v<b)){b=v;cr=k;}}); return {val:b,cr}; };
@@ -172,63 +200,15 @@ export default function App() {
   const filt = useMemo(()=>{ let d=fData; if(areaF!=="ALL")d=d.filter(r=>r.area===areaF); if(search)d=d.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())); return d; },[fData,areaF,search]);
   const rFilt = useMemo(()=>search?rData.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())):rData,[rData,search]);
 
-  const s = { ff:"-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif" };
+  const ff = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
 
-  if (mode === "login") return (
-    <div style={{minHeight:"100vh",background:"#f8fafc",display:"flex",alignItems:"center",justifyContent:"center",padding:"0 16px",fontFamily:s.ff}}>
-      <div style={{width:"100%",maxWidth:360}}>
-        <div style={{display:"flex",flexDirection:"column",alignItems:"center",marginBottom:32}}>
-          <svg width="64" height="64" viewBox="0 0 100 100" style={{marginBottom:12}}>
-            <circle cx="50" cy="50" r="49" fill="#1D2B4F"/><circle cx="50" cy="50" r="40" fill="#E8A817"/>
-            <polygon points="50,10 55,40 50,32 45,40" fill="#C0392B"/><polygon points="50,90 55,60 50,68 45,60" fill="#C0392B"/>
-            <polygon points="10,50 40,45 32,50 40,55" fill="#C0392B"/><polygon points="90,50 60,45 68,50 60,55" fill="#C0392B"/>
-            <polygon points="22,22 40,40 34,36 36,34" fill="#C0392B"/><polygon points="78,78 60,60 66,64 64,66" fill="#C0392B"/>
-            <polygon points="78,22 60,40 64,34 66,36" fill="#C0392B"/><polygon points="22,78 40,60 36,66 34,64" fill="#C0392B"/>
-            <circle cx="50" cy="50" r="7" fill="white"/><circle cx="50" cy="50" r="3.5" fill="#C0392B"/>
-          </svg>
-          <div style={{fontSize:20,fontWeight:700,color:"#111"}}>YSL Agency</div>
-          <div style={{fontSize:13,color:"#9ca3af",marginTop:4}}>Freight Rate Portal</div>
-        </div>
-        <div style={{background:"#fff",borderRadius:16,padding:24,border:"1px solid #e5e7eb"}}>
-          <div style={{fontSize:13,fontWeight:700,color:"#374151",marginBottom:16}}>Client Login</div>
-          <input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}
-            style={{width:"100%",padding:"12px 16px",fontSize:14,border:"1px solid #d1d5db",borderRadius:12,marginBottom:12,boxSizing:"border-box",outline:"none"}}/>
-          <input type="password" placeholder="Password" value={pw} onChange={e=>setPw(e.target.value)}
-            onKeyDown={e=>e.key==="Enter"&&login()}
-            style={{width:"100%",padding:"12px 16px",fontSize:14,border:"1px solid #d1d5db",borderRadius:12,marginBottom:16,boxSizing:"border-box",outline:"none"}}/>
-          {err && <div style={{fontSize:12,color:"#ef4444",marginBottom:12}}>{err}</div>}
-          <button onClick={login} disabled={loading}
-            style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#111827",border:"none",borderRadius:12,cursor:"pointer",opacity:loading?0.6:1}}>
-            {loading?"Checking...":"Login"}
-          </button>
-          <div style={{marginTop:16,paddingTop:16,borderTop:"1px solid #f3f4f6",textAlign:"center"}}>
-            <button onClick={()=>setPinModal(true)} style={{fontSize:12,color:"#9ca3af",background:"none",border:"none",cursor:"pointer"}}>Admin Access</button>
-          </div>
-        </div>
-        <div style={{textAlign:"center",fontSize:11,color:"#d1d5db",marginTop:24}}>YSL Agency Far East · June 2026</div>
-      </div>
-      {pinModal && (
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:50}}>
-          <div style={{background:"#fff",borderRadius:16,padding:24,width:280,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}}>
-            <div style={{fontSize:14,fontWeight:700,marginBottom:16}}>Admin PIN</div>
-            <input type="password" value={pin} onChange={e=>setPin(e.target.value)} onKeyDown={e=>e.key==="Enter"&&adminLogin()} autoFocus
-              style={{width:"100%",padding:"10px 16px",fontSize:20,fontWeight:700,letterSpacing:8,textAlign:"center",border:"1px solid #d1d5db",borderRadius:10,boxSizing:"border-box",outline:"none"}}/>
-            <div style={{display:"flex",gap:8,marginTop:16}}>
-              <button onClick={()=>setPinModal(false)} style={{flex:1,padding:"8px",fontSize:12,color:"#6b7280",background:"#f3f4f6",border:"none",borderRadius:8,cursor:"pointer"}}>Cancel</button>
-              <button onClick={adminLogin} style={{flex:1,padding:"8px",fontSize:12,color:"#fff",background:"#111827",border:"none",borderRadius:8,cursor:"pointer"}}>Confirm</button>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-
+  // ── CLIENT MANAGEMENT ──
   if (showMgr && isAdmin) return (
-    <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:s.ff}}>
+    <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
       <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
-        <button onClick={()=>setShowMgr(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>Back</button>
+        <button onClick={()=>setShowMgr(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
         <div style={{fontSize:14,fontWeight:700}}>Client Management</div>
-        <button onClick={()=>{setAddForm(true);loadClients();}} style={{fontSize:13,color:"#2563eb",background:"none",border:"none",cursor:"pointer",fontWeight:600}}>+ Add</button>
+        <button onClick={()=>{setAddForm(!addForm); if(!clients.length)loadClients();}} style={{fontSize:13,color:"#2563eb",fontWeight:600,background:"none",border:"none",cursor:"pointer"}}>+ Add</button>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 80px"}}>
         {addForm && (
@@ -240,11 +220,9 @@ export default function App() {
             ))}
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:12}}>
               {["coc20","coc40","soc20","soc40"].map(t=>(
-                <div key={t}>
-                  <div style={{fontSize:10,color:"#6b7280",marginBottom:2}}>{t.toUpperCase()}</div>
+                <div key={t}><div style={{fontSize:10,color:"#6b7280",marginBottom:2}}>{t.toUpperCase()}</div>
                   <input type="number" value={newC[`margin_${t}`]} onChange={e=>setNewC(p=>({...p,[`margin_${t}`]:parseInt(e.target.value)||0}))}
-                    style={{width:"100%",padding:"6px 8px",fontSize:13,border:"1px solid #d1d5db",borderRadius:6,boxSizing:"border-box"}}/>
-                </div>
+                    style={{width:"100%",padding:"6px 8px",fontSize:13,border:"1px solid #d1d5db",borderRadius:6,boxSizing:"border-box"}}/></div>
               ))}
             </div>
             <div style={{display:"flex",gap:8}}>
@@ -253,23 +231,21 @@ export default function App() {
             </div>
           </div>
         )}
-        <button onClick={loadClients} style={{width:"100%",padding:"8px",fontSize:12,color:"#6b7280",background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,cursor:"pointer",marginBottom:12}}>Refresh List</button>
+        <button onClick={loadClients} style={{width:"100%",padding:"8px",fontSize:12,color:"#6b7280",background:"#fff",border:"1px solid #e5e7eb",borderRadius:8,cursor:"pointer",marginBottom:12}}>Refresh</button>
         {clients.map(c=>(
           <div key={c.id} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:16,marginBottom:12}}>
             {editC?.id===c.id ? (
               <div>
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:12}}>
                   {["coc20","coc40","soc20","soc40"].map(t=>(
-                    <div key={t}>
-                      <div style={{fontSize:10,color:"#6b7280",marginBottom:2}}>{t.toUpperCase()}</div>
+                    <div key={t}><div style={{fontSize:10,color:"#6b7280",marginBottom:2}}>{t.toUpperCase()}</div>
                       <input type="number" value={editC[`margin_${t}`]} onChange={e=>setEditC(p=>({...p,[`margin_${t}`]:parseInt(e.target.value)||0}))}
-                        style={{width:"100%",padding:"6px 8px",fontSize:13,border:"1px solid #d1d5db",borderRadius:6,boxSizing:"border-box"}}/>
-                    </div>
+                        style={{width:"100%",padding:"6px 8px",fontSize:13,border:"1px solid #d1d5db",borderRadius:6,boxSizing:"border-box"}}/></div>
                   ))}
                 </div>
                 <div style={{display:"flex",gap:8}}>
                   <button onClick={()=>setEditC(null)} style={{flex:1,padding:"6px",fontSize:12,color:"#6b7280",background:"#f3f4f6",border:"none",borderRadius:6,cursor:"pointer"}}>Cancel</button>
-                  <button onClick={()=>updateClient(c.id,{margin_coc20:editC.margin_coc20,margin_coc40:editC.margin_coc40,margin_soc20:editC.margin_soc20,margin_soc40:editC.margin_soc40})}
+                  <button onClick={()=>updateMargins(c.id,{margin_coc20:editC.margin_coc20,margin_coc40:editC.margin_coc40,margin_soc20:editC.margin_soc20,margin_soc40:editC.margin_soc40})}
                     style={{flex:1,padding:"6px",fontSize:12,color:"#fff",background:"#2563eb",border:"none",borderRadius:6,cursor:"pointer"}}>Save</button>
                 </div>
               </div>
@@ -281,8 +257,8 @@ export default function App() {
                     <span style={{marginLeft:8,fontSize:10,fontWeight:700,padding:"2px 8px",borderRadius:20,background:c.is_active?"#dcfce7":"#fee2e2",color:c.is_active?"#166534":"#991b1b"}}>{c.is_active?"Active":"Inactive"}</span>
                   </div>
                   <div style={{display:"flex",gap:6}}>
-                    <button onClick={()=>setEditC({...c})} style={{fontSize:11,color:"#2563eb",background:"none",border:"1px solid #bfdbfe",borderRadius:6,padding:"3px 10px",cursor:"pointer"}}>Edit</button>
-                    <button onClick={()=>toggleClient(c.id,c.is_active)} style={{fontSize:11,color:c.is_active?"#dc2626":"#16a34a",background:"none",border:`1px solid ${c.is_active?"#fecaca":"#bbf7d0"}`,borderRadius:6,padding:"3px 10px",cursor:"pointer"}}>{c.is_active?"Deactivate":"Activate"}</button>
+                    <button onClick={()=>setEditC({...c})} style={{fontSize:11,color:"#2563eb",border:"1px solid #bfdbfe",borderRadius:6,padding:"3px 10px",background:"none",cursor:"pointer"}}>Edit</button>
+                    <button onClick={()=>toggleClient(c.id,c.is_active)} style={{fontSize:11,color:c.is_active?"#dc2626":"#16a34a",border:`1px solid ${c.is_active?"#fecaca":"#bbf7d0"}`,borderRadius:6,padding:"3px 10px",background:"none",cursor:"pointer"}}>{c.is_active?"Deactivate":"Activate"}</button>
                   </div>
                 </div>
                 <div style={{fontSize:12,color:"#9ca3af",marginBottom:6}}>{c.email}</div>
@@ -297,7 +273,8 @@ export default function App() {
     </div>
   );
 
-  const Card = ({row,idx}) => {
+  // ── CARDS ──
+  const OCard = ({row,idx}) => {
     const types = ctype==="coc"?["coc20","coc40"]:["soc20","soc40"];
     const open = exp===`o${idx}`;
     return (
@@ -308,13 +285,13 @@ export default function App() {
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-            {types.map(t=>{ const b=bNet(row,t); const v=b.val!=null?b.val+margins[t]:null; const d=isAdmin?b.val:v;
+            {types.map(t=>{ const b=bNet(row,t); const sell=b.val!=null?b.val+margins[t]:null; const show=isAdmin?b.val:sell;
               return <div key={t} style={{textAlign:"right"}}>
                 <div style={{fontSize:10,color:"#9ca3af"}}>{t.includes("20")?"20'":"40'"}</div>
-                <div style={{fontSize:14,fontWeight:700,color:isAdmin?"#111":"#1d4ed8"}}>{d!=null?`$${n(d)}`:"—"}</div>
+                <div style={{fontSize:14,fontWeight:700,color:isAdmin?"#374151":"#1d4ed8"}}>{show!=null?`$${n(show)}`:"—"}</div>
                 <Bg k={b.cr}/>
               </div>; })}
-            <span style={{fontSize:16,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",transition:"transform 0.2s"}}>&#8964;</span>
+            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
           </div>
         </button>
         {open && (
@@ -328,9 +305,9 @@ export default function App() {
               <tbody>
                 {CRS.map(k=>{ const t20=ctype==="coc"?"coc20":"soc20",t40=ctype==="coc"?"coc40":"soc40"; const v20=row.rates[k][t20],v40=row.rates[k][t40]; if(!v20&&!v40)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
-                    <td style={{padding:"8px 0"}}><Bg k={k}/> <span style={{fontSize:11,color:"#6b7280",marginLeft:4}}>{CN[k]}</span></td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default",textDecoration:v20?"underline dotted":"none"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{isAdmin?n(v20):(v20?n(v20+margins[t20]):"—")}</td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default",textDecoration:v40?"underline dotted":"none"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{isAdmin?n(v40):(v40?n(v40+margins[t40]):"—")}</td>
+                    <td style={{padding:"8px 0"}}><Bg k={k}/><span style={{fontSize:11,color:"#6b7280",marginLeft:4}}>{CN[k]}</span></td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{isAdmin?n(v20):(v20?n(v20+margins[t20]):"—")}</td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{isAdmin?n(v40):(v40?n(v40+margins[t40]):"—")}</td>
                   </tr>; })}
               </tbody>
             </table>
@@ -340,9 +317,8 @@ export default function App() {
     );
   };
 
-  const DOCard = ({row,idx}) => {
+  const DOCrd = ({row,idx}) => {
     const open = exp===`d${idx}`;
-    const doCities = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
     const b20=bDO(row,"mow",0),b40=bDO(row,"mow",1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
@@ -352,27 +328,25 @@ export default function App() {
             <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
           </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-            {b20.val && <>
-              <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>${n(b20.val)}</div><Bg k={b20.cr}/></div>
-              <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>${n(b40.val)}</div><Bg k={b40.cr}/></div>
-            </>}
-            <span style={{fontSize:16,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
+            {b20.val&&<><div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>${n(b20.val)}</div><Bg k={b20.cr}/></div>
+            <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>${n(b40.val)}</div><Bg k={b40.cr}/></div></>}
+            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
           </div>
         </button>
         {open && (
           <div style={{padding:"0 16px 16px",borderTop:"1px solid #f3f4f6"}}>
             <table style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
               <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
-                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>City</th>
-                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>20'</th><th style={{textAlign:"center",padding:"4px 0",fontWeight:500,width:36}}>Cr</th>
-                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>40'</th><th style={{textAlign:"center",padding:"4px 0",fontWeight:500,width:36}}>Cr</th>
+                <th style={{textAlign:"left",fontWeight:500,padding:"4px 0"}}>City</th>
+                <th style={{textAlign:"right",fontWeight:500,padding:"4px 0"}}>20'</th><th style={{width:36,textAlign:"center",fontWeight:500,padding:"4px 0"}}>Cr</th>
+                <th style={{textAlign:"right",fontWeight:500,padding:"4px 0"}}>40'</th><th style={{width:36,textAlign:"center",fontWeight:500,padding:"4px 0"}}>Cr</th>
               </tr></thead>
               <tbody>
-                {doCities.map(({k,l})=>{ const c20=bDO(row,k,0),c40=bDO(row,k,1);
+                {DOC.map(({k,l})=>{ const c20=bDO(row,k,0),c40=bDO(row,k,1);
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
                     <td style={{padding:"10px 0",fontWeight:600,color:"#374151"}}>{l}</td>
-                    {c20.val?<><td style={{textAlign:"right",padding:"10px 0",fontFamily:"monospace",fontWeight:700,color:"#111",cursor:"pointer",textDecoration:"underline dotted"}} onClick={()=>openSC(c20.cr,"coc20",row.pol+" > "+l)}>${n(c20.val)}</td><td style={{textAlign:"center",padding:"10px 0"}}><Bg k={c20.cr}/></td></>:<><td style={{textAlign:"right",color:"#d1d5db"}}>—</td><td/></>}
-                    {c40.val?<><td style={{textAlign:"right",padding:"10px 0",fontFamily:"monospace",fontWeight:700,color:"#111",cursor:"pointer",textDecoration:"underline dotted"}} onClick={()=>openSC(c40.cr,"coc40",row.pol+" > "+l)}>${n(c40.val)}</td><td style={{textAlign:"center",padding:"10px 0"}}><Bg k={c40.cr}/></td></>:<><td style={{textAlign:"right",color:"#d1d5db"}}>—</td><td/></>}
+                    {c20.val?<><td style={{textAlign:"right",padding:"10px 0",fontFamily:"monospace",fontWeight:700,color:"#111",cursor:"pointer"}} onClick={()=>openSC(c20.cr,"coc20",row.pol+" > "+l)}>${n(c20.val)}</td><td style={{textAlign:"center",padding:"10px 0"}}><Bg k={c20.cr}/></td></>:<><td style={{textAlign:"right",color:"#d1d5db"}}>—</td><td/></>}
+                    {c40.val?<><td style={{textAlign:"right",padding:"10px 0",fontFamily:"monospace",fontWeight:700,color:"#111",cursor:"pointer"}} onClick={()=>openSC(c40.cr,"coc40",row.pol+" > "+l)}>${n(c40.val)}</td><td style={{textAlign:"center",padding:"10px 0"}}><Bg k={c40.cr}/></td></>:<><td style={{textAlign:"right",color:"#d1d5db"}}>—</td><td/></>}
                   </tr>; })}
               </tbody>
             </table>
@@ -382,7 +356,7 @@ export default function App() {
     );
   };
 
-  const RCard = ({row,idx}) => {
+  const RCrd = ({row,idx}) => {
     const open = exp===`r${idx}`;
     const m20=bRent(row.pol,"Moscow",row,0),m40=bRent(row.pol,"Moscow",row,1);
     return (
@@ -392,7 +366,7 @@ export default function App() {
           <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
             <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{m20.val?`$${n(m20.val)}`:`$${n(row.r20["Moscow"])}`}</div>{m20.cr&&<Bg k={m20.cr}/>}</div>
             <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{m40.val?`$${n(m40.val)}`:`$${n(row.r40["Moscow"])}`}</div>{m40.cr&&<Bg k={m40.cr}/>}</div>
-            <span style={{fontSize:16,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
+            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
           </div>
         </button>
         {open && (
@@ -409,23 +383,23 @@ export default function App() {
                     <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
                       <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{b20.val?`$${n(b20.val)}`:"—"}</div>{b20.val&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r20[city])}</div>}{b20.cr&&<Bg k={b20.cr}/>}</div>
                       <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{b40.val?`$${n(b40.val)}`:"—"}</div>{b40.val&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r40[city])}</div>}{b40.cr&&<Bg k={b40.cr}/>}</div>
-                      <span style={{fontSize:14,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
+                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block"}}>&#8964;</span>
                     </div>
                   </button>
                   {cOpen && (
                     <div style={{background:"#faf5ff",borderBottom:"1px solid #ede9fe"}}>
-                      {carriers.length===0 ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
-                        : carriers.map(c=>(
+                      {carriers.length===0?<div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
+                        :carriers.map(c=>(
                         <div key={c.k} style={{display:"flex",alignItems:"center",padding:"10px 24px",borderBottom:"1px solid #ede9fe"}}>
                           <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}><Bg k={c.k}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[c.k]}</span></div>
                           <div style={{textAlign:"right",marginRight:20,cursor:c.t20?"pointer":"default"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
                             <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
-                            <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t20?"underline dotted":"none"}}>{c.t20?`$${n(c.t20)}`:"—"}</div>
+                            <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t20?"underline":"none"}}>{c.t20?`$${n(c.t20)}`:"—"}</div>
                             {c.t20&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r20[city])}</div>}
                           </div>
                           <div style={{textAlign:"right",cursor:c.t40?"pointer":"default"}} onClick={()=>c.t40&&openSC(c.k,"soc40",row.pol+" > "+city)}>
                             <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
-                            <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t40?"underline dotted":"none"}}>{c.t40?`$${n(c.t40)}`:"—"}</div>
+                            <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t40?"underline":"none"}}>{c.t40?`$${n(c.t40)}`:"—"}</div>
                             {c.t40&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r40[city])}</div>}
                           </div>
                         </div>
@@ -441,48 +415,52 @@ export default function App() {
     );
   };
 
+  // ── MAIN RENDER ──
   return (
-    <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:s.ff}}>
+    <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+
+      {/* HEADER */}
       <div style={{position:"sticky",top:0,zIndex:30,background:"#fff",borderBottom:"1px solid #e5e7eb",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
         <div style={{maxWidth:640,margin:"0 auto",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
-            <svg width="32" height="32" viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="49" fill="#1D2B4F"/><circle cx="50" cy="50" r="40" fill="#E8A817"/>
-              <polygon points="50,10 55,40 50,32 45,40" fill="#C0392B"/><polygon points="50,90 55,60 50,68 45,60" fill="#C0392B"/>
-              <polygon points="10,50 40,45 32,50 40,55" fill="#C0392B"/><polygon points="90,50 60,45 68,50 60,55" fill="#C0392B"/>
-              <polygon points="22,22 40,40 34,36 36,34" fill="#C0392B"/><polygon points="78,78 60,60 66,64 64,66" fill="#C0392B"/>
-              <polygon points="78,22 60,40 64,34 66,36" fill="#C0392B"/><polygon points="22,78 40,60 36,66 34,64" fill="#C0392B"/>
-              <circle cx="50" cy="50" r="7" fill="white"/><circle cx="50" cy="50" r="3.5" fill="#C0392B"/>
-            </svg>
+            <Logo size={32}/>
             <div>
               <div style={{fontSize:14,fontWeight:700,color:"#111",lineHeight:1}}>YSL Agency</div>
-              <div style={{fontSize:10,color:"#9ca3af",marginTop:2}}>{isAdmin?"Admin Mode":client?.company_name||"Portal"}</div>
+              <div style={{fontSize:10,color:"#9ca3af",marginTop:2}}>
+                {isAdmin ? "Admin Mode" : isClient ? client?.company_name : "Freight Rate Portal"}
+              </div>
             </div>
           </div>
-          <div style={{display:"flex",gap:8}}>
-            {isAdmin && <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer"}}>Clients</button>}
-            <button onClick={logout} style={{fontSize:11,fontWeight:500,padding:"6px 12px",borderRadius:20,background:"#f3f4f6",color:"#6b7280",border:"1px solid #e5e7eb",cursor:"pointer"}}>Logout</button>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {isAdmin && (
+              <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer"}}>Clients</button>
+            )}
+            {(isClient || isAdmin) ? (
+              <button onClick={logout} style={{fontSize:11,fontWeight:500,padding:"6px 12px",borderRadius:20,background:"#f3f4f6",color:"#6b7280",border:"1px solid #e5e7eb",cursor:"pointer"}}>Logout</button>
+            ) : (
+              <button onClick={()=>{setShowLoginModal(true);setLoginErr("");}} style={{fontSize:11,fontWeight:600,padding:"6px 14px",borderRadius:20,background:"#1D2B4F",color:"#fff",border:"none",cursor:"pointer"}}>Login</button>
+            )}
           </div>
         </div>
       </div>
 
+      {/* ADMIN MARGIN PANEL */}
       {isAdmin && (
         <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px"}}>
           <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD)</div>
+            <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD) — Admin</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
               {["coc20","coc40","soc20","soc40"].map(t=>(
-                <div key={t}>
-                  <div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
                   <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
-                    style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/>
-                </div>
+                    style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
               ))}
             </div>
           </div>
         </div>
       )}
 
+      {/* SEARCH + FILTERS */}
       <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px 8px"}}>
         <input placeholder="Search POL..." value={search} onChange={e=>setSearch(e.target.value)}
           style={{width:"100%",padding:"10px 16px",fontSize:14,border:"1px solid #e5e7eb",borderRadius:10,outline:"none",background:"#fff",boxSizing:"border-box"}}/>
@@ -497,6 +475,7 @@ export default function App() {
         )}
       </div>
 
+      {/* TABS */}
       <div style={{maxWidth:640,margin:"0 auto",padding:"0 16px"}}>
         <div style={{display:"flex",borderBottom:"1px solid #e5e7eb"}}>
           {[["ocean","Ocean Freight"],["dropoff","Ocean+Drop off"]].map(([k,l])=>(
@@ -504,7 +483,7 @@ export default function App() {
           ))}
           <button onClick={()=>{setTab("rental");setExp(null);setCityOpen(null);}} style={{flex:1,textAlign:"center",padding:"10px 4px",fontSize:11,fontWeight:600,background:"none",border:"none",borderBottom:`2px solid ${tab==="rental"?"#111":"transparent"}`,color:tab==="rental"?"#111":"#9ca3af",cursor:"pointer"}}>
             <div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:2}}>
-              <svg width="18" height="12" viewBox="0 0 36 22" fill="none">
+              <svg width="18" height="11" viewBox="0 0 36 22" fill="none">
                 <rect x="1" y="4" width="34" height="16" rx="1" fill="#3b82f6" opacity="0.15" stroke="#3b82f6" strokeWidth="1.5"/>
                 <line x1="1" y1="4" x2="1" y2="20" stroke="#3b82f6" strokeWidth="2"/>
                 <line x1="35" y1="4" x2="35" y2="20" stroke="#3b82f6" strokeWidth="2"/>
@@ -520,6 +499,7 @@ export default function App() {
         </div>
       </div>
 
+      {/* COC/SOC TOGGLE */}
       {tab==="ocean" && (
         <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
           <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
@@ -531,17 +511,61 @@ export default function App() {
         </div>
       )}
 
+      {/* CONTENT */}
       <div style={{maxWidth:640,margin:"12px auto",padding:"0 16px 120px"}}>
         <div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>{tab==="rental"?`${rFilt.length} origins`:`${filt.length} routes`}</div>
-        {tab==="ocean" && filt.map((row,i)=><Card key={i} row={row} idx={i}/>)}
-        {tab==="dropoff" && filt.map((row,i)=><DOCard key={i} row={row} idx={i}/>)}
-        {tab==="rental" && rFilt.map((row,i)=><RCard key={i} row={row} idx={i}/>)}
+        {tab==="ocean" && filt.map((row,i)=><OCard key={i} row={row} idx={i}/>)}
+        {tab==="dropoff" && filt.map((row,i)=><DOCrd key={i} row={row} idx={i}/>)}
+        {tab==="rental" && rFilt.map((row,i)=><RCrd key={i} row={row} idx={i}/>)}
       </div>
 
-      <div style={{maxWidth:640,margin:"0 auto",padding:"16px",textAlign:"center"}}>
+      <div style={{maxWidth:640,margin:"0 auto",padding:16,textAlign:"center"}}>
         <span style={{fontSize:10,color:"#d1d5db"}}>YSL Agency Far East · Rates subject to change</span>
       </div>
 
+      {/* LOGIN MODAL */}
+      {showLoginModal && (
+        <div style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.4)",display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setShowLoginModal(false)}>
+          <div style={{background:"#fff",borderRadius:20,padding:24,width:"100%",maxWidth:360,boxShadow:"0 20px 60px rgba(0,0,0,0.2)"}} onClick={e=>e.stopPropagation()}>
+            <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:20}}>
+              <Logo size={40}/>
+              <div><div style={{fontSize:16,fontWeight:700,color:"#111"}}>YSL Agency</div><div style={{fontSize:11,color:"#9ca3af"}}>Login</div></div>
+              <button onClick={()=>setShowLoginModal(false)} style={{marginLeft:"auto",fontSize:18,color:"#9ca3af",background:"none",border:"none",cursor:"pointer",lineHeight:1}}>&#10005;</button>
+            </div>
+            {/* Tab */}
+            <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:16}}>
+              {[["client","Client"],["admin","Admin"]].map(([k,l])=>(
+                <button key={k} onClick={()=>{setLoginTab(k);setLoginErr("");}} style={{flex:1,padding:"7px",fontSize:12,fontWeight:600,borderRadius:8,background:loginTab===k?"#fff":"transparent",border:"none",cursor:"pointer",color:loginTab===k?"#111":"#9ca3af"}}>{l}</button>
+              ))}
+            </div>
+            {loginTab==="client" ? (
+              <div>
+                <input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}
+                  style={{width:"100%",padding:"11px 14px",fontSize:14,border:"1px solid #e5e7eb",borderRadius:10,marginBottom:10,boxSizing:"border-box",outline:"none"}}/>
+                <input type="password" placeholder="Password" value={pw} onChange={e=>setPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doLogin()}
+                  style={{width:"100%",padding:"11px 14px",fontSize:14,border:"1px solid #e5e7eb",borderRadius:10,marginBottom:14,boxSizing:"border-box",outline:"none"}}/>
+                {loginErr&&<div style={{fontSize:12,color:"#ef4444",marginBottom:10}}>{loginErr}</div>}
+                <button onClick={doLogin} disabled={loginLoading}
+                  style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer",opacity:loginLoading?0.6:1}}>
+                  {loginLoading?"Checking...":"Login"}
+                </button>
+              </div>
+            ) : (
+              <div>
+                <input type="password" placeholder="Admin PIN" value={pin} onChange={e=>setPin(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doAdminLogin()} autoFocus
+                  style={{width:"100%",padding:"11px 14px",fontSize:22,fontWeight:700,letterSpacing:10,textAlign:"center",border:"1px solid #e5e7eb",borderRadius:10,marginBottom:14,boxSizing:"border-box",outline:"none"}}/>
+                {loginErr&&<div style={{fontSize:12,color:"#ef4444",marginBottom:10}}>{loginErr}</div>}
+                <button onClick={doAdminLogin}
+                  style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
+                  Admin Login
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* S/C POPUP */}
       {sc && (
         <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center",background:"rgba(0,0,0,0.3)"}} onClick={()=>setSc(null)}>
           <div style={{width:"100%",maxWidth:480,background:"#fff",borderRadius:"20px 20px 0 0",padding:"20px 20px 32px",boxShadow:"0 -20px 60px rgba(0,0,0,0.2)"}} onClick={e=>e.stopPropagation()}>
