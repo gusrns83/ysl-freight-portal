@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 
 const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
@@ -147,6 +147,8 @@ export default function App() {
   const [noticeFileUrl, setNoticeFileUrl] = useState("");
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
+  const [saveMsg, setSaveMsg] = useState("");
+  const [dragOver, setDragOver] = useState(false);
 
   // App state
   const [search, setSearch] = useState("");
@@ -202,19 +204,51 @@ export default function App() {
     try {
       const ext = file.name.split(".").pop().toLowerCase();
       const fname = `notice_${Date.now()}.${ext}`;
-      const res = await fetch(`${SB_URL}/storage/v1/object/notices/${fname}`, {
+      const res = await fetch(`${SB_URL}/storage/v1/object/Notices/${fname}`, {
         method: "POST",
         headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
         body: file,
       });
       if (!res.ok) throw new Error(await res.text());
-      const url = `${SB_URL}/storage/v1/object/public/notices/${fname}`;
+      const url = `${SB_URL}/storage/v1/object/public/Notices/${fname}`;
       setNoticeFileUrl(url);
       setUploadMsg("업로드 완료!");
       setTimeout(() => setUploadMsg(""), 2000);
     } catch(e) { setUploadMsg("업로드 실패: " + e.message); }
     setUploadLoading(false);
   };
+
+  const saveSetting = async (key, value) => {
+    await api(`settings?key=eq.${key}`, { method:"PATCH", body: JSON.stringify({value: String(value)}) });
+  };
+
+  const saveAllSettings = async () => {
+    try {
+      await Promise.all([
+        saveSetting("notice_text", notice),
+        saveSetting("notice_on", noticeOn),
+        saveSetting("notice_file_url", noticeFileUrl),
+        saveSetting("validity_snk", validity.SNK),
+        saveSetting("validity_dy", validity.DY),
+        saveSetting("validity_ck", validity.CK),
+      ]);
+      setSaveMsg("저장 완료!");
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch(e) { setSaveMsg("저장 실패"); }
+  };
+
+  useEffect(() => {
+    api("settings?select=*").then(rows => {
+      if (!rows.length) return;
+      const s = Object.fromEntries(rows.map(r=>[r.key, r.value]));
+      if (s.notice_text !== undefined) setNotice(s.notice_text);
+      if (s.notice_on !== undefined) setNoticeOn(s.notice_on === "true");
+      if (s.notice_file_url !== undefined) setNoticeFileUrl(s.notice_file_url);
+      if (s.validity_snk !== undefined) setValidity(p=>({...p, SNK: s.validity_snk}));
+      if (s.validity_dy !== undefined) setValidity(p=>({...p, DY: s.validity_dy}));
+      if (s.validity_ck !== undefined) setValidity(p=>({...p, CK: s.validity_ck}));
+    }).catch(()=>{});
+  }, []);
 
   const bNet = (row,t) => { let b=null,cr=null; CRS.forEach(k=>{const v=row.rates[k][t]; if(v!=null&&(b===null||v<b)){b=v;cr=k;}}); return {val:b,cr}; };
   const bDO = (row,city,si) => { const t=si===0?"coc20":"coc40"; let b=null,cr=null; CRS.forEach(k=>{const o=row.rates[k][t],d=DO[city]?.[k]; if(o!=null&&d){const tot=o+d[si]; if(b===null||tot<b){b=tot;cr=k;}}}); return {val:b,cr}; };
@@ -541,32 +575,45 @@ export default function App() {
                   style={{flex:1,padding:"6px 10px",fontSize:12,fontWeight:600,color:"#166534",background:"#fff",border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box"}}/>
               </div>
             ))}
+            <button onClick={saveAllSettings}
+              style={{width:"100%",marginTop:4,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#16a34a",border:"none",borderRadius:6,cursor:"pointer"}}>
+              {saveMsg || "💾 저장"}
+            </button>
           </div>
           <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
               <div style={{fontSize:10,fontWeight:700,color:"#6b21a8"}}>NOTICE / GRI 공지</div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 <span style={{fontSize:11,color:"#7c3aed"}}>{noticeOn?"ON":"OFF"}</span>
-                <div onClick={()=>{setNoticeOn(p=>!p);setShowNotice(true);}} style={{width:36,height:20,borderRadius:10,background:noticeOn?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative"}}>
+                <div onClick={()=>setNoticeOn(p=>!p)} style={{width:36,height:20,borderRadius:10,background:noticeOn?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative"}}>
                   <div style={{position:"absolute",top:2,left:noticeOn?18:2,width:16,height:16,borderRadius:8,background:"#fff",transition:"left 0.2s"}}/>
                 </div>
               </div>
             </div>
             <textarea value={notice} onChange={e=>setNotice(e.target.value)} placeholder="공지 텍스트 입력 (선사 GRI, 스케줄 변경 등)"
-              style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:6,boxSizing:"border-box",minHeight:60,resize:"vertical",fontFamily:"inherit",marginBottom:8}}/>
+              style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:6,boxSizing:"border-box",minHeight:80,resize:"vertical",fontFamily:"inherit",marginBottom:8}}/>
             <div style={{fontSize:10,fontWeight:700,color:"#6b21a8",marginBottom:6}}>공문 파일 첨부 (PDF / 이미지)</div>
-            <label style={{display:"flex",alignItems:"center",gap:8,padding:"8px 12px",background:"#fff",border:"1px dashed #c4b5fd",borderRadius:8,cursor:"pointer"}}>
-              <span style={{fontSize:20}}>📎</span>
-              <span style={{fontSize:12,color:"#7c3aed"}}>{uploadLoading ? "업로드 중..." : "파일 선택"}</span>
+            <label
+              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+              onDragLeave={()=>setDragOver(false)}
+              onDrop={e=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer.files[0];if(f)uploadNoticeFile(f);}}
+              style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"16px 12px",background:dragOver?"#ede9fe":"#fff",border:`2px dashed ${dragOver?"#7c3aed":"#c4b5fd"}`,borderRadius:8,cursor:"pointer",transition:"all 0.2s"}}>
+              <span style={{fontSize:24}}>📎</span>
+              <span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>{uploadLoading?"업로드 중...":"파일 선택 또는 드래그 앤 드롭"}</span>
+              <span style={{fontSize:11,color:"#a78bfa"}}>PDF, JPG, PNG 지원</span>
               <input type="file" accept=".pdf,image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&uploadNoticeFile(e.target.files[0])} disabled={uploadLoading}/>
             </label>
-            {uploadMsg && <div style={{fontSize:11,color:uploadMsg.includes("완료")?"#16a34a":"#dc2626",marginTop:4}}>{uploadMsg}</div>}
+            {uploadMsg && <div style={{fontSize:11,marginTop:6,color:uploadMsg.includes("완료")?"#16a34a":"#dc2626"}}>{uploadMsg}</div>}
             {noticeFileUrl && (
               <div style={{marginTop:8,padding:"8px 10px",background:"#fff",border:"1px solid #c4b5fd",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span style={{fontSize:11,color:"#7c3aed",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"80%"}}>{noticeFileUrl.split("/").pop()}</span>
+                <span style={{fontSize:11,color:"#7c3aed",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"80%"}}>✅ {noticeFileUrl.split("/").pop()}</span>
                 <button onClick={()=>setNoticeFileUrl("")} style={{fontSize:11,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
               </div>
             )}
+            <button onClick={saveAllSettings}
+              style={{width:"100%",marginTop:10,padding:"9px",fontSize:12,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:8,cursor:"pointer"}}>
+              {saveMsg || "💾 설정 저장"}
+            </button>
           </div>
         </div>
       )}
