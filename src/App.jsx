@@ -219,7 +219,17 @@ export default function App() {
   };
 
   const saveSetting = async (key, value) => {
-    await api(`settings?key=eq.${key}`, { method:"PATCH", body: JSON.stringify({value: String(value)}) });
+    const res = await fetch(`${SB_URL}/rest/v1/settings`, {
+      method: "POST",
+      headers: {
+        "apikey": SB_KEY,
+        "Authorization": `Bearer ${SB_KEY}`,
+        "Content-Type": "application/json",
+        "Prefer": "resolution=merge-duplicates,return=minimal",
+      },
+      body: JSON.stringify({ key, value: String(value) }),
+    });
+    if (!res.ok) throw new Error(await res.text());
   };
 
   const saveAllSettings = async () => {
@@ -417,7 +427,7 @@ export default function App() {
               }).filter(x=>x.tot20!=null||x.tot40!=null);
               return (
                 <div key={k}>
-                  <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} style={{width:"100%",display:"flex",alignItems:"center",padding:"10px 16px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left"}}>
+                  <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 16px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left"}}>
                     <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151"}}>{l}</span>
                     <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
                       <div style={{textAlign:"right"}}>
@@ -438,9 +448,10 @@ export default function App() {
                       {carrierRows.length===0
                         ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
                         : carrierRows.map(({cr,tot20,tot40})=>(
-                          <div key={cr} style={{display:"flex",alignItems:"center",padding:"10px 24px",borderBottom:"1px solid #e0f2fe"}}>
+                          <div key={cr} style={{display:"flex",alignItems:"center",padding:"7px 24px",borderBottom:"1px solid #e0f2fe"}}>
                             <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
                               <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span>
+                              {validity[cr] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[cr]}</span>}
                             </div>
                             <div style={{textAlign:"right",marginRight:20,cursor:tot20?"pointer":"default"}} onClick={()=>tot20&&openSC(cr,"coc20",row.pol+" > "+l)}>
                               <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
@@ -499,7 +510,11 @@ export default function App() {
                       {carriers.length===0?<div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
                         :carriers.map(c=>(
                         <div key={c.k} style={{display:"flex",alignItems:"center",padding:"10px 24px",borderBottom:"1px solid #ede9fe"}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}><Bg k={c.k}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[c.k]}</span></div>
+                          <div style={{display:"flex",alignItems:"center",gap:8,flex:1}}>
+                            <Bg k={c.k}/>
+                            <span style={{fontSize:11,color:"#6b7280"}}>{CN[c.k]}</span>
+                            {validity[c.k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[c.k]}</span>}
+                          </div>
                           <div style={{textAlign:"right",marginRight:20,cursor:c.t20?"pointer":"default"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
                             <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
                             <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t20?"underline":"none"}}>{c.t20?`$${n(c.t20)}`:"—"}</div>
