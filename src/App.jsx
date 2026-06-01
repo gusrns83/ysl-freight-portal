@@ -102,6 +102,10 @@ const DO = {mow:{SNK:[1100,1400],DY:[800,1400],CK:[950,1300]},spb:{SNK:[700,1000
 const CRS = ["SNK","DY","CK"];
 const CN = {SNK:"Sinokor",DY:"Dongyoung",CK:"CK Line"};
 const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
+const F_TO_R = Object.fromEntries(Object.entries(PM).map(([rental, freight]) => [freight, rental]));
+const DOC_RC = {mow:"Moscow",spb:"St.Petersburg",nsb:"Novosibirsk",ekb:"Ekaterinburg"};
+const RC_LABEL = Object.fromEntries(DOC.map(d => [DOC_RC[d.k], d.l]));
+const RENT_CITY_ORDER = [...DOC.map(d => DOC_RC[d.k]), ...RC.filter(c => !Object.values(DOC_RC).includes(c))];
 const n = v => v != null ? v.toLocaleString() : "—";
 
 const Logo = ({size=32}) => (
@@ -345,7 +349,26 @@ export default function App() {
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
 
   const filt = useMemo(()=>{ let d=fData; if(areaF!=="ALL")d=d.filter(r=>r.area===areaF); if(search)d=d.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())); return d; },[fData,areaF,search]);
-  const rFilt = useMemo(()=>search?rData.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())):rData,[rData,search]);
+  const rFilt = useMemo(()=>{
+    const byRental = Object.fromEntries(rData.map(r => [r.pol, r]));
+    let routes = fData;
+    if (areaF !== "ALL") routes = routes.filter(r => r.area === areaF);
+    if (search) {
+      const q = search.toLowerCase();
+      routes = routes.filter(r =>
+        r.pol.toLowerCase().includes(q) ||
+        r.area.toLowerCase().includes(q) ||
+        (F_TO_R[r.pol] && F_TO_R[r.pol].toLowerCase().includes(q))
+      );
+    }
+    return routes.map(fr => {
+      const rentalPol = F_TO_R[fr.pol];
+      if (!rentalPol) return null;
+      const row = byRental[rentalPol];
+      if (!row) return null;
+      return { ...row, area: fr.area, displayPol: fr.pol };
+    }).filter(Boolean);
+  }, [fData, rData, areaF, search]);
 
   const ff = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
 
@@ -558,7 +581,10 @@ export default function App() {
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
         <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left"}}>
-          <span style={{fontSize:14,fontWeight:600,color:"#111"}}>{row.pol}</span>
+          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0}}>
+            <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
+            <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.displayPol || row.pol}</span>
+          </div>
           <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
             <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{m20.val?`$${n(m20.val)}`:`$${n(row.r20["Moscow"])}`}</div>{m20.cr&&<Bg k={m20.cr}/>}</div>
             <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{m40.val?`$${n(m40.val)}`:`$${n(row.r40["Moscow"])}`}</div>{m40.cr&&<Bg k={m40.cr}/>}</div>
@@ -567,15 +593,16 @@ export default function App() {
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6",paddingBottom:8}}>
-            <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>SOC + Rental by Return City</div>
-            {RC.map(city=>{
+            <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Rental · Return City (Drop off 순서)</div>
+            {RENT_CITY_ORDER.map(city=>{
               const b20=bRent(row.pol,city,row,0),b40=bRent(row.pol,city,row,1);
               const key=`${idx}-${city}`,cOpen=cityOpen===key;
               const carriers=cOpen?cRent(row.pol,city,row):[];
+              const cityLabel=RC_LABEL[city]||city;
               return (
                 <div key={city}>
                   <button onClick={()=>setCityOpen(cOpen?null:key)} style={{width:"100%",display:"flex",alignItems:"center",padding:"10px 16px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left"}}>
-                    <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151"}}>{city}</span>
+                    <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151"}}>{cityLabel}</span>
                     <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
                       <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{b20.val?`$${n(b20.val)}`:"—"}</div>{b20.val&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r20[city])}</div>}{b20.cr&&<Bg k={b20.cr}/>}</div>
                       <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{b40.val?`$${n(b40.val)}`:"—"}</div>{b40.val&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r40[city])}</div>}{b40.cr&&<Bg k={b40.cr}/>}</div>
@@ -806,15 +833,13 @@ export default function App() {
       <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px 8px"}}>
         <input placeholder="Search POL..." value={search} onChange={e=>setSearch(e.target.value)}
           style={{width:"100%",padding:"10px 16px",fontSize:14,border:"1px solid #e5e7eb",borderRadius:10,outline:"none",background:"#fff",boxSizing:"border-box"}}/>
-        {tab!=="rental" && (
-          <div style={{display:"flex",gap:6,marginTop:8,overflowX:"auto",paddingBottom:4}}>
-            {["ALL",...areas].map(a=>(
-              <button key={a} onClick={()=>setAreaF(a)} style={{fontSize:11,fontWeight:500,padding:"6px 12px",borderRadius:20,whiteSpace:"nowrap",background:a===areaF?"#111":"#fff",color:a===areaF?"#fff":"#6b7280",border:`1px solid ${a===areaF?"#111":"#e5e7eb"}`,cursor:"pointer"}}>
-                {a==="ALL"?"All":a}
-              </button>
-            ))}
-          </div>
-        )}
+        <div style={{display:"flex",gap:6,marginTop:8,overflowX:"auto",paddingBottom:4}}>
+          {["ALL",...areas].map(a=>(
+            <button key={a} onClick={()=>setAreaF(a)} style={{fontSize:11,fontWeight:500,padding:"6px 12px",borderRadius:20,whiteSpace:"nowrap",background:a===areaF?"#111":"#fff",color:a===areaF?"#fff":"#6b7280",border:`1px solid ${a===areaF?"#111":"#e5e7eb"}`,cursor:"pointer"}}>
+              {a==="ALL"?"All":a}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* TABS */}
@@ -847,7 +872,7 @@ export default function App() {
 
       {/* CONTENT */}
       <div style={{maxWidth:640,margin:"12px auto",padding:"0 16px 120px"}}>
-        <div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>{tab==="rental"?`${rFilt.length} origins`:`${filt.length} routes`}</div>
+        <div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>{`${tab==="rental"?rFilt.length:filt.length} routes`}</div>
         {tab==="ocean" && filt.map((row,i)=><OCard key={i} row={row} idx={i}/>)}
         {tab==="dropoff" && filt.map((row,i)=><DOCrd key={i} row={row} idx={i}/>)}
         {tab==="rental" && rFilt.map((row,i)=><RCrd key={i} row={row} idx={i}/>)}
