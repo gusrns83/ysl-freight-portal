@@ -601,30 +601,45 @@ export default function App() {
     </div>
   );
 
-  const costInp = { width:"100%",padding:"4px 6px",fontSize:12,fontWeight:700,color:"#1e40af",background:"#fff",border:"1px solid #93c5fd",borderRadius:5,boxSizing:"border-box",textAlign:"right" };
+  const costInp = { width:"100%",maxWidth:"100%",minWidth:0,padding:"2px 4px",fontSize:11,fontWeight:700,color:"#1e40af",background:"#fff",border:"1px solid #93c5fd",borderRadius:4,boxSizing:"border-box",textAlign:"right" };
 
-  const AdminPriceCols = ({d20,d40,prefix="MOW",editable,onCost20,onCost40}) => (
-    <div style={{display:"flex",gap:12,alignItems:"flex-start",flexShrink:0}} onClick={e=>e.stopPropagation()}>
+  const AdminPriceCols = ({d20,d40,prefix="",editable,onCost20,onCost40}) => (
+    <div className="admin-price-cols" onClick={e=>e.stopPropagation()}>
       {[{l:"매출가",c:"#b45309",k:"sell",cr:d20.cr,vc:"#111"},
         {l:"매입가",c:"#2563eb",k:"cost",cr:null,vc:"#374151"},
         {l:"마진",c:"#7c3aed",k:"margin",cr:null,vc:"#7c3aed"}].map(col=>(
-        <div key={col.l} style={{textAlign:"right",minWidth:col.k==="cost"&&editable?62:54}}>
-          <div style={{fontSize:9,fontWeight:700,color:col.c,marginBottom:4}}>{col.l}</div>
-          <div style={{fontSize:10,color:"#9ca3af"}}>{prefix?`${prefix} 20'`:"20'"}</div>
+        <div key={col.l} className="apc-col">
+          <div className="apc-label" style={{color:col.c}}>{col.l}</div>
+          <div className="apc-size">{prefix?`${prefix} 20'`:"20'"}</div>
           {col.k==="cost"&&editable ? (
-            <input type="number" value={d20.cost??""} placeholder="auto" onChange={e=>onCost20?.(e.target.value)} style={costInp}/>
+            <input type="number" inputMode="numeric" value={d20.cost??""} placeholder="—" onChange={e=>onCost20?.(e.target.value)} className="apc-inp"/>
           ) : (
-            <div style={{fontSize:13,fontWeight:700,color:col.vc}}>{d20[col.k]!=null?`$${n(d20[col.k])}`:"—"}</div>
+            <div className="apc-val" style={{color:col.vc}}>{d20[col.k]!=null?`$${n(d20[col.k])}`:"—"}</div>
           )}
-          <div style={{fontSize:10,color:"#9ca3af",marginTop:4}}>40'</div>
+          <div className="apc-size" style={{marginTop:2}}>40'</div>
           {col.k==="cost"&&editable ? (
-            <input type="number" value={d40.cost??""} placeholder="auto" onChange={e=>onCost40?.(e.target.value)} style={costInp}/>
+            <input type="number" inputMode="numeric" value={d40.cost??""} placeholder="—" onChange={e=>onCost40?.(e.target.value)} className="apc-inp"/>
           ) : (
-            <div style={{fontSize:13,fontWeight:700,color:col.vc}}>{d40[col.k]!=null?`$${n(d40[col.k])}`:"—"}</div>
+            <div className="apc-val" style={{color:col.vc}}>{d40[col.k]!=null?`$${n(d40[col.k])}`:"—"}</div>
           )}
-          {col.cr&&<div style={{marginTop:4}}><Bg k={col.cr}/></div>}
+          {col.cr&&<div style={{marginTop:2}}><Bg k={col.cr}/></div>}
         </div>
       ))}
+    </div>
+  );
+
+  const GuestPricePair = ({d20,d40,prefix=""}) => (
+    <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
+      <div style={{textAlign:"right"}}>
+        <div style={{fontSize:10,color:"#9ca3af"}}>{prefix?`${prefix} 20'`:"20'"}</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>
+        {d20.cr&&<Bg k={d20.cr}/>}
+      </div>
+      <div style={{textAlign:"right"}}>
+        <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>
+        {d40.cr&&<Bg k={d40.cr}/>}
+      </div>
     </div>
   );
 
@@ -665,20 +680,22 @@ export default function App() {
     const t20=types[0],t40=types[1];
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>setExp(open?null:`o${idx}`)} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
-            <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
-            <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
+        <button onClick={()=>setExp(open?null:`o${idx}`)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+          <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1,width:"100%"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
+              <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
+              <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
+            </div>
+            {!isAdmin && <GuestPricePair d20={d20} d40={d40}/>}
+            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
           </div>
-          {isAdmin
-            ? <AdminPriceCols d20={d20} d40={d40} prefix="" editable
+          {isAdmin && (
+            <div className="admin-card-prices">
+              <AdminPriceCols d20={d20} d40={d40} editable
                 onCost20={v=>d20.cr&&applyCarrierRate(row.pol,d20.cr,t20,v)}
                 onCost40={v=>d40.cr&&applyCarrierRate(row.pol,d40.cr,t40,v)}/>
-            : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div><Bg k={d20.cr}/></div>
-                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div><Bg k={d40.cr}/></div>
-              </div>}
-          <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+            </div>
+          )}
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6"}}>
@@ -690,12 +707,12 @@ export default function App() {
                   const cd20=mkPrice(v20,getM(row.pol,row.area,t20),k);
                   const cd40=mkPrice(v40,getM(row.pol,row.area,t40),k);
                   return (
-                    <div key={k} style={{display:"flex",alignItems:"center",gap:8,padding:"10px 0",borderBottom:"1px solid #f9fafb"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6,flex:1,minWidth:0,flexWrap:"wrap"}}>
+                    <div key={k} style={{display:"flex",flexWrap:"wrap",alignItems:"flex-start",gap:6,padding:"8px 0",borderBottom:"1px solid #f9fafb"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,flex:"1 1 120px",minWidth:0}}>
                         <Bg k={k}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
                         {validity[k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[k]}</span>}
                       </div>
-                      <AdminPriceCols d20={cd20} d40={cd40} prefix="" editable
+                      <AdminPriceCols d20={cd20} d40={cd40} editable
                         onCost20={v=>applyCarrierRate(row.pol,k,t20,v)}
                         onCost40={v=>applyCarrierRate(row.pol,k,t40,v)}/>
                     </div>
@@ -739,20 +756,22 @@ export default function App() {
     const d20=doDetail(row,"mow",0),d40=doDetail(row,"mow",1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>{setExp(open?null:`d${idx}`);setDoCityOpen(null);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
-            <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
-            <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
+        <button onClick={()=>{setExp(open?null:`d${idx}`);setDoCityOpen(null);}} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+          <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1,width:"100%"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
+              <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
+              <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
+            </div>
+            {!isAdmin && d20.sell!=null && <GuestPricePair d20={d20} d40={d40} prefix="MOW"/>}
+            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
           </div>
-          {isAdmin
-            ? <AdminPriceCols d20={d20} d40={d40} prefix="MOW" editable
+          {isAdmin && (
+            <div className="admin-card-prices">
+              <AdminPriceCols d20={d20} d40={d40} prefix="MOW" editable
                 onCost20={v=>applyDropCityCost(row.pol,"mow",0,v)}
                 onCost40={v=>applyDropCityCost(row.pol,"mow",1,v)}/>
-            : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-                {d20.sell!=null&&<><div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>${n(d20.sell)}</div><Bg k={d20.cr}/></div>
-                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div><Bg k={d40.cr}/></div></>}
-              </div>}
-          <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+            </div>
+          )}
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6",paddingBottom:8}}>
@@ -769,24 +788,26 @@ export default function App() {
               }).filter(x=>x.cdC20.cost!=null||x.cdC40.cost!=null);
               return (
                 <div key={k}>
-                  <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 16px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:8}}>
-                    <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151"}}>{l}</span>
-                    {isAdmin
-                      ? <AdminPriceCols d20={cd20} d40={cd40} prefix="" editable
+                  <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 12px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
+                    <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
+                      <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{l}</span>
+                      {!isAdmin && <GuestPricePair d20={cd20} d40={cd40}/>}
+                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+                    </div>
+                    {isAdmin && (
+                      <div className="admin-card-prices">
+                        <AdminPriceCols d20={cd20} d40={cd40} editable
                           onCost20={v=>applyDropCityCost(row.pol,k,0,v)}
                           onCost40={v=>applyDropCityCost(row.pol,k,1,v)}/>
-                      : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-                          <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{cd20.sell!=null?`$${n(cd20.sell)}`:"—"}</div>{cd20.cr&&<Bg k={cd20.cr}/>}</div>
-                          <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{cd40.sell!=null?`$${n(cd40.sell)}`:"—"}</div>{cd40.cr&&<Bg k={cd40.cr}/>}</div>
-                        </div>}
-                    <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+                      </div>
+                    )}
                   </button>
                   {cOpen && (
                     <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
                       {carrierRows.length===0
                         ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
                         : carrierRows.map(({cr,cdC20,cdC40})=>(
-                          <div key={cr} style={{display:"flex",alignItems:"center",padding:"7px 16px 7px 24px",borderBottom:"1px solid #e0f2fe",gap:8}}>
+                          <div key={cr} style={{display:"flex",flexWrap:"wrap",alignItems:"flex-start",padding:"7px 12px 7px 20px",borderBottom:"1px solid #e0f2fe",gap:6}}>
                             <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
                               <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span>
                               {validity[cr] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[cr]}</span>}
@@ -825,20 +846,22 @@ export default function App() {
     const d20=rentDetail(row.pol,mow,row,0),d40=rentDetail(row.pol,mow,row,1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
-          <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
-            <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
-            <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.displayPol || row.pol}</span>
+        <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+          <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1,width:"100%"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
+              <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
+              <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.displayPol || row.pol}</span>
+            </div>
+            {!isAdmin && <GuestPricePair d20={d20} d40={d40} prefix="MOW"/>}
+            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
           </div>
-          {isAdmin
-            ? <AdminPriceCols d20={d20} d40={d40} prefix="MOW" editable
+          {isAdmin && (
+            <div className="admin-card-prices">
+              <AdminPriceCols d20={d20} d40={d40} prefix="MOW" editable
                 onCost20={v=>applyRentCityCost(freightPol,"Moscow",0,v)}
                 onCost40={v=>applyRentCityCost(freightPol,"Moscow",1,v)}/>
-            : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>MOW 20'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>{d20.cr&&<Bg k={d20.cr}/>}</div>
-                <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>{d40.cr&&<Bg k={d40.cr}/>}</div>
-              </div>}
-          <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+            </div>
+          )}
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6",paddingBottom:8}}>
@@ -854,17 +877,19 @@ export default function App() {
               const fp=PM[row.pol],fr=fp?fMap[fp]:null;
               return (
                 <div key={city}>
-                  <button onClick={()=>setCityOpen(cOpen?null:key)} style={{width:"100%",display:"flex",alignItems:"center",padding:"10px 16px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:8}}>
-                    <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
-                    {isAdmin
-                      ? <AdminPriceCols d20={cd20} d40={cd40} prefix="" editable
+                  <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"8px 12px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
+                    <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
+                      <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
+                      {!isAdmin && <GuestPricePair d20={cd20} d40={cd40}/>}
+                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+                    </div>
+                    {isAdmin && (
+                      <div className="admin-card-prices">
+                        <AdminPriceCols d20={cd20} d40={cd40} editable
                           onCost20={v=>applyRentCityCost(freightPol,city,0,v)}
                           onCost40={v=>applyRentCityCost(freightPol,city,1,v)}/>
-                      : <div style={{display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
-                          <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>20'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{cd20.sell!=null?`$${n(cd20.sell)}`:"—"}</div>{cd20.sell!=null&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r20[city])}</div>}{cd20.cr&&<Bg k={cd20.cr}/>}</div>
-                          <div style={{textAlign:"right"}}><div style={{fontSize:10,color:"#9ca3af"}}>40'</div><div style={{fontSize:14,fontWeight:700,color:"#111"}}>{cd40.sell!=null?`$${n(cd40.sell)}`:"—"}</div>{cd40.sell!=null&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r40[city])}</div>}{cd40.cr&&<Bg k={cd40.cr}/>}</div>
-                        </div>}
-                    <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+                      </div>
+                    )}
                   </button>
                   {cOpen && (
                     <div style={{background:"#faf5ff",borderBottom:"1px solid #ede9fe"}}>
@@ -873,7 +898,7 @@ export default function App() {
                         const cdC20=mkPrice(c.cost20,c.m20,c.k);
                         const cdC40=mkPrice(c.cost40,c.m40,c.k);
                         return (
-                        <div key={c.k} style={{display:"flex",alignItems:"center",padding:"10px 16px 10px 24px",borderBottom:"1px solid #ede9fe",gap:8}}>
+                        <div key={c.k} style={{display:"flex",flexWrap:"wrap",alignItems:"flex-start",padding:"8px 12px 8px 20px",borderBottom:"1px solid #ede9fe",gap:6}}>
                           <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
                             <Bg k={c.k}/>
                             <span style={{fontSize:11,color:"#6b7280"}}>{CN[c.k]}</span>
