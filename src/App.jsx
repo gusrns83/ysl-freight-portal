@@ -231,6 +231,7 @@ export default function App() {
 
   // Client mgmt
   const [showMgr, setShowMgr] = useState(false);
+  const [showNoticeAdmin, setShowNoticeAdmin] = useState(false);
   const [clients, setClients] = useState([]);
   const [addForm, setAddForm] = useState(false);
   const [editC, setEditC] = useState(null);
@@ -601,6 +602,63 @@ export default function App() {
     </div>
   );
 
+  // ── NOTICE ADMIN ──
+  if (showNoticeAdmin && isAdmin) return (
+    <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+      <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
+        <button onClick={()=>setShowNoticeAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+        <div style={{fontSize:14,fontWeight:700,color:"#6b21a8"}}>Notice / GRI</div>
+        <div style={{width:48}}/>
+      </div>
+      <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 80px"}}>
+        <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:12,padding:16}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#6b21a8"}}>공지 표시</div>
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>{noticeOn?"ON":"OFF"}</span>
+              <div onClick={()=>setNoticeOn(p=>!p)} style={{width:40,height:22,borderRadius:11,background:noticeOn?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative"}}>
+                <div style={{position:"absolute",top:2,left:noticeOn?20:2,width:18,height:18,borderRadius:9,background:"#fff",transition:"left 0.2s"}}/>
+              </div>
+            </div>
+          </div>
+          <div style={{fontSize:11,color:"#7c3aed",marginBottom:8}}>OFF면 방문자에게 팝업이 뜨지 않습니다.</div>
+          <div style={{fontSize:11,fontWeight:700,color:"#6b21a8",marginBottom:6}}>공지 텍스트</div>
+          <textarea value={notice} onChange={e=>setNotice(e.target.value)} placeholder="공지 텍스트 입력 (선사 GRI, 스케줄 변경 등)"
+            style={{width:"100%",padding:"10px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:8,boxSizing:"border-box",minHeight:140,resize:"vertical",fontFamily:"inherit",marginBottom:12}}/>
+          <div style={{fontSize:11,fontWeight:700,color:"#6b21a8",marginBottom:8}}>공문 파일 첨부 (PDF / 이미지)</div>
+          <label
+            onDragOver={e=>{e.preventDefault();setDragOver(true);}}
+            onDragLeave={()=>setDragOver(false)}
+            onDrop={e=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer.files[0];if(f)uploadNoticeFile(f);}}
+            style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,padding:"20px 12px",background:dragOver?"#ede9fe":"#fff",border:`2px dashed ${dragOver?"#7c3aed":"#c4b5fd"}`,borderRadius:10,cursor:"pointer",transition:"all 0.2s"}}>
+            <span style={{fontSize:28}}>📎</span>
+            <span style={{fontSize:13,color:"#7c3aed",fontWeight:600}}>{uploadLoading?"업로드 중...":"파일 선택 또는 드래그 앤 드롭"}</span>
+            <span style={{fontSize:11,color:"#a78bfa"}}>PDF, JPG, PNG 지원</span>
+            <input type="file" accept=".pdf,image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&uploadNoticeFile(e.target.files[0])} disabled={uploadLoading}/>
+          </label>
+          {uploadMsg && <div style={{fontSize:12,marginTop:8,color:uploadMsg.includes("완료")?"#16a34a":"#dc2626"}}>{uploadMsg}</div>}
+          {noticeFileUrl && (
+            <div style={{marginTop:12,padding:"10px 12px",background:"#fff",border:"1px solid #c4b5fd",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
+              <span style={{fontSize:12,color:"#7c3aed",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>✅ {noticeFileUrl.split("/").pop()}</span>
+              <button type="button" onClick={()=>setNoticeFileUrl("")} style={{fontSize:12,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
+            </div>
+          )}
+          <button type="button" onClick={saveAllSettings}
+            style={{width:"100%",marginTop:16,padding:"12px",fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:8,cursor:"pointer"}}>
+            {saveMsg || "💾 공지 저장"}
+          </button>
+        </div>
+        {(notice || noticeFileUrl) && (
+          <div style={{marginTop:16,padding:12,background:"#fff",border:"1px solid #e5e7eb",borderRadius:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:8}}>미리보기</div>
+            {notice && <div style={{fontSize:13,color:"#374151",lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:noticeFileUrl?12:0}}>{notice}</div>}
+            {noticeFileUrl && <div style={{fontSize:11,color:"#7c3aed"}}>📎 첨부 파일 연결됨</div>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   const costInp = { width:"100%",maxWidth:"100%",minWidth:0,padding:"2px 4px",fontSize:11,fontWeight:700,color:"#1e40af",background:"#fff",border:"1px solid #93c5fd",borderRadius:4,boxSizing:"border-box",textAlign:"right" };
 
   const AdminPriceCols = ({d20,d40,prefix="",editable,onCost20,onCost40}) => (
@@ -951,7 +1009,10 @@ export default function App() {
           </div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {isAdmin && (
-              <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer"}}>Clients</button>
+              <>
+                <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer"}}>Notice</button>
+                <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer"}}>Clients</button>
+              </>
             )}
             {(isClient || isAdmin) ? (
               <button onClick={logout} style={{fontSize:11,fontWeight:500,padding:"6px 12px",borderRadius:20,background:"#f3f4f6",color:"#6b7280",border:"1px solid #e5e7eb",cursor:"pointer"}}>Logout</button>
@@ -1080,41 +1141,6 @@ export default function App() {
             <button onClick={saveAllSettings}
               style={{width:"100%",marginTop:4,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#16a34a",border:"none",borderRadius:6,cursor:"pointer"}}>
               {saveMsg || "💾 저장"}
-            </button>
-          </div>
-          <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:10,padding:12,marginBottom:8}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
-              <div style={{fontSize:10,fontWeight:700,color:"#6b21a8"}}>NOTICE / GRI 공지</div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
-                <span style={{fontSize:11,color:"#7c3aed"}}>{noticeOn?"ON":"OFF"}</span>
-                <div onClick={()=>setNoticeOn(p=>!p)} style={{width:36,height:20,borderRadius:10,background:noticeOn?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative"}}>
-                  <div style={{position:"absolute",top:2,left:noticeOn?18:2,width:16,height:16,borderRadius:8,background:"#fff",transition:"left 0.2s"}}/>
-                </div>
-              </div>
-            </div>
-            <textarea value={notice} onChange={e=>setNotice(e.target.value)} placeholder="공지 텍스트 입력 (선사 GRI, 스케줄 변경 등)"
-              style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:6,boxSizing:"border-box",minHeight:80,resize:"vertical",fontFamily:"inherit",marginBottom:8}}/>
-            <div style={{fontSize:10,fontWeight:700,color:"#6b21a8",marginBottom:6}}>공문 파일 첨부 (PDF / 이미지)</div>
-            <label
-              onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-              onDragLeave={()=>setDragOver(false)}
-              onDrop={e=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer.files[0];if(f)uploadNoticeFile(f);}}
-              style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:4,padding:"16px 12px",background:dragOver?"#ede9fe":"#fff",border:`2px dashed ${dragOver?"#7c3aed":"#c4b5fd"}`,borderRadius:8,cursor:"pointer",transition:"all 0.2s"}}>
-              <span style={{fontSize:24}}>📎</span>
-              <span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>{uploadLoading?"업로드 중...":"파일 선택 또는 드래그 앤 드롭"}</span>
-              <span style={{fontSize:11,color:"#a78bfa"}}>PDF, JPG, PNG 지원</span>
-              <input type="file" accept=".pdf,image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&uploadNoticeFile(e.target.files[0])} disabled={uploadLoading}/>
-            </label>
-            {uploadMsg && <div style={{fontSize:11,marginTop:6,color:uploadMsg.includes("완료")?"#16a34a":"#dc2626"}}>{uploadMsg}</div>}
-            {noticeFileUrl && (
-              <div style={{marginTop:8,padding:"8px 10px",background:"#fff",border:"1px solid #c4b5fd",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-                <span style={{fontSize:11,color:"#7c3aed",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",maxWidth:"80%"}}>✅ {noticeFileUrl.split("/").pop()}</span>
-                <button onClick={()=>setNoticeFileUrl("")} style={{fontSize:11,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
-              </div>
-            )}
-            <button onClick={saveAllSettings}
-              style={{width:"100%",marginTop:10,padding:"9px",fontSize:12,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:8,cursor:"pointer"}}>
-              {saveMsg || "💾 설정 저장"}
             </button>
           </div>
         </div>
