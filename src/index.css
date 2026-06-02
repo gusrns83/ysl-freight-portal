@@ -28,6 +28,8 @@
   font-size: 11px;
   font-weight: 700;
   line-height: 1.2;
+  min-height: 22px;
+  box-sizing: border-box;
 }
 .admin-price-cols .apc-inp {
   width: 100%;
@@ -42,6 +44,9 @@
   border-radius: 4px;
   box-sizing: border-box;
   text-align: right;
+  min-height: 22px;
+  display: block;
+  margin: 0; 
 }
 .admin-card-btn {
   flex-wrap: wrap;
