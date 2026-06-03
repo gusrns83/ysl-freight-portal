@@ -227,9 +227,11 @@ const Logo = ({size=32}) => (
   </svg>
 );
 
-const AD_BANNER_URL = "https://www.yslagency.com/en/index.asp";
+const AD_BANNER_URL = "http://www.yslagency.com/en/index.asp";
 
 function FooterAdSlot() {
+  const isHttpsPortal = typeof window !== "undefined" && window.location.protocol === "https:";
+
   return (
     <section className="app-ad-slot" aria-label="Advertisement">
       <div className="app-ad-slot-inner">
@@ -246,18 +248,44 @@ function FooterAdSlot() {
           </a>
         </div>
         <div className="app-ad-frame-wrap">
-          <iframe
-            src={AD_BANNER_URL}
-            title="YSL Agency"
-            className="app-ad-iframe"
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
+          {isHttpsPortal ? (
+            <a
+              href={AD_BANNER_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="app-ad-card"
+            >
+              <div className="app-ad-card-browser">
+                <span className="app-ad-card-dots" aria-hidden>
+                  <i /><i /><i />
+                </span>
+                <span className="app-ad-card-url">www.yslagency.com</span>
+              </div>
+              <div className="app-ad-card-body">
+                <div className="app-ad-card-mark">YSL</div>
+                <div className="app-ad-card-name">YSL Agency</div>
+                <div className="app-ad-card-desc">Global Logistics · Freight Forwarding · Far East</div>
+                <span className="app-ad-card-cta">공식 웹사이트 방문 →</span>
+              </div>
+            </a>
+          ) : (
+            <iframe
+              src={AD_BANNER_URL}
+              title="YSL Agency"
+              className="app-ad-iframe"
+              loading="lazy"
+              referrerPolicy="no-referrer-when-downgrade"
+            />
+          )}
         </div>
         <p className="app-ad-note">
-          사이트가 보이지 않으면{" "}
-          <a href={AD_BANNER_URL} target="_blank" rel="noopener noreferrer">여기를 눌러</a>
-          {" "}YSL Agency 웹사이트를 열어주세요.
+          {isHttpsPortal ? (
+            <>YSL 사이트는 HTTP만 지원해 HTTPS 포탈 안에서는 미리보기를 띄울 수 없습니다. 배너를 누르면 새 창에서 열립니다.</>
+          ) : (
+            <>미리보기가 안 되면{" "}
+              <a href={AD_BANNER_URL} target="_blank" rel="noopener noreferrer">여기</a>
+              {" "}를 눌러주세요.</>
+          )}
         </p>
       </div>
     </section>
