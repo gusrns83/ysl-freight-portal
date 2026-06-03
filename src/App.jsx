@@ -344,14 +344,12 @@ const ValidityDateInput = ({ kind, value, onChange, compact, min }) => (
   />
 );
 
-const Logo = ({size=32}) => (
-  <svg width={size} height={size} viewBox="0 0 100 100">
-    <circle cx="50" cy="50" r="49" fill="#1D2B4F"/><circle cx="50" cy="50" r="40" fill="#E8A817"/>
-    <polygon points="50,10 55,40 50,32 45,40" fill="#C0392B"/><polygon points="50,90 55,60 50,68 45,60" fill="#C0392B"/>
-    <polygon points="10,50 40,45 32,50 40,55" fill="#C0392B"/><polygon points="90,50 60,45 68,50 60,55" fill="#C0392B"/>
-    <polygon points="22,22 40,40 34,36 36,34" fill="#C0392B"/><polygon points="78,78 60,60 66,64 64,66" fill="#C0392B"/>
-    <polygon points="78,22 60,40 64,34 66,36" fill="#C0392B"/><polygon points="22,78 40,60 36,66 34,64" fill="#C0392B"/>
-    <circle cx="50" cy="50" r="7" fill="white"/><circle cx="50" cy="50" r="3.5" fill="#C0392B"/>
+const Logo = ({ size = 32 }) => (
+  <svg width={size} height={size} viewBox="0 0 100 100" aria-hidden>
+    <circle cx="50" cy="50" r="47" fill="#FFCC00" stroke="#0F1440" strokeWidth="2.8" />
+    <polygon points="50,12 88,50 50,88 12,50" fill="#E60000" />
+    <polygon points="50,12 88,50 50,88 12,50" fill="#E60000" transform="rotate(45 50 50)" />
+    <circle cx="50" cy="50" r="5" fill="#FFFFFF" />
   </svg>
 );
 
