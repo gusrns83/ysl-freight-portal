@@ -119,6 +119,7 @@ const defaultCarrierRates = () => Object.fromEntries(CRS.map(k => [k, {
   future: { coc20: "", coc40: "", soc20: "", soc40: "" },
 }]));
 const CN = {SNK:"Sinokor",DY:"Dongyoung",CK:"CK Line"};
+const CN_KR = {SNK:"장금상선",DY:"동영해운",CK:"CK Line"};
 const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
 const F_TO_R = Object.fromEntries(Object.entries(PM).map(([rental, freight]) => [freight, rental]));
 const DOC_RC = {mow:"Moscow",spb:"St.Petersburg",nsb:"Novosibirsk",ekb:"Ekaterinburg"};
@@ -205,6 +206,15 @@ export default function App() {
   const fData = useMemo(() => FR.map(r => ({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})), []);
   const rData = useMemo(() => RN.map(r => { const r20={},r40={}; RC.forEach((c,i)=>{r20[c]=r[1+i];r40[c]=r[13+i];}); return {pol:r[0],r20,r40}; }), []);
   const areas = useMemo(() => [...new Set(fData.map(d=>d.area))], [fData]);
+  const carrierAreaGroups = useMemo(() => {
+    const groups = [];
+    fData.forEach(row => {
+      const last = groups[groups.length - 1];
+      if (!last || last.area !== row.area) groups.push({ area: row.area, rows: [row] });
+      else last.rows.push(row);
+    });
+    return groups;
+  }, [fData]);
   const fMap = useMemo(() => Object.fromEntries(fData.map(d=>[d.pol,d])), [fData]);
 
   // Auth
@@ -253,7 +263,6 @@ export default function App() {
   const [showMgr, setShowMgr] = useState(false);
   const [showNoticeAdmin, setShowNoticeAdmin] = useState(false);
   const [showCarrierAdmin, setShowCarrierAdmin] = useState(false);
-  const [carrierAdminPol, setCarrierAdminPol] = useState("__global__");
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
   const [clients, setClients] = useState([]);
@@ -963,66 +972,48 @@ export default function App() {
 
   // ── CARRIER RATES ADMIN ──
   if (showCarrierAdmin && isAdmin) {
-    const caGlobal = carrierAdminPol === "__global__";
-    const caRow = caGlobal ? fData.find(d => d.rates[carrierAdminCr]?.coc20 != null || d.rates[carrierAdminCr]?.soc20 != null) : fData.find(d => d.pol === carrierAdminPol);
     const caPeriod = carrierAdminPeriod;
     const caCr = carrierAdminCr;
-    const getCaCost = (t) => {
-      if (caGlobal) {
-        const g = carrierRates[caCr]?.[caPeriod]?.[t];
-        if (g !== "" && g != null) return Number(g);
-        return caRow?.rates[caCr]?.[t] ?? null;
+    const isFuture = caPeriod === "future";
+    const renderGridCell = (row, type) => {
+      const base = row.rates[caCr]?.[type];
+      const cost = getCarrierRate(row, caCr, type, caPeriod);
+      if (base == null && cost == null) {
+        return <td className="cg-cell cg-empty">—</td>;
       }
-      return caRow ? getCarrierRate(caRow, caCr, t, caPeriod) : null;
+      const margin = getM(row.pol, row.area, type);
+      const sell = cost != null ? cost + margin : null;
+      return (
+        <td className={`cg-cell${isFuture ? " cg-future" : ""}`}>
+          <input type="number" inputMode="numeric" className="cg-inp"
+            value={cost ?? ""} placeholder="—"
+            onChange={e => applyCarrierRate(row.pol, caCr, type, e.target.value, caPeriod)}/>
+          {sell != null && <div className="cg-sell">${n(sell)}</div>}
+        </td>
+      );
     };
-    const getCaMargin = (t) => {
-      if (!caRow) return margins[t];
-      return getM(caRow.pol, caRow.area, t);
-    };
-    const applyCaCost = (t, v) => {
-      if (caGlobal) setGlobalCarrierRate(caCr, caPeriod, t, v);
-      else if (caRow) applyCarrierRate(caRow.pol, caCr, t, v, caPeriod);
-    };
-    const applyCaMargin = (t, v) => {
-      if (caGlobal) setMargins(p => ({ ...p, [t]: parseInt(v, 10) || 0 }));
-      else if (caRow) applyPolMargin(caRow.pol, t, v);
-    };
-    const coc20 = mkPrice(getCaCost("coc20"), getCaMargin("coc20"), caCr);
-    const coc40 = mkPrice(getCaCost("coc40"), getCaMargin("coc40"), caCr);
-    const soc20 = mkPrice(getCaCost("soc20"), getCaMargin("soc20"), caCr);
-    const soc40 = mkPrice(getCaCost("soc40"), getCaMargin("soc40"), caCr);
     return (
       <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
         <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
           <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
           <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
-          <div style={{width:48}}/>
+          <button type="button" onClick={saveCarrierPricing}
+            style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:"#2563eb",color:"#fff",border:"none",cursor:"pointer"}}>
+            {saveMsg ? saveMsg : "저장"}
+          </button>
         </div>
-        <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 80px"}}>
-          <div style={{fontSize:11,color:"#6b7280",marginBottom:12}}>선사별 매입·매출·마진 · 현재/향후 운임</div>
-
-          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:12,marginBottom:12}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#374151",marginBottom:6}}>POL 선택</div>
-            <select value={carrierAdminPol} onChange={e=>setCarrierAdminPol(e.target.value)}
-              style={{width:"100%",padding:"8px 10px",fontSize:13,border:"1px solid #d1d5db",borderRadius:8,background:"#fff",boxSizing:"border-box"}}>
-              <option value="__global__">전체 기본 (모든 POL 공통)</option>
-              {fData.map(d=><option key={d.pol} value={d.pol}>{d.area} · {d.pol}</option>)}
-            </select>
-            {caGlobal && <div style={{fontSize:9,color:"#9ca3af",marginTop:6}}>전체 기본: 미입력 POL은 운임표 자동 · POL 선택 시 해당 도시만 개별 수정</div>}
-          </div>
-
-          <div style={{display:"flex",background:"#eff6ff",borderRadius:10,padding:3,marginBottom:10}}>
+        <div style={{maxWidth:960,margin:"0 auto",padding:"12px 12px 80px"}}>
+          <div style={{display:"flex",background:"#eff6ff",borderRadius:10,padding:3,marginBottom:8}}>
             {CRS.map(k=>(
               <button key={k} type="button" onClick={()=>setCarrierAdminCr(k)}
                 style={{flex:1,padding:"8px 4px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
                   background:carrierAdminCr===k?"#fff":"transparent",color:carrierAdminCr===k?"#1e40af":"#60a5fa",
                   boxShadow:carrierAdminCr===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
-                {k}
+                {CN_KR[k]} ({k})
               </button>
             ))}
           </div>
-
-          <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:12}}>
+          <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:10}}>
             {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
               <button key={k} type="button" onClick={()=>setCarrierAdminPeriod(k)}
                 style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
@@ -1032,56 +1023,58 @@ export default function App() {
               </button>
             ))}
           </div>
-
-          <div style={{background:"#fff",border:"1px solid #bfdbfe",borderRadius:12,padding:14,marginBottom:12}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
-              <Bg k={caCr}/><span style={{fontSize:14,fontWeight:700,color:"#111"}}>{CN[caCr]}</span>
-              {caRow && !caGlobal && <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4}}>{caRow.pol}</span>}
-              <ValidityCell carrierKey={caCr}/>
-            </div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
-              <div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:10}}>
+            {CRS.map(k=>(
+              <div key={k} style={{opacity:caCr===k?1:0.45}}>
+                <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:4}}><Bg k={k}/><span style={{fontSize:10,fontWeight:700}}>{CN_KR[k]}</span></div>
                 <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
-                <input value={validityInfo[caCr]?.current??""} onChange={e=>setValidityInfo(p=>({...p,[caCr]:{...p[caCr],current:e.target.value}}))}
-                  style={{width:"100%",padding:"6px 8px",fontSize:11,border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box",background:"#f0fdf4"}}/>
-              </div>
-              <div>
+                <input value={validityInfo[k]?.current??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],current:e.target.value}}))}
+                  style={{width:"100%",padding:"4px 6px",fontSize:10,border:"1px solid #86efac",borderRadius:4,boxSizing:"border-box",background:"#f0fdf4",marginBottom:4}}/>
                 <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
-                <input value={validityInfo[caCr]?.future??""} onChange={e=>setValidityInfo(p=>({...p,[caCr]:{...p[caCr],future:e.target.value}}))}
-                  style={{width:"100%",padding:"6px 8px",fontSize:11,border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box",background:"#fffbeb"}}/>
-              </div>
-            </div>
-
-            <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:6}}>마진 (USD) {caGlobal ? "· 전체 기본" : `· ${caRow?.pol}`}</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:14}}>
-              {RATE_TYPES.map(t=>(
-                <div key={t}>
-                  <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
-                  <input type="number" value={getCaMargin(t)} onChange={e=>applyCaMargin(t,e.target.value)}
-                    style={{width:"100%",padding:"6px",fontSize:12,fontWeight:700,color:"#92400e",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/>
-                </div>
-              ))}
-            </div>
-
-            {[{label:"COC",d20:coc20,d40:coc40,t20:"coc20",t40:"coc40"},
-              {label:"SOC",d20:soc20,d40:soc40,t20:"soc20",t40:"soc40"}].map(({label,d20,d40,t20,t40})=>(
-              <div key={label} style={{marginBottom:14,paddingTop:10,borderTop:"1px solid #f3f4f6"}}>
-                <div style={{fontSize:11,fontWeight:700,color:"#1e40af",marginBottom:8}}>{label} · {carrierAdminPeriod==="current"?"현재":"향후"}</div>
-                <AdminPriceCols d20={d20} d40={d40} editable
-                  onCost20={v=>applyCaCost(t20,v)}
-                  onCost40={v=>applyCaCost(t40,v)}/>
+                <input value={validityInfo[k]?.future??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],future:e.target.value}}))}
+                  style={{width:"100%",padding:"4px 6px",fontSize:10,border:"1px solid #fcd34d",borderRadius:4,boxSizing:"border-box",background:"#fffbeb"}}/>
               </div>
             ))}
           </div>
-
-          {!caRow && !caGlobal && (
-            <div style={{fontSize:12,color:"#dc2626",marginBottom:12}}>POL 데이터 없음</div>
-          )}
-
-          <button type="button" onClick={saveCarrierPricing}
-            style={{width:"100%",padding:"12px",fontSize:13,fontWeight:700,color:"#fff",background:"#2563eb",border:"none",borderRadius:8,cursor:"pointer"}}>
-            {saveMsg || "💾 운임·마진 저장"}
-          </button>
+          <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
+            매입가 직접 입력 · 아래 작은 글씨 = 매출가(마진 포함) · {fData.length}개 POL
+          </div>
+          <div className="carrier-grid-wrap">
+            <table className="carrier-grid">
+              <thead>
+                <tr className="cg-carrier-row">
+                  <th colSpan={2}></th>
+                  <th colSpan={4}><Bg k={caCr}/> {CN_KR[caCr]} · {isFuture ? "향후" : "현재"} 운임 (USD)</th>
+                </tr>
+                <tr className="cg-head-row">
+                  <th rowSpan={2} className="cg-th-area">AREA</th>
+                  <th rowSpan={2} className="cg-th-pol">POL</th>
+                  <th colSpan={2}>COC</th>
+                  <th colSpan={2}>SOC</th>
+                </tr>
+                <tr className="cg-head-row">
+                  <th>20&apos;</th>
+                  <th>40&apos;</th>
+                  <th>20&apos;</th>
+                  <th>40&apos;</th>
+                </tr>
+              </thead>
+              <tbody>
+                {carrierAreaGroups.map(({ area, rows }) => rows.map((row, ri) => (
+                  <tr key={row.pol} className={ri % 2 === 1 ? "cg-stripe" : ""}>
+                    {ri === 0 && (
+                      <td rowSpan={rows.length} className="cg-area">{area}</td>
+                    )}
+                    <td className="cg-pol">{row.pol}</td>
+                    {renderGridCell(row, "coc20")}
+                    {renderGridCell(row, "coc40")}
+                    {renderGridCell(row, "soc20")}
+                    {renderGridCell(row, "soc40")}
+                  </tr>
+                )))}
+              </tbody>
+            </table>
+          </div>
         </div>
       </div>
     );
