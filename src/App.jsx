@@ -1006,11 +1006,6 @@ export default function App() {
                         value={cost ?? ""} placeholder="—"
                         onChange={e => applyCarrierRate(row.pol, caCr, type, e.target.value, caPeriod)}/>
                     </td>
-                    <td rowSpan={2} className="cg-margin-col">
-                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
-                        value={margin} onChange={e => applyPolMargin(row.pol, type, e.target.value)}/>
-                      <span className="cg-margin-lbl">(마진)</span>
-                    </td>
                   </tr>
                   <tr>
                     <td className="cg-mini-label">매출</td>
@@ -1020,14 +1015,28 @@ export default function App() {
                         onChange={e => applyCellSell(row, type, e.target.value)}/>
                     </td>
                   </tr>
+                  <tr className="cg-mini-margin-tr">
+                    <td className="cg-mini-label cg-mini-label-margin">마진</td>
+                    <td>
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
+                        value={margin} onChange={e => applyPolMargin(row.pol, type, e.target.value)}/>
+                    </td>
+                  </tr>
                 </tbody>
               </table>
               <button type="button" className="cg-close" onClick={() => setCarrierEditCell(null)}>닫기</button>
             </div>
           ) : (
             <button type="button" className="cg-box" onClick={() => setCarrierEditCell(cellKey)}>
-              <div className="cg-cost-display">{cost != null ? n(cost) : "—"}</div>
-              {sell != null && <div className="cg-sell-ref">${n(sell)}</div>}
+              <div className="cg-pair-row">
+                <span className="cg-lbl">매입</span>
+                <span className="cg-val cg-val-cost">{cost != null ? n(cost) : "—"}</span>
+              </div>
+              <div className="cg-pair-row">
+                <span className="cg-lbl">매출</span>
+                <span className="cg-val cg-val-sell">{sell != null ? n(sell) : "—"}</span>
+              </div>
+              <div className="cg-margin-hint">마진 {n(margin)}</div>
             </button>
           )}
         </td>
@@ -1078,7 +1087,7 @@ export default function App() {
             ))}
           </div>
           <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
-            셀 클릭 → 매입·매출·마진 조정 · {fData.length}개 POL
+            셀 클릭 → 매입·매출 조정 · {fData.length}개 POL
           </div>
           <div className="carrier-grid-wrap">
             <table className="carrier-grid">
