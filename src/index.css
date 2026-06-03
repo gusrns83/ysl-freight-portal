@@ -76,12 +76,20 @@
   }
 }
 
+.carrier-admin-page {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 12px 12px 80px;
+  box-sizing: border-box;
+}
+
 .carrier-grid-wrap {
   overflow-x: auto;
   background: #fff;
   border: 1px solid #d1d5db;
   border-radius: 8px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+  width: 100%;
 }
 .carrier-grid {
   border-collapse: collapse;
@@ -268,4 +276,60 @@
 }
 .carrier-grid .cg-close:hover {
   background: #e5e7eb;
+}
+
+@media (min-width: 768px) {
+  .carrier-admin-page {
+    max-width: 1080px;
+    padding: 16px 24px 80px;
+  }
+  .carrier-grid-wrap {
+    display: flex;
+    justify-content: center;
+  }
+  .carrier-grid {
+    width: 100%;
+    max-width: 100%;
+    font-size: 12px;
+  }
+  .carrier-grid .cg-carrier-row th {
+    font-size: 14px;
+    padding: 10px 12px;
+  }
+  .carrier-grid .cg-head-row th {
+    font-size: 11px;
+    padding: 6px 8px;
+  }
+  .carrier-grid .cg-area {
+    font-size: 11px;
+    padding: 4px 8px;
+  }
+  .carrier-grid .cg-pol {
+    font-size: 11px;
+    padding: 4px 10px 4px 8px;
+  }
+  .carrier-grid .cg-cell {
+    width: auto;
+    padding: 4px 6px;
+  }
+  .carrier-grid .cg-cell.cg-empty {
+    width: 10%;
+  }
+  .carrier-grid .cg-box {
+    display: block;
+    width: 100%;
+    min-width: 72px;
+    padding: 8px 10px;
+    box-sizing: border-box;
+  }
+  .carrier-grid .cg-cost-display {
+    font-size: 14px;
+  }
+  .carrier-grid .cg-sell-ref {
+    font-size: 9px;
+    margin-top: 3px;
+  }
+  .carrier-grid .cg-cell.cg-active {
+    min-width: 100px;
+  }
 }
