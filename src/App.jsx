@@ -263,34 +263,24 @@ const MAIN_TABS = [
 
 const marginInpStyle = {width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"};
 
-const clearPolMarginType = (polM, type) => {
-  const next = { ...polM };
-  for (const pol of Object.keys(next)) {
-    if (next[pol]?.[type] == null) continue;
-    const row = { ...next[pol] };
-    delete row[type];
-    if (Object.keys(row).length === 0) delete next[pol];
-    else next[pol] = row;
-  }
-  return next;
-};
+const marginNowTs = () => Date.now();
 
-const clearPolMarginsForArea = (polM, fData, area) => {
-  const next = { ...polM };
-  fData.filter(d => d.area === area).forEach(d => delete next[d.pol]);
-  return next;
-};
+const pickLatestMargin = (candidates) =>
+  candidates.reduce((best, c) => (c.ts > best.ts ? c : best)).value;
 
-const clearPolMarginTypeForArea = (polM, fData, area, type) => {
-  const next = { ...polM };
-  fData.filter(d => d.area === area).forEach(d => {
-    if (next[d.pol]?.[type] == null) return;
-    const row = { ...next[d.pol] };
-    delete row[type];
-    if (Object.keys(row).length === 0) delete next[d.pol];
-    else next[d.pol] = row;
+const buildLegacyMarginTimestamps = (areaM, polM) => {
+  const marginTs = Object.fromEntries(RATE_TYPES.map(t => [t, 1]));
+  const areaTs = {};
+  Object.entries(areaM || {}).forEach(([area, m]) => {
+    areaTs[area] = {};
+    RATE_TYPES.forEach(t => { if (m[t] != null) areaTs[area][t] = 2; });
   });
-  return next;
+  const polTs = {};
+  Object.entries(polM || {}).forEach(([pol, m]) => {
+    polTs[pol] = {};
+    RATE_TYPES.forEach(t => { if (m[t] != null) polTs[pol][t] = 3; });
+  });
+  return { marginTs, areaTs, polTs };
 };
 
 function MarginPanel({
@@ -298,7 +288,7 @@ function MarginPanel({
   marginTab, setMarginTab,
   margins, applyGlobalMargin,
   selArea, setSelArea, areaM, applyAreaMarginType, applyAreaMargins,
-  selPol, setSelPol, polM, setPolM, polEdit, setPolEdit,
+  selPol, setSelPol, polM, applyPolMargins, clearPolMargins, polEdit, setPolEdit,
   areas, fData, getM,
 }) {
   return (
@@ -312,7 +302,7 @@ function MarginPanel({
       {filterHint && <div style={{fontSize:9,color:"#b45309",marginBottom:8}}>{filterHint}</div>}
       {marginTab==="global" && (
         <div>
-          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>모든 구간에 적용되는 기본 마진</div>
+          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>모든 구간 기본 마진 · 마지막 수정 기준 우선</div>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
             {RATE_TYPES.map(t=>(
               <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
@@ -324,7 +314,7 @@ function MarginPanel({
       )}
       {marginTab==="area" && (
         <div>
-          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>지역별 마진 (전체 마진보다 우선 · 선택 시 운임표 필터)</div>
+          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>지역별 마진 (마지막 수정 기준 · 선택 시 운임표 필터)</div>
           <select value={selArea} onChange={e=>setSelArea(e.target.value)}
             style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
             <option value="">-- 전체 지역 --</option>
@@ -357,7 +347,7 @@ function MarginPanel({
       )}
       {marginTab==="pol" && (
         <div>
-          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>도시별 마진 (최우선 · 선택 시 해당 POL만 표시)</div>
+          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>도시별 마진 (마지막 수정 기준 · 선택 시 해당 POL만 표시)</div>
           <select value={selPol} onChange={e=>{setSelPol(e.target.value); const m=polM[e.target.value]; setPolEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""});}}
             style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
             <option value="">-- 전체 POL --</option>
@@ -372,9 +362,9 @@ function MarginPanel({
               ))}
             </div>
             <div style={{display:"flex",gap:6}}>
-              <button type="button" onClick={()=>{const area=fData.find(d=>d.pol===selPol)?.area||""; const m={coc20:parseInt(polEdit.coc20)||getM(selPol,area,"coc20"),coc40:parseInt(polEdit.coc40)||getM(selPol,area,"coc40"),soc20:parseInt(polEdit.soc20)||getM(selPol,area,"soc20"),soc40:parseInt(polEdit.soc40)||getM(selPol,area,"soc40")}; setPolM(p=>({...p,[selPol]:m}));}}
+              <button type="button" onClick={()=>{const area=fData.find(d=>d.pol===selPol)?.area||""; const m={coc20:parseInt(polEdit.coc20)||getM(selPol,area,"coc20"),coc40:parseInt(polEdit.coc40)||getM(selPol,area,"coc40"),soc20:parseInt(polEdit.soc20)||getM(selPol,area,"soc20"),soc40:parseInt(polEdit.soc40)||getM(selPol,area,"soc40")}; applyPolMargins(selPol, m);}}
                 style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
-              <button type="button" onClick={()=>{setPolM(p=>{const n={...p};delete n[selPol];return n;});setPolEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
+              <button type="button" onClick={()=>{clearPolMargins(selPol); setPolEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
                 style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
             </div>
           </>}
@@ -416,8 +406,11 @@ export default function App() {
 
   // Default margins (used for guest + admin)
   const [margins, setMargins] = useState({coc20:80,coc40:100,soc20:80,soc40:100});
+  const [marginTs, setMarginTs] = useState(() => Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])));
   const [areaM, setAreaM] = useState({});
+  const [areaTs, setAreaTs] = useState({});
   const [polM, setPolM] = useState({});
+  const [polTs, setPolTs] = useState({});
   const [polCostO, setPolCostO] = useState({});
   const [marginTab, setMarginTab] = useState("global");
   const [selArea, setSelArea] = useState("");
@@ -495,31 +488,69 @@ export default function App() {
   const toggleClient = async (id,cur) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify({is_active:!cur})}); loadClients(); };
 
   const getM = (pol, area, type) => {
-    if (polM[pol]?.[type] != null) return polM[pol][type];
-    if (areaM[area]?.[type] != null) return areaM[area][type];
-    return margins[type];
+    const candidates = [{ value: margins[type], ts: marginTs[type] ?? 0 }];
+    if (areaM[area]?.[type] != null) {
+      candidates.push({ value: areaM[area][type], ts: areaTs[area]?.[type] ?? 0 });
+    }
+    if (polM[pol]?.[type] != null) {
+      candidates.push({ value: polM[pol][type], ts: polTs[pol]?.[type] ?? 0 });
+    }
+    return pickLatestMargin(candidates);
   };
+
   const applyPolMargin = (pol, type, value) => {
     const v = parseInt(value, 10);
+    const ts = marginNowTs();
     setPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: Number.isFinite(v) ? v : 0 } }));
+    setPolTs(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: ts } }));
+  };
+
+  const applyPolMargins = (pol, m) => {
+    const ts = marginNowTs();
+    setPolM(p => ({ ...p, [pol]: m }));
+    setPolTs(p => ({
+      ...p,
+      [pol]: {
+        ...(p[pol] || {}),
+        ...Object.fromEntries(Object.keys(m).map(t => [t, ts])),
+      },
+    }));
+  };
+
+  const clearPolMargins = (pol) => {
+    setPolM(p => { const n = { ...p }; delete n[pol]; return n; });
+    setPolTs(p => { const n = { ...p }; delete n[pol]; return n; });
   };
 
   const applyGlobalMargin = (type, value) => {
     const v = parseInt(value, 10) || 0;
+    const ts = marginNowTs();
     setMargins(p => ({ ...p, [type]: v }));
-    setPolM(p => clearPolMarginType(p, type));
+    setMarginTs(p => ({ ...p, [type]: ts }));
   };
 
   const applyAreaMarginType = (area, type, value) => {
     const v = parseInt(value, 10) || 0;
+    const ts = marginNowTs();
     setAreaM(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: v } }));
-    setPolM(p => clearPolMarginTypeForArea(p, fData, area, type));
+    setAreaTs(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: ts } }));
   };
 
   const applyAreaMargins = (area, m) => {
-    if (m) setAreaM(p => ({ ...p, [area]: m }));
-    else setAreaM(p => { const n = { ...p }; delete n[area]; return n; });
-    setPolM(p => clearPolMarginsForArea(p, fData, area));
+    if (m) {
+      const ts = marginNowTs();
+      setAreaM(p => ({ ...p, [area]: m }));
+      setAreaTs(p => ({
+        ...p,
+        [area]: {
+          ...(p[area] || {}),
+          ...Object.fromEntries(Object.keys(m).map(t => [t, ts])),
+        },
+      }));
+    } else {
+      setAreaM(p => { const n = { ...p }; delete n[area]; return n; });
+      setAreaTs(p => { const n = { ...p }; delete n[area]; return n; });
+    }
   };
 
   const updateCarrierValidity = (carrier, field, value) => {
@@ -603,6 +634,9 @@ export default function App() {
         saveSetting("global_margins", JSON.stringify(margins)),
         saveSetting("area_margins", JSON.stringify(areaM)),
         saveSetting("pol_margins", JSON.stringify(polM)),
+        saveSetting("margin_timestamps", JSON.stringify(marginTs)),
+        saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
+        saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
         saveSetting("pol_costs", JSON.stringify(polCostO)),
       ]);
       setSaveMsg("저장 완료!");
@@ -662,9 +696,26 @@ export default function App() {
           }
         } catch(e) {}
       }
+      let loadedAreaM = {};
+      let loadedPolM = {};
       if (s.global_margins) { try { setMargins(JSON.parse(s.global_margins)); } catch(e){} }
-      if (s.area_margins) { try { setAreaM(JSON.parse(s.area_margins)); } catch(e){} }
-      if (s.pol_margins) { try { setPolM(JSON.parse(s.pol_margins)); } catch(e){} }
+      if (s.area_margins) { try { loadedAreaM = JSON.parse(s.area_margins); setAreaM(loadedAreaM); } catch(e){} }
+      if (s.pol_margins) { try { loadedPolM = JSON.parse(s.pol_margins); setPolM(loadedPolM); } catch(e){} }
+      if (s.margin_timestamps) {
+        try { setMarginTs(JSON.parse(s.margin_timestamps)); } catch(e){}
+      } else {
+        setMarginTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).marginTs);
+      }
+      if (s.area_margin_timestamps) {
+        try { setAreaTs(JSON.parse(s.area_margin_timestamps)); } catch(e){}
+      } else {
+        setAreaTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).areaTs);
+      }
+      if (s.pol_margin_timestamps) {
+        try { setPolTs(JSON.parse(s.pol_margin_timestamps)); } catch(e){}
+      } else {
+        setPolTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).polTs);
+      }
       if (s.pol_costs) { try { setPolCostO(JSON.parse(s.pol_costs)); } catch(e){} }
     }).catch(()=>{});
   }, []);
@@ -908,6 +959,9 @@ export default function App() {
         saveSetting("pol_margins", JSON.stringify(polM)),
         saveSetting("global_margins", JSON.stringify(margins)),
         saveSetting("area_margins", JSON.stringify(areaM)),
+        saveSetting("margin_timestamps", JSON.stringify(marginTs)),
+        saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
+        saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
         saveSetting("validity_info_json", JSON.stringify(validityInfo)),
       ]);
       setSaveMsg("저장 완료!");
@@ -1324,7 +1378,7 @@ export default function App() {
             selArea={selArea} setSelArea={setSelArea}
             areaM={areaM} applyAreaMarginType={applyAreaMarginType} applyAreaMargins={applyAreaMargins}
             selPol={selPol} setSelPol={setSelPol}
-            polM={polM} setPolM={setPolM}
+            polM={polM} applyPolMargins={applyPolMargins} clearPolMargins={clearPolMargins}
             polEdit={polEdit} setPolEdit={setPolEdit}
             areas={areas} fData={fData} getM={getM}
           />
