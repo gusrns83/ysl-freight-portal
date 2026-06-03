@@ -1403,12 +1403,12 @@ export default function App() {
               </div>
             </div>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end",maxWidth:"62%"}}>
             {isAdmin && (
               <>
-                <button onClick={()=>setShowCarrierAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer"}}>Rates</button>
-                <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer"}}>Notice</button>
-                <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer"}}>Clients</button>
+                <button onClick={()=>setShowCarrierAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#1e40af",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>선사운임</button>
+                <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer",whiteSpace:"nowrap"}}>Notice</button>
+                <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer",whiteSpace:"nowrap"}}>Clients</button>
               </>
             )}
             {(isClient || isAdmin) ? (
@@ -1423,6 +1423,10 @@ export default function App() {
       {/* ADMIN MARGIN PANEL */}
       {isAdmin && (
         <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px"}}>
+          <button type="button" onClick={()=>setShowCarrierAdmin(true)}
+            style={{width:"100%",padding:"12px 14px",marginBottom:10,fontSize:13,fontWeight:700,color:"#fff",background:"#1e40af",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            선사별 운임 관리 (매입 · 매출 · 마진)
+          </button>
           <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD)</div>
             {/* Tab selector */}
@@ -1527,7 +1531,7 @@ export default function App() {
           </div>
           <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:4}}>VALIDITY (선사별)</div>
-            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Till / From 날짜 · 매입·매출·마진은 상단 <b>Rates</b> 메뉴</div>
+            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Till / From 날짜만 · 매입·매출·마진은 <b>선사운임</b> 메뉴</div>
             {CRS.map(k=>(
               <div key={k} style={{marginBottom:8,padding:10,background:"#fff",border:"1px solid #bbf7d0",borderRadius:8}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
