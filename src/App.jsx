@@ -252,6 +252,10 @@ export default function App() {
   // Client mgmt
   const [showMgr, setShowMgr] = useState(false);
   const [showNoticeAdmin, setShowNoticeAdmin] = useState(false);
+  const [showCarrierAdmin, setShowCarrierAdmin] = useState(false);
+  const [carrierAdminPol, setCarrierAdminPol] = useState("__global__");
+  const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
+  const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
   const [clients, setClients] = useState([]);
   const [addForm, setAddForm] = useState(false);
   const [editC, setEditC] = useState(null);
@@ -662,6 +666,20 @@ export default function App() {
     } catch(e) { setSaveMsg("저장 실패: " + e.message); }
   };
 
+  const saveCarrierPricing = async () => {
+    try {
+      await Promise.all([
+        saveSetting("carrier_rates_json", JSON.stringify(carrierRates)),
+        saveSetting("pol_costs", JSON.stringify(polCostO)),
+        saveSetting("pol_margins", JSON.stringify(polM)),
+        saveSetting("global_margins", JSON.stringify(margins)),
+        saveSetting("validity_info_json", JSON.stringify(validityInfo)),
+      ]);
+      setSaveMsg("저장 완료!");
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch(e) { setSaveMsg("저장 실패: " + e.message); }
+  };
+
   const renderNoticeFile = (fileUrl, title) => {
     if (!fileUrl) return null;
     const ext = fileUrl.split(".").pop().toLowerCase();
@@ -942,6 +960,135 @@ export default function App() {
       <div style={{fontSize:9,color:"#9ca3af",marginTop:6}}>매입가·마진 변경 후 상단 「설정 저장」</div>
     </div>
   );
+
+    </div>
+  );
+
+  // ── CARRIER RATES ADMIN ──
+  if (showCarrierAdmin && isAdmin) {
+    const caGlobal = carrierAdminPol === "__global__";
+    const caRow = caGlobal ? fData.find(d => d.rates[carrierAdminCr]?.coc20 != null || d.rates[carrierAdminCr]?.soc20 != null) : fData.find(d => d.pol === carrierAdminPol);
+    const caPeriod = carrierAdminPeriod;
+    const caCr = carrierAdminCr;
+    const getCaCost = (t) => {
+      if (caGlobal) {
+        const g = carrierRates[caCr]?.[caPeriod]?.[t];
+        if (g !== "" && g != null) return Number(g);
+        return caRow?.rates[caCr]?.[t] ?? null;
+      }
+      return caRow ? getCarrierRate(caRow, caCr, t, caPeriod) : null;
+    };
+    const getCaMargin = (t) => {
+      if (!caRow) return margins[t];
+      return getM(caRow.pol, caRow.area, t);
+    };
+    const applyCaCost = (t, v) => {
+      if (caGlobal) setGlobalCarrierRate(caCr, caPeriod, t, v);
+      else if (caRow) applyCarrierRate(caRow.pol, caCr, t, v, caPeriod);
+    };
+    const applyCaMargin = (t, v) => {
+      if (caGlobal) setMargins(p => ({ ...p, [t]: parseInt(v, 10) || 0 }));
+      else if (caRow) applyPolMargin(caRow.pol, t, v);
+    };
+    const coc20 = mkPrice(getCaCost("coc20"), getCaMargin("coc20"), caCr);
+    const coc40 = mkPrice(getCaCost("coc40"), getCaMargin("coc40"), caCr);
+    const soc20 = mkPrice(getCaCost("soc20"), getCaMargin("soc20"), caCr);
+    const soc40 = mkPrice(getCaCost("soc40"), getCaMargin("soc40"), caCr);
+    return (
+      <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+        <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
+          <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+          <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
+          <div style={{width:48}}/>
+        </div>
+        <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 80px"}}>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:12}}>선사별 매입·매출·마진 · 현재/향후 운임</div>
+
+          <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,padding:12,marginBottom:12}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#374151",marginBottom:6}}>POL 선택</div>
+            <select value={carrierAdminPol} onChange={e=>setCarrierAdminPol(e.target.value)}
+              style={{width:"100%",padding:"8px 10px",fontSize:13,border:"1px solid #d1d5db",borderRadius:8,background:"#fff",boxSizing:"border-box"}}>
+              <option value="__global__">전체 기본 (모든 POL 공통)</option>
+              {fData.map(d=><option key={d.pol} value={d.pol}>{d.area} · {d.pol}</option>)}
+            </select>
+            {caGlobal && <div style={{fontSize:9,color:"#9ca3af",marginTop:6}}>전체 기본: 미입력 POL은 운임표 자동 · POL 선택 시 해당 도시만 개별 수정</div>}
+          </div>
+
+          <div style={{display:"flex",background:"#eff6ff",borderRadius:10,padding:3,marginBottom:10}}>
+            {CRS.map(k=>(
+              <button key={k} type="button" onClick={()=>setCarrierAdminCr(k)}
+                style={{flex:1,padding:"8px 4px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                  background:carrierAdminCr===k?"#fff":"transparent",color:carrierAdminCr===k?"#1e40af":"#60a5fa",
+                  boxShadow:carrierAdminCr===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+                {k}
+              </button>
+            ))}
+          </div>
+
+          <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:12}}>
+            {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
+              <button key={k} type="button" onClick={()=>setCarrierAdminPeriod(k)}
+                style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                  background:carrierAdminPeriod===k?"#fff":"transparent",
+                  color:carrierAdminPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+
+          <div style={{background:"#fff",border:"1px solid #bfdbfe",borderRadius:12,padding:14,marginBottom:12}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,flexWrap:"wrap"}}>
+              <Bg k={caCr}/><span style={{fontSize:14,fontWeight:700,color:"#111"}}>{CN[caCr]}</span>
+              {caRow && !caGlobal && <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4}}>{caRow.pol}</span>}
+              <ValidityCell carrierKey={caCr}/>
+            </div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}}>
+              <div>
+                <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
+                <input value={validityInfo[caCr]?.current??""} onChange={e=>setValidityInfo(p=>({...p,[caCr]:{...p[caCr],current:e.target.value}}))}
+                  style={{width:"100%",padding:"6px 8px",fontSize:11,border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box",background:"#f0fdf4"}}/>
+              </div>
+              <div>
+                <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
+                <input value={validityInfo[caCr]?.future??""} onChange={e=>setValidityInfo(p=>({...p,[caCr]:{...p[caCr],future:e.target.value}}))}
+                  style={{width:"100%",padding:"6px 8px",fontSize:11,border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box",background:"#fffbeb"}}/>
+              </div>
+            </div>
+
+            <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:6}}>마진 (USD) {caGlobal ? "· 전체 기본" : `· ${caRow?.pol}`}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:14}}>
+              {RATE_TYPES.map(t=>(
+                <div key={t}>
+                  <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                  <input type="number" value={getCaMargin(t)} onChange={e=>applyCaMargin(t,e.target.value)}
+                    style={{width:"100%",padding:"6px",fontSize:12,fontWeight:700,color:"#92400e",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/>
+                </div>
+              ))}
+            </div>
+
+            {[{label:"COC",d20:coc20,d40:coc40,t20:"coc20",t40:"coc40"},
+              {label:"SOC",d20:soc20,d40:soc40,t20:"soc20",t40:"soc40"}].map(({label,d20,d40,t20,t40})=>(
+              <div key={label} style={{marginBottom:14,paddingTop:10,borderTop:"1px solid #f3f4f6"}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#1e40af",marginBottom:8}}>{label} · {carrierAdminPeriod==="current"?"현재":"향후"}</div>
+                <AdminPriceCols d20={d20} d40={d40} editable
+                  onCost20={v=>applyCaCost(t20,v)}
+                  onCost40={v=>applyCaCost(t40,v)}/>
+              </div>
+            ))}
+          </div>
+
+          {!caRow && !caGlobal && (
+            <div style={{fontSize:12,color:"#dc2626",marginBottom:12}}>POL 데이터 없음</div>
+          )}
+
+          <button type="button" onClick={saveCarrierPricing}
+            style={{width:"100%",padding:"12px",fontSize:13,fontWeight:700,color:"#fff",background:"#2563eb",border:"none",borderRadius:8,cursor:"pointer"}}>
+            {saveMsg || "💾 운임·마진 저장"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   // ── CARDS ──
   const OCard = ({row,idx}) => {
@@ -1259,6 +1406,7 @@ export default function App() {
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
             {isAdmin && (
               <>
+                <button onClick={()=>setShowCarrierAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer"}}>Rates</button>
                 <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer"}}>Notice</button>
                 <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer"}}>Clients</button>
               </>
@@ -1379,41 +1527,24 @@ export default function App() {
           </div>
           <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:4}}>VALIDITY (선사별)</div>
-            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Validity 날짜 + 선사별 기본 매입가 (POL별 세부 수정은 카드 펼침)</div>
+            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Till / From 날짜 · 매입·매출·마진은 상단 <b>Rates</b> 메뉴</div>
             {CRS.map(k=>(
-              <div key={k} style={{marginBottom:10,padding:10,background:"#fff",border:"1px solid #bbf7d0",borderRadius:8}}>
+              <div key={k} style={{marginBottom:8,padding:10,background:"#fff",border:"1px solid #bbf7d0",borderRadius:8}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
                   <Bg k={k}/><span style={{fontSize:12,fontWeight:700,color:"#374151"}}>{CN[k]}</span>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   <div>
-                    <div style={{fontSize:9,color:"#166534",marginBottom:2}}>현재 Validity (Till)</div>
+                    <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
                     <input value={validityInfo[k]?.current??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],current:e.target.value}}))} placeholder="Till 15.06.2026"
                       style={{width:"100%",padding:"6px 8px",fontSize:11,fontWeight:600,color:"#166534",background:"#f0fdf4",border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box"}}/>
                   </div>
                   <div>
-                    <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>향후 Validity (From)</div>
+                    <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
                     <input value={validityInfo[k]?.future??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],future:e.target.value}}))} placeholder="From 16.06.2026"
                       style={{width:"100%",padding:"6px 8px",fontSize:11,fontWeight:600,color:"#b45309",background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/>
                   </div>
                 </div>
-                {["current","future"].map(period=>(
-                  <div key={period} style={{marginBottom:period==="current"?8:0}}>
-                    <div style={{fontSize:9,fontWeight:700,color:period==="current"?"#166534":"#b45309",marginBottom:4}}>
-                      {period==="current"?"현재 운임 (매입가 USD)":"향후 운임 (매입가 USD)"}
-                    </div>
-                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
-                      {RATE_TYPES.map(t=>(
-                        <div key={t}>
-                          <div style={{fontSize:9,color:"#6b7280",marginBottom:2}}>{t.toUpperCase()}</div>
-                          <input type="number" value={carrierRates[k]?.[period]?.[t]??""} placeholder="자동"
-                            onChange={e=>setGlobalCarrierRate(k,period,t,e.target.value)}
-                            style={{width:"100%",padding:"5px 6px",fontSize:11,border:`1px solid ${period==="current"?"#86efac":"#fcd34d"}`,borderRadius:6,boxSizing:"border-box",background:period==="current"?"#f0fdf4":"#fffbeb"}}/>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
               </div>
             ))}
             <button onClick={saveAllSettings}
