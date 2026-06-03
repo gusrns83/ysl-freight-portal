@@ -83,6 +83,45 @@
   box-sizing: border-box;
 }
 
+.validity-date-inp {
+  width: 100%;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 6px;
+  box-sizing: border-box;
+  border: 1px solid;
+  font-family: inherit;
+  cursor: pointer;
+  color-scheme: light;
+}
+.validity-date-inp::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.65;
+}
+.validity-date-inp:hover::-webkit-calendar-picker-indicator {
+  opacity: 1;
+}
+.validity-date-till {
+  color: #166534;
+  background: #f0fdf4;
+  border-color: #86efac;
+}
+.validity-date-from {
+  color: #b45309;
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+.validity-date-compact {
+  padding: 4px 6px;
+  font-size: 10px;
+  border-radius: 4px;
+  margin-bottom: 0;
+}
+.validity-date-till.validity-date-compact {
+  margin-bottom: 0;
+}
+
 .carrier-grid-wrap {
   overflow-x: auto;
   background: #fff;
