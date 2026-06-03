@@ -1343,6 +1343,11 @@ export default function App() {
     () => notices.map((n, i) => ({ ...n, i })).filter(n => n.on && (n.text || n.fileUrl)),
     [notices]
   );
+  const activeAds = useMemo(
+    () => adBanners.filter(a => a.on && a.imageUrl),
+    [adBanners]
+  );
+  const adVisible = activeAds.length > 0 && !adDismissed;
   const currentNoticePopup = activeNoticeQueue.find(n => !dismissedNotices.has(n.i));
   const dismissCurrentNotice = () => {
     if (currentNoticePopup) setDismissedNotices(prev => new Set([...prev, currentNoticePopup.i]));
@@ -1477,7 +1482,7 @@ export default function App() {
   // ── NOTICE ADMIN ──
   if (showNoticeAdmin && isAdmin) {
     const slot = noticeAdminTab;
-    const cur = notices[slot];
+    const cur = notices[slot] ?? mkNotices()[slot];
     return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
       <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
@@ -2382,12 +2387,6 @@ export default function App() {
       </div>
     );
   };
-
-  const activeAds = useMemo(
-    () => adBanners.filter(a => a.on && a.imageUrl),
-    [adBanners]
-  );
-  const adVisible = activeAds.length > 0 && !adDismissed;
 
   // ── MAIN RENDER ──
   return (
