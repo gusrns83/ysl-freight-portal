@@ -22,6 +22,24 @@ const defaultAdBanner = () => ({
 });
 
 function FooterAdSlot({ banner }) {
+  const slotRef = useRef(null);
+
+  useEffect(() => {
+    if (!banner?.on || !banner?.imageUrl) {
+      document.documentElement.style.removeProperty("--app-ad-h");
+      return;
+    }
+    const el = slotRef.current;
+    if (!el) return;
+    const syncHeight = () => {
+      document.documentElement.style.setProperty("--app-ad-h", `${el.offsetHeight}px`);
+    };
+    syncHeight();
+    const ro = new ResizeObserver(syncHeight);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [banner?.on, banner?.imageUrl, banner?.linkUrl]);
+
   if (!banner?.on || !banner?.imageUrl) return null;
   const media = (
     <img
@@ -31,7 +49,7 @@ function FooterAdSlot({ banner }) {
     />
   );
   return (
-    <section className="app-ad-slot" aria-label="Advertisement">
+    <section ref={slotRef} className="app-ad-slot" aria-label="Advertisement">
       <div className="app-ad-slot-inner">
         <div className="app-ad-header">
           <span className="app-ad-badge">{banner.title || "AD"}</span>
@@ -2305,9 +2323,11 @@ export default function App() {
     );
   };
 
+  const adVisible = adBanner.on && adBanner.imageUrl;
+
   // ── MAIN RENDER ──
   return (
-    <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+    <div className={adVisible ? "app-root app-has-fixed-ad" : "app-root"} style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
 
       {/* HEADER */}
       <div style={{position:"sticky",top:0,zIndex:30,background:"#fff",borderBottom:"1px solid #e5e7eb",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
@@ -2510,7 +2530,7 @@ export default function App() {
       )}
 
       {/* CONTENT */}
-      <div style={{maxWidth:640,margin:"12px auto",padding:"0 16px 120px"}}>
+      <div style={{maxWidth:640,margin:"12px auto",padding:"0 16px 24px"}}>
         <div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>{`${tab==="rental"?rFilt.length:filt.length} routes`}</div>
         {tab==="ocean" && filt.map((row,i)=><OCard key={i} row={row} idx={i}/>)}
         {tab==="dropoff" && filt.map((row,i)=><DOCrd key={i} row={row} idx={i}/>)}
