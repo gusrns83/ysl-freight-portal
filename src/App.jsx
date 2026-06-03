@@ -112,6 +112,9 @@ const DO = {mow:{SNK:[1100,1400],DY:[800,1400],CK:[950,1300]},spb:{SNK:[700,1000
 const CRS = ["SNK","DY","CK"];
 const VALIDITY_KEYS = [...CRS, "RENTAL"];
 const RATE_TYPES = ["coc20","coc40","soc20","soc40"];
+const RENTAL_RATE_TYPES = ["r20", "r40"];
+const rentalRateLabel = (t) => (t === "r20" ? "20'" : "40'");
+const defaultRentalMargins = () => ({ r20: 80, r40: 100 });
 const defaultValidityInfo = () => Object.fromEntries(VALIDITY_KEYS.map(k => [k, {
   current: k === "SNK" ? "Till 15.06.2026" : "Till 30.06.2026",
   future: k === "SNK" ? "From 16.06.2026" : "From 01.07.2026",
@@ -295,17 +298,17 @@ const marginNowTs = () => Date.now();
 const pickLatestMargin = (candidates) =>
   candidates.reduce((best, c) => (c.ts > best.ts ? c : best)).value;
 
-const buildLegacyMarginTimestamps = (areaM, polM) => {
-  const marginTs = Object.fromEntries(RATE_TYPES.map(t => [t, 1]));
+const buildLegacyMarginTimestamps = (areaM, polM, types = RATE_TYPES) => {
+  const marginTs = Object.fromEntries(types.map(t => [t, 1]));
   const areaTs = {};
   Object.entries(areaM || {}).forEach(([area, m]) => {
     areaTs[area] = {};
-    RATE_TYPES.forEach(t => { if (m[t] != null) areaTs[area][t] = 2; });
+    types.forEach(t => { if (m[t] != null) areaTs[area][t] = 2; });
   });
   const polTs = {};
   Object.entries(polM || {}).forEach(([pol, m]) => {
     polTs[pol] = {};
-    RATE_TYPES.forEach(t => { if (m[t] != null) polTs[pol][t] = 3; });
+    types.forEach(t => { if (m[t] != null) polTs[pol][t] = 3; });
   });
   return { marginTs, areaTs, polTs };
 };
@@ -317,7 +320,18 @@ function MarginPanel({
   selArea, setSelArea, areaM, applyAreaMarginType, applyAreaMargins,
   selPol, setSelPol, polM, applyPolMargins, clearPolMargins, polEdit, setPolEdit,
   areas, fData, getM,
+  rateTypes = RATE_TYPES,
+  rateLabel = (t) => t.toUpperCase(),
+  gridCols = "1fr 1fr 1fr 1fr",
+  polData,
+  globalHint = "모든 구간 기본 마진 · 마지막 수정 기준 우선",
+  formatAreaSummary,
 }) {
+  const polList = polData || fData;
+  const emptyPolEdit = () => Object.fromEntries(rateTypes.map(t => [t, ""]));
+  const areaSummary = (area, m) => formatAreaSummary
+    ? formatAreaSummary(m, margins)
+    : <>COC {m.coc20 ?? margins.coc20}/{m.coc40 ?? margins.coc40} SOC {m.soc20 ?? margins.soc20}/{m.soc40 ?? margins.soc40}</>;
   return (
     <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:10}}>
       <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD)</div>
@@ -329,10 +343,10 @@ function MarginPanel({
       {filterHint && <div style={{fontSize:9,color:"#b45309",marginBottom:8}}>{filterHint}</div>}
       {marginTab==="global" && (
         <div>
-          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>모든 구간 기본 마진 · 마지막 수정 기준 우선</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
-            {RATE_TYPES.map(t=>(
-              <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>{globalHint}</div>
+          <div style={{display:"grid",gridTemplateColumns:gridCols,gap:8}}>
+            {rateTypes.map(t=>(
+              <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{rateLabel(t)}</div>
                 <input type="number" value={margins[t]} onChange={e=>applyGlobalMargin(t, e.target.value)}
                   style={marginInpStyle}/></div>
             ))}
@@ -348,9 +362,9 @@ function MarginPanel({
             {areas.map(a=><option key={a} value={a}>{a} {areaM[a]?"✅":""}</option>)}
           </select>
           {selArea && <>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
-              {RATE_TYPES.map(t=>(
-                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+            <div style={{display:"grid",gridTemplateColumns:gridCols,gap:8,marginBottom:8}}>
+              {rateTypes.map(t=>(
+                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{rateLabel(t)}</div>
                   <input type="number" value={areaM[selArea]?.[t] ?? margins[t]} onChange={e=>applyAreaMarginType(selArea, t, e.target.value)}
                     style={marginInpStyle}/></div>
               ))}
@@ -365,7 +379,7 @@ function MarginPanel({
               <div style={{fontSize:10,color:"#92400e",fontWeight:700,marginBottom:4}}>적용된 지역 마진:</div>
               {Object.entries(areaM).map(([area,m])=>(
                 <div key={area} style={{fontSize:11,color:"#78350f",marginBottom:2}}>
-                  <b>{area}</b>: COC {m.coc20 ?? margins.coc20}/{m.coc40 ?? margins.coc40} SOC {m.soc20 ?? margins.soc20}/{m.soc40 ?? margins.soc40}
+                  <b>{area}</b>: {areaSummary(area, m)}
                 </div>
               ))}
             </div>
@@ -375,23 +389,23 @@ function MarginPanel({
       {marginTab==="pol" && (
         <div>
           <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>도시별 마진 (마지막 수정 기준 · 선택 시 해당 POL만 표시)</div>
-          <select value={selPol} onChange={e=>{setSelPol(e.target.value); const m=polM[e.target.value]; setPolEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""});}}
+          <select value={selPol} onChange={e=>{setSelPol(e.target.value); const m=polM[e.target.value]; setPolEdit(m||emptyPolEdit());}}
             style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
             <option value="">-- 전체 POL --</option>
-            {fData.map(d=><option key={d.pol} value={d.pol}>{d.area} · {d.pol} {polM[d.pol]?"✅":""}</option>)}
+            {polList.map(d=><option key={d.pol} value={d.pol}>{d.area} · {d.pol} {polM[d.pol]?"✅":""}</option>)}
           </select>
           {selPol && <>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
-              {RATE_TYPES.map(t=>(
-                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
-                  <input type="number" placeholder={String(getM(selPol,fData.find(d=>d.pol===selPol)?.area||"",t))} value={polEdit[t]} onChange={e=>setPolEdit(p=>({...p,[t]:e.target.value}))}
+            <div style={{display:"grid",gridTemplateColumns:gridCols,gap:8,marginBottom:8}}>
+              {rateTypes.map(t=>(
+                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{rateLabel(t)}</div>
+                  <input type="number" placeholder={String(getM(selPol,polList.find(d=>d.pol===selPol)?.area||"",t))} value={polEdit[t] ?? ""} onChange={e=>setPolEdit(p=>({...p,[t]:e.target.value}))}
                     style={marginInpStyle}/></div>
               ))}
             </div>
             <div style={{display:"flex",gap:6}}>
-              <button type="button" onClick={()=>{const area=fData.find(d=>d.pol===selPol)?.area||""; const m={coc20:parseInt(polEdit.coc20)||getM(selPol,area,"coc20"),coc40:parseInt(polEdit.coc40)||getM(selPol,area,"coc40"),soc20:parseInt(polEdit.soc20)||getM(selPol,area,"soc20"),soc40:parseInt(polEdit.soc40)||getM(selPol,area,"soc40")}; applyPolMargins(selPol, m);}}
+              <button type="button" onClick={()=>{const area=polList.find(d=>d.pol===selPol)?.area||""; const m=Object.fromEntries(rateTypes.map(t=>[t,parseInt(polEdit[t])||getM(selPol,area,t)])); applyPolMargins(selPol, m);}}
                 style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
-              <button type="button" onClick={()=>{clearPolMargins(selPol); setPolEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
+              <button type="button" onClick={()=>{clearPolMargins(selPol); setPolEdit(emptyPolEdit());}}
                 style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
             </div>
           </>}
@@ -439,6 +453,11 @@ export default function App() {
     return groups;
   }, [rentalRows]);
 
+  const rentalPolData = useMemo(
+    () => rentalRows.map(r => ({ area: r.area, pol: r.freightPol })),
+    [rentalRows]
+  );
+
   // Auth
   const [mode, setMode] = useState("guest"); // guest | client | admin
   const [client, setClient] = useState(null);
@@ -457,11 +476,21 @@ export default function App() {
   const [areaTs, setAreaTs] = useState({});
   const [polM, setPolM] = useState({});
   const [polTs, setPolTs] = useState({});
+  const [rentalMargins, setRentalMargins] = useState(defaultRentalMargins);
+  const [rentalMarginTs, setRentalMarginTs] = useState(() => Object.fromEntries(RENTAL_RATE_TYPES.map(t => [t, marginNowTs()])));
+  const [rentalAreaM, setRentalAreaM] = useState({});
+  const [rentalAreaTs, setRentalAreaTs] = useState({});
+  const [rentalPolM, setRentalPolM] = useState({});
+  const [rentalPolTs, setRentalPolTs] = useState({});
   const [polCostO, setPolCostO] = useState({});
   const [marginTab, setMarginTab] = useState("global");
+  const [rentalMarginTab, setRentalMarginTab] = useState("global");
   const [selArea, setSelArea] = useState("");
+  const [rentalSelArea, setRentalSelArea] = useState("");
   const [selPol, setSelPol] = useState("");
+  const [rentalSelPol, setRentalSelPol] = useState("");
   const [polEdit, setPolEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
+  const [rentalPolEdit, setRentalPolEdit] = useState({r20:"",r40:""});
   const [validityInfo, setValidityInfo] = useState(defaultValidityInfo);
   const [carrierRates, setCarrierRates] = useState(defaultCarrierRates);
   const [rentalRates, setRentalRates] = useState(buildDefaultRentalRates);
@@ -604,6 +633,68 @@ export default function App() {
     }
   };
 
+  const getRentalM = (pol, area, type) => {
+    const candidates = [{ value: rentalMargins[type], ts: rentalMarginTs[type] ?? 0 }];
+    if (rentalAreaM[area]?.[type] != null) {
+      candidates.push({ value: rentalAreaM[area][type], ts: rentalAreaTs[area]?.[type] ?? 0 });
+    }
+    if (rentalPolM[pol]?.[type] != null) {
+      candidates.push({ value: rentalPolM[pol][type], ts: rentalPolTs[pol]?.[type] ?? 0 });
+    }
+    return pickLatestMargin(candidates);
+  };
+
+  const applyRentalPolMargin = (pol, type, value) => {
+    const v = parseInt(value, 10);
+    const ts = marginNowTs();
+    setRentalPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: Number.isFinite(v) ? v : 0 } }));
+    setRentalPolTs(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: ts } }));
+  };
+
+  const applyRentalPolMargins = (pol, m) => {
+    const ts = marginNowTs();
+    setRentalPolM(p => ({ ...p, [pol]: m }));
+    setRentalPolTs(p => ({
+      ...p,
+      [pol]: { ...(p[pol] || {}), ...Object.fromEntries(Object.keys(m).map(t => [t, ts])) },
+    }));
+  };
+
+  const clearRentalPolMargins = (pol) => {
+    setRentalPolM(p => { const n = { ...p }; delete n[pol]; return n; });
+    setRentalPolTs(p => { const n = { ...p }; delete n[pol]; return n; });
+  };
+
+  const applyRentalGlobalMargin = (type, value) => {
+    const v = parseInt(value, 10) || 0;
+    const ts = marginNowTs();
+    setRentalMargins(p => ({ ...p, [type]: v }));
+    setRentalMarginTs(p => ({ ...p, [type]: ts }));
+  };
+
+  const applyRentalAreaMarginType = (area, type, value) => {
+    const v = parseInt(value, 10) || 0;
+    const ts = marginNowTs();
+    setRentalAreaM(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: v } }));
+    setRentalAreaTs(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: ts } }));
+  };
+
+  const applyRentalAreaMargins = (area, m) => {
+    if (m) {
+      const ts = marginNowTs();
+      setRentalAreaM(p => ({ ...p, [area]: m }));
+      setRentalAreaTs(p => ({
+        ...p,
+        [area]: { ...(p[area] || {}), ...Object.fromEntries(Object.keys(m).map(t => [t, ts])) },
+      }));
+    } else {
+      setRentalAreaM(p => { const n = { ...p }; delete n[area]; return n; });
+      setRentalAreaTs(p => { const n = { ...p }; delete n[area]; return n; });
+    }
+  };
+
+  const rentalType = (si) => (si === 0 ? "r20" : "r40");
+
   const updateCarrierValidity = (carrier, field, value) => {
     setValidityInfo(p => {
       const prev = p[carrier] || { current: "", future: "" };
@@ -690,6 +781,12 @@ export default function App() {
         saveSetting("margin_timestamps", JSON.stringify(marginTs)),
         saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
         saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
+        saveSetting("rental_global_margins", JSON.stringify(rentalMargins)),
+        saveSetting("rental_area_margins", JSON.stringify(rentalAreaM)),
+        saveSetting("rental_pol_margins", JSON.stringify(rentalPolM)),
+        saveSetting("rental_margin_timestamps", JSON.stringify(rentalMarginTs)),
+        saveSetting("rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)),
+        saveSetting("rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)),
         saveSetting("pol_costs", JSON.stringify(polCostO)),
       ]);
       setSaveMsg("저장 완료!");
@@ -777,6 +874,26 @@ export default function App() {
         try { setPolTs(JSON.parse(s.pol_margin_timestamps)); } catch(e){}
       } else {
         setPolTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).polTs);
+      }
+      let loadedRentalAreaM = {};
+      let loadedRentalPolM = {};
+      if (s.rental_global_margins) { try { setRentalMargins(JSON.parse(s.rental_global_margins)); } catch(e){} }
+      if (s.rental_area_margins) { try { loadedRentalAreaM = JSON.parse(s.rental_area_margins); setRentalAreaM(loadedRentalAreaM); } catch(e){} }
+      if (s.rental_pol_margins) { try { loadedRentalPolM = JSON.parse(s.rental_pol_margins); setRentalPolM(loadedRentalPolM); } catch(e){} }
+      if (s.rental_margin_timestamps) {
+        try { setRentalMarginTs(JSON.parse(s.rental_margin_timestamps)); } catch(e){}
+      } else {
+        setRentalMarginTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).marginTs);
+      }
+      if (s.rental_area_margin_timestamps) {
+        try { setRentalAreaTs(JSON.parse(s.rental_area_margin_timestamps)); } catch(e){}
+      } else {
+        setRentalAreaTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).areaTs);
+      }
+      if (s.rental_pol_margin_timestamps) {
+        try { setRentalPolTs(JSON.parse(s.rental_pol_margin_timestamps)); } catch(e){}
+      } else {
+        setRentalPolTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).polTs);
       }
       if (s.pol_costs) { try { setPolCostO(JSON.parse(s.pol_costs)); } catch(e){} }
     }).catch(()=>{});
@@ -957,8 +1074,8 @@ export default function App() {
     return CRS.map(k => {
       const s20 = getCarrierRate(fr, k, "soc20");
       const s40 = getCarrierRate(fr, k, "soc40");
-      const m20 = getM(fp, fr.area, "soc20");
-      const m40 = getM(fp, fr.area, "soc40");
+      const m20 = getRentalM(fp, fr.area, "r20");
+      const m40 = getRentalM(fp, fr.area, "r40");
       const cost20 = s20 != null && r20 != null ? s20 + r20 : null;
       const cost40 = s40 != null && r40 != null ? s40 + r40 : null;
       return {
@@ -980,8 +1097,8 @@ export default function App() {
   };
   const rentDetail = (rPol, city, rRow, si) => {
     const fp = PM[rPol], fr = fp ? fMap[fp] : null;
-    const t = si === 0 ? "soc20" : "soc40";
-    const margin = fr ? getM(fp, fr.area, t) : 0;
+    const t = rentalType(si);
+    const margin = fr ? getRentalM(fp, fr.area, t) : 0;
     const b = bRent(rPol, city, rRow, si);
     const cost = getRentCityCost(fp || rPol, rPol, city, rRow, si);
     return mkPrice(cost, margin, b.cr);
@@ -1070,12 +1187,12 @@ export default function App() {
     try {
       await Promise.all([
         saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
-        saveSetting("pol_margins", JSON.stringify(polM)),
-        saveSetting("global_margins", JSON.stringify(margins)),
-        saveSetting("area_margins", JSON.stringify(areaM)),
-        saveSetting("margin_timestamps", JSON.stringify(marginTs)),
-        saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
-        saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
+        saveSetting("rental_global_margins", JSON.stringify(rentalMargins)),
+        saveSetting("rental_area_margins", JSON.stringify(rentalAreaM)),
+        saveSetting("rental_pol_margins", JSON.stringify(rentalPolM)),
+        saveSetting("rental_margin_timestamps", JSON.stringify(rentalMarginTs)),
+        saveSetting("rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)),
+        saveSetting("rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)),
         saveSetting("validity_info_json", JSON.stringify(validityInfo)),
       ]);
       setSaveMsg("저장 완료!");
@@ -1376,24 +1493,24 @@ export default function App() {
     const applyRentalCellSell = (row, city, si, sellStr) => {
       const sell = parseInt(sellStr, 10);
       if (!Number.isFinite(sell)) return;
-      const type = si === 0 ? "soc20" : "soc40";
-      const margin = getM(row.freightPol, row.area, type);
+      const type = rentalType(si);
+      const margin = getRentalM(row.freightPol, row.area, type);
       applyRentalRate(row.rentalPol, city, si, sell - margin, raPeriod);
     };
     const filteredRentalAreaGroups = rentalAreaGroups
-      .filter(({ area }) => !(marginTab === "area" && selArea) || area === selArea)
+      .filter(({ area }) => !(rentalMarginTab === "area" && rentalSelArea) || area === rentalSelArea)
       .map(({ area, rows }) => ({
         area,
-        rows: marginTab === "pol" && selPol
-          ? rows.filter(r => r.freightPol === selPol || r.displayPol === selPol)
+        rows: rentalMarginTab === "pol" && rentalSelPol
+          ? rows.filter(r => r.freightPol === rentalSelPol || r.displayPol === rentalSelPol)
           : rows,
       }))
       .filter(({ rows }) => rows.length > 0);
     const rentalGridPolCount = filteredRentalAreaGroups.reduce((n, g) => n + g.rows.length, 0);
-    const rentalGridFilterLabel = marginTab === "area" && selArea
-      ? `${selArea} · ${rentalGridPolCount}개 POL`
-      : marginTab === "pol" && selPol
-        ? `${selPol} · ${rentalGridPolCount}개 POL`
+    const rentalGridFilterLabel = rentalMarginTab === "area" && rentalSelArea
+      ? `${rentalSelArea} · ${rentalGridPolCount}개 POL`
+      : rentalMarginTab === "pol" && rentalSelPol
+        ? `${rentalSelPol} · ${rentalGridPolCount}개 POL`
         : `${rentalGridPolCount}개 POL (전체)`;
     const rentalCityFilterLabel = selReturnCity
       ? RC_LABEL[selReturnCity] || selReturnCity
@@ -1401,8 +1518,8 @@ export default function App() {
     const renderRentalGridCell = (row, city, si) => {
       const cost = getRentalBase(row.rentalPol, city, si, raPeriod);
       if (cost == null) return <td className="cg-cell cg-empty">—</td>;
-      const type = si === 0 ? "soc20" : "soc40";
-      const margin = getM(row.freightPol, row.area, type);
+      const type = rentalType(si);
+      const margin = getRentalM(row.freightPol, row.area, type);
       const sell = cost + margin;
       const cellKey = `${row.rentalPol}:${city}:${si}`;
       const isOpen = rentalEditCell === cellKey;
@@ -1432,7 +1549,7 @@ export default function App() {
                     <td className="cg-mini-label cg-mini-label-margin">마진</td>
                     <td className="cg-mini-val-margin">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
-                        value={margin} onChange={e => applyPolMargin(row.freightPol, type, e.target.value)}/>
+                        value={margin} onChange={e => applyRentalPolMargin(row.freightPol, type, e.target.value)}/>
                     </td>
                   </tr>
                 </tbody>
@@ -1496,18 +1613,24 @@ export default function App() {
             onSave={saveRentalPricing}
             saveMsg={saveMsg}
             filterHint={
-              marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
-              marginTab === "pol" && selPol ? `운임표: ${selPol} 만 표시` :
-              marginTab === "area" ? "지역 선택 시 해당 지역 운임만 표시" : null
+              rentalMarginTab === "area" && rentalSelArea ? `운임표: ${rentalSelArea} 지역만 표시` :
+              rentalMarginTab === "pol" && rentalSelPol ? `운임표: ${rentalSelPol} 만 표시` :
+              rentalMarginTab === "area" ? "지역 선택 시 해당 지역 운임만 표시" : null
             }
-            marginTab={marginTab} setMarginTab={setMarginTab}
-            margins={margins} applyGlobalMargin={applyGlobalMargin}
-            selArea={selArea} setSelArea={setSelArea}
-            areaM={areaM} applyAreaMarginType={applyAreaMarginType} applyAreaMargins={applyAreaMargins}
-            selPol={selPol} setSelPol={setSelPol}
-            polM={polM} applyPolMargins={applyPolMargins} clearPolMargins={clearPolMargins}
-            polEdit={polEdit} setPolEdit={setPolEdit}
-            areas={areas} fData={fData} getM={getM}
+            marginTab={rentalMarginTab} setMarginTab={setRentalMarginTab}
+            margins={rentalMargins} applyGlobalMargin={applyRentalGlobalMargin}
+            selArea={rentalSelArea} setSelArea={setRentalSelArea}
+            areaM={rentalAreaM} applyAreaMarginType={applyRentalAreaMarginType} applyAreaMargins={applyRentalAreaMargins}
+            selPol={rentalSelPol} setSelPol={setRentalSelPol}
+            polM={rentalPolM} applyPolMargins={applyRentalPolMargins} clearPolMargins={clearRentalPolMargins}
+            polEdit={rentalPolEdit} setPolEdit={setRentalPolEdit}
+            areas={areas} fData={fData} getM={getRentalM}
+            rateTypes={RENTAL_RATE_TYPES}
+            rateLabel={rentalRateLabel}
+            gridCols="1fr 1fr"
+            polData={rentalPolData}
+            globalHint="렌탈 20'·40' 기본 마진 · 마지막 수정 기준 우선"
+            formatAreaSummary={(m, mg) => `${m.r20 ?? mg.r20} / ${m.r40 ?? mg.r40}`}
           />
           <div style={{marginBottom:10,padding:10,background:"#faf5ff",border:"1px solid #ddd6fe",borderRadius:10}}>
             <div style={{fontSize:10,fontWeight:700,color:"#6b21a8",marginBottom:6}}>반납지 (Return City) · 운임표 필터</div>
