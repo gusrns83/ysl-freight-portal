@@ -265,6 +265,7 @@ export default function App() {
   const [showCarrierAdmin, setShowCarrierAdmin] = useState(false);
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
+  const [carrierEditCell, setCarrierEditCell] = useState(null);
   const [clients, setClients] = useState([]);
   const [addForm, setAddForm] = useState(false);
   const [editC, setEditC] = useState(null);
@@ -975,6 +976,13 @@ export default function App() {
     const caPeriod = carrierAdminPeriod;
     const caCr = carrierAdminCr;
     const isFuture = caPeriod === "future";
+    const applyCellSell = (row, type, sellStr) => {
+      const sell = parseInt(sellStr, 10);
+      if (!Number.isFinite(sell)) return;
+      const cost = getCarrierRate(row, caCr, type, caPeriod);
+      if (cost == null) return;
+      applyPolMargin(row.pol, type, sell - cost);
+    };
     const renderGridCell = (row, type) => {
       const base = row.rates[caCr]?.[type];
       const cost = getCarrierRate(row, caCr, type, caPeriod);
@@ -983,17 +991,50 @@ export default function App() {
       }
       const margin = getM(row.pol, row.area, type);
       const sell = cost != null ? cost + margin : null;
+      const cellKey = `${row.pol}:${type}`;
+      const isOpen = carrierEditCell === cellKey;
       return (
-        <td className={`cg-cell${isFuture ? " cg-future" : ""}`}>
-          <input type="number" inputMode="numeric" className="cg-inp"
-            value={cost ?? ""} placeholder="—"
-            onChange={e => applyCarrierRate(row.pol, caCr, type, e.target.value, caPeriod)}/>
-          {sell != null && <div className="cg-sell">${n(sell)}</div>}
+        <td className={`cg-cell${isFuture ? " cg-future" : ""}${isOpen ? " cg-active" : ""}`}>
+          {isOpen ? (
+            <div className="cg-edit-panel" onClick={e => e.stopPropagation()}>
+              <table className="cg-mini">
+                <tbody>
+                  <tr>
+                    <td className="cg-mini-label">매입</td>
+                    <td>
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-cost"
+                        value={cost ?? ""} placeholder="—"
+                        onChange={e => applyCarrierRate(row.pol, caCr, type, e.target.value, caPeriod)}/>
+                    </td>
+                    <td rowSpan={2} className="cg-margin-col">
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
+                        value={margin} onChange={e => applyPolMargin(row.pol, type, e.target.value)}/>
+                      <span className="cg-margin-lbl">(마진)</span>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="cg-mini-label">매출</td>
+                    <td>
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-sell"
+                        value={sell ?? ""} placeholder="—"
+                        onChange={e => applyCellSell(row, type, e.target.value)}/>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <button type="button" className="cg-close" onClick={() => setCarrierEditCell(null)}>닫기</button>
+            </div>
+          ) : (
+            <button type="button" className="cg-box" onClick={() => setCarrierEditCell(cellKey)}>
+              <div className="cg-cost-display">{cost != null ? n(cost) : "—"}</div>
+              {sell != null && <div className="cg-sell-ref">${n(sell)}</div>}
+            </button>
+          )}
         </td>
       );
     };
     return (
-      <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+      <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}} onClick={() => setCarrierEditCell(null)}>
         <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
           <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
           <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
@@ -1002,10 +1043,10 @@ export default function App() {
             {saveMsg ? saveMsg : "저장"}
           </button>
         </div>
-        <div style={{maxWidth:960,margin:"0 auto",padding:"12px 12px 80px"}}>
+        <div style={{maxWidth:960,margin:"0 auto",padding:"12px 12px 80px"}} onClick={e => e.stopPropagation()}>
           <div style={{display:"flex",background:"#eff6ff",borderRadius:10,padding:3,marginBottom:8}}>
             {CRS.map(k=>(
-              <button key={k} type="button" onClick={()=>setCarrierAdminCr(k)}
+              <button key={k} type="button" onClick={()=>{setCarrierAdminCr(k);setCarrierEditCell(null);}}
                 style={{flex:1,padding:"8px 4px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
                   background:carrierAdminCr===k?"#fff":"transparent",color:carrierAdminCr===k?"#1e40af":"#60a5fa",
                   boxShadow:carrierAdminCr===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
@@ -1015,7 +1056,7 @@ export default function App() {
           </div>
           <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:10}}>
             {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
-              <button key={k} type="button" onClick={()=>setCarrierAdminPeriod(k)}
+              <button key={k} type="button" onClick={()=>{setCarrierAdminPeriod(k);setCarrierEditCell(null);}}
                 style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
                   background:carrierAdminPeriod===k?"#fff":"transparent",
                   color:carrierAdminPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
@@ -1037,14 +1078,14 @@ export default function App() {
             ))}
           </div>
           <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
-            매입가 직접 입력 · 아래 작은 글씨 = 매출가(마진 포함) · {fData.length}개 POL
+            셀 클릭 → 매입·매출·마진 조정 · {fData.length}개 POL
           </div>
           <div className="carrier-grid-wrap">
             <table className="carrier-grid">
               <thead>
                 <tr className="cg-carrier-row">
                   <th colSpan={2}></th>
-                  <th colSpan={4}><Bg k={caCr}/> {CN_KR[caCr]} · {isFuture ? "향후" : "현재"} 운임 (USD)</th>
+                  <th colSpan={4}>{caCr} {CN_KR[caCr]} · {isFuture ? "향후" : "현재"} 운임 (USD)</th>
                 </tr>
                 <tr className="cg-head-row">
                   <th rowSpan={2} className="cg-th-area">AREA</th>
