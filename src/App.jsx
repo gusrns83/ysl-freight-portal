@@ -2,7 +2,15 @@ import { useState, useMemo, useEffect, useRef } from "react";
 
 const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
-const ADMIN_PIN = "0000";
+const NOTICE_COUNT = 3;
+const mkNotices = () => Array.from({ length: NOTICE_COUNT }, (_, i) => ({
+  text: "",
+  on: false,
+  fileUrl: "",
+  title: `Notice ${i + 1}`,
+}));
+
+const parseNoticeOn = (v) => v === true || v === "true";
 
 const api = async (path, opts = {}) => {
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, {
@@ -211,14 +219,13 @@ export default function App() {
   const [areaEdit, setAreaEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [polEdit, setPolEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [validity, setValidity] = useState({SNK:"June 1-30, 2026", DY:"June 1-30, 2026", CK:"June 1-30, 2026"});
-  const [notice, setNotice] = useState("");
-  const [noticeOn, setNoticeOn] = useState(false);
-  const [showNotice, setShowNotice] = useState(true);
-  const [noticeFileUrl, setNoticeFileUrl] = useState("");
+  const [notices, setNotices] = useState(mkNotices);
+  const [dismissedNotices, setDismissedNotices] = useState(() => new Set());
+  const [noticeAdminTab, setNoticeAdminTab] = useState(0);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
   const [saveMsg, setSaveMsg] = useState("");
-  const [dragOver, setDragOver] = useState(false);
+  const [dragOverSlot, setDragOverSlot] = useState(null);
 
   // App state
   const [search, setSearch] = useState("");
@@ -281,23 +288,40 @@ export default function App() {
     setPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: Number.isFinite(v) ? v : 0 } }));
   };
 
-  const uploadNoticeFile = async (file) => {
+  const patchNotice = (idx, patch) => setNotices(prev => prev.map((n, i) => i === idx ? { ...n, ...patch } : n));
+
+  const uploadNoticeFile = async (file, slotIdx) => {
     setUploadLoading(true); setUploadMsg("");
     try {
       const ext = file.name.split(".").pop().toLowerCase();
-      const fname = `notice_${Date.now()}.${ext}`;
+      const fname = `notice_${slotIdx + 1}_${Date.now()}.${ext}`;
       const res = await fetch(`${SB_URL}/storage/v1/object/Notices/${fname}`, {
         method: "POST",
         headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": file.type, "x-upsert": "true" },
         body: file,
       });
-      if (!res.ok) throw new Error(await res.text());
+      if (!res.ok) {
+        const errText = await res.text();
+        if (errText.includes("row-level security")) {
+          throw new Error("Supabase Storage 권한 없음 — Storage Policies를 확인하세요.");
+        }
+        throw new Error(errText);
+      }
       const url = `${SB_URL}/storage/v1/object/public/Notices/${fname}`;
-      setNoticeFileUrl(url);
-      setUploadMsg("업로드 완료!");
+      patchNotice(slotIdx, { fileUrl: url });
+      setUploadMsg(`공지 ${slotIdx + 1} 업로드 완료!`);
       setTimeout(() => setUploadMsg(""), 2000);
     } catch(e) { setUploadMsg("업로드 실패: " + e.message); }
     setUploadLoading(false);
+  };
+
+  const saveNoticeSettings = async () => {
+    await Promise.all([
+      saveSetting("notices_json", JSON.stringify(notices)),
+      saveSetting("notice_text", notices[0].text),
+      saveSetting("notice_on", notices[0].on),
+      saveSetting("notice_file_url", notices[0].fileUrl),
+    ]);
   };
 
   const saveSetting = async (key, value) => {
@@ -317,9 +341,10 @@ export default function App() {
   const saveAllSettings = async () => {
     try {
       await Promise.all([
-        saveSetting("notice_text", notice),
-        saveSetting("notice_on", noticeOn),
-        saveSetting("notice_file_url", noticeFileUrl),
+        saveSetting("notices_json", JSON.stringify(notices)),
+        saveSetting("notice_text", notices[0].text),
+        saveSetting("notice_on", notices[0].on),
+        saveSetting("notice_file_url", notices[0].fileUrl),
         saveSetting("validity_snk", validity.SNK),
         saveSetting("validity_dy", validity.DY),
         saveSetting("validity_ck", validity.CK),
@@ -337,9 +362,25 @@ export default function App() {
     api("settings?select=*").then(rows => {
       if (!rows.length) return;
       const s = Object.fromEntries(rows.map(r=>[r.key, r.value]));
-      if (s.notice_text !== undefined) setNotice(s.notice_text);
-      if (s.notice_on !== undefined) setNoticeOn(s.notice_on === "true");
-      if (s.notice_file_url !== undefined) setNoticeFileUrl(s.notice_file_url);
+      if (s.notices_json) {
+        try {
+          const parsed = JSON.parse(s.notices_json);
+          if (Array.isArray(parsed)) {
+            setNotices(mkNotices().map((n, i) => {
+              const p = parsed[i];
+              if (!p) return n;
+              return { ...n, text: p.text ?? "", fileUrl: p.fileUrl ?? "", title: p.title || n.title, on: parseNoticeOn(p.on) };
+            }));
+          }
+        } catch(e) {}
+      } else if (s.notice_text !== undefined || s.notice_on !== undefined || s.notice_file_url !== undefined) {
+        setNotices(prev => prev.map((n, i) => i === 0 ? {
+          ...n,
+          text: s.notice_text ?? "",
+          on: s.notice_on === "true",
+          fileUrl: s.notice_file_url ?? "",
+        } : n));
+      }
       if (s.validity_snk !== undefined) setValidity(p=>({...p, SNK: s.validity_snk}));
       if (s.validity_dy !== undefined) setValidity(p=>({...p, DY: s.validity_dy}));
       if (s.validity_ck !== undefined) setValidity(p=>({...p, CK: s.validity_ck}));
@@ -532,6 +573,34 @@ export default function App() {
 
   const ff = "-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif";
 
+  const activeNoticeQueue = useMemo(
+    () => notices.map((n, i) => ({ ...n, i })).filter(n => n.on && (n.text || n.fileUrl)),
+    [notices]
+  );
+  const currentNoticePopup = activeNoticeQueue.find(n => !dismissedNotices.has(n.i));
+  const dismissCurrentNotice = () => {
+    if (currentNoticePopup) setDismissedNotices(prev => new Set([...prev, currentNoticePopup.i]));
+  };
+
+  const saveNoticesOnly = async () => {
+    try {
+      await saveNoticeSettings();
+      setSaveMsg("저장 완료!");
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch(e) { setSaveMsg("저장 실패: " + e.message); }
+  };
+
+  const renderNoticeFile = (fileUrl, title) => {
+    if (!fileUrl) return null;
+    const ext = fileUrl.split(".").pop().toLowerCase();
+    if (ext === "pdf") return (
+      <div style={{ width:"100%", borderRadius:8, overflow:"hidden", border:"1px solid #e5e7eb" }}>
+        <iframe src={fileUrl} style={{ width:"100%", height:400, border:"none" }} title={title}/>
+      </div>
+    );
+    return <img src={fileUrl} alt={title} style={{ width:"100%", borderRadius:8, border:"1px solid #e5e7eb" }}/>;
+  };
+
   // ── CLIENT MANAGEMENT ──
   if (showMgr && isAdmin) return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
@@ -604,61 +673,88 @@ export default function App() {
   );
 
   // ── NOTICE ADMIN ──
-  if (showNoticeAdmin && isAdmin) return (
+  if (showNoticeAdmin && isAdmin) {
+    const slot = noticeAdminTab;
+    const cur = notices[slot];
+    return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
       <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
         <button onClick={()=>setShowNoticeAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
-        <div style={{fontSize:14,fontWeight:700,color:"#6b21a8"}}>Notice / GRI</div>
+        <div style={{fontSize:14,fontWeight:700,color:"#6b21a8"}}>Notice / GRI (최대 3개)</div>
         <div style={{width:48}}/>
       </div>
       <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 80px"}}>
+        <div style={{display:"flex",background:"#ede9fe",borderRadius:10,padding:3,marginBottom:12}}>
+          {notices.map((n, i) => (
+            <button key={i} type="button" onClick={()=>{ setNoticeAdminTab(i); setUploadMsg(""); }}
+              style={{flex:1,padding:"8px 4px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                background:noticeAdminTab===i?"#fff":"transparent",color:noticeAdminTab===i?"#6b21a8":"#7c3aed",
+                boxShadow:noticeAdminTab===i?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+              공지 {i + 1}{n.on && (n.text || n.fileUrl) ? " ●" : ""}
+            </button>
+          ))}
+        </div>
+        <div style={{fontSize:11,color:"#7c3aed",marginBottom:10}}>
+          ON인 공지는 방문 시 순서대로 팝업됩니다 (1 → 2 → 3). 닫으면 다음 공지로 넘어갑니다.
+        </div>
         <div style={{background:"#faf5ff",border:"1px solid #e9d5ff",borderRadius:12,padding:16}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-            <div style={{fontSize:12,fontWeight:700,color:"#6b21a8"}}>공지 표시</div>
+            <div style={{fontSize:12,fontWeight:700,color:"#6b21a8"}}>공지 {slot + 1} 표시</div>
             <div style={{display:"flex",alignItems:"center",gap:8}}>
-              <span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>{noticeOn?"ON":"OFF"}</span>
-              <div onClick={()=>setNoticeOn(p=>!p)} style={{width:40,height:22,borderRadius:11,background:noticeOn?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative"}}>
-                <div style={{position:"absolute",top:2,left:noticeOn?20:2,width:18,height:18,borderRadius:9,background:"#fff",transition:"left 0.2s"}}/>
+              <span style={{fontSize:12,color:"#7c3aed",fontWeight:600}}>{cur.on?"ON":"OFF"}</span>
+              <div onClick={()=>patchNotice(slot,{ on:!cur.on })} style={{width:40,height:22,borderRadius:11,background:cur.on?"#7c3aed":"#d1d5db",cursor:"pointer",position:"relative"}}>
+                <div style={{position:"absolute",top:2,left:cur.on?20:2,width:18,height:18,borderRadius:9,background:"#fff",transition:"left 0.2s"}}/>
               </div>
             </div>
           </div>
-          <div style={{fontSize:11,color:"#7c3aed",marginBottom:8}}>OFF면 방문자에게 팝업이 뜨지 않습니다.</div>
+          <div style={{fontSize:11,fontWeight:700,color:"#6b21a8",marginBottom:4}}>팝업 제목</div>
+          <input value={cur.title} onChange={e=>patchNotice(slot,{ title:e.target.value })} placeholder={`Notice ${slot + 1}`}
+            style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:8,boxSizing:"border-box",marginBottom:12}}/>
           <div style={{fontSize:11,fontWeight:700,color:"#6b21a8",marginBottom:6}}>공지 텍스트</div>
-          <textarea value={notice} onChange={e=>setNotice(e.target.value)} placeholder="공지 텍스트 입력 (선사 GRI, 스케줄 변경 등)"
+          <textarea value={cur.text} onChange={e=>patchNotice(slot,{ text:e.target.value })} placeholder="공지 텍스트 입력 (선사 GRI, 스케줄 변경 등)"
             style={{width:"100%",padding:"10px 12px",fontSize:13,color:"#4c1d95",background:"#fff",border:"1px solid #c4b5fd",borderRadius:8,boxSizing:"border-box",minHeight:140,resize:"vertical",fontFamily:"inherit",marginBottom:12}}/>
           <div style={{fontSize:11,fontWeight:700,color:"#6b21a8",marginBottom:8}}>공문 파일 첨부 (PDF / 이미지)</div>
           <label
-            onDragOver={e=>{e.preventDefault();setDragOver(true);}}
-            onDragLeave={()=>setDragOver(false)}
-            onDrop={e=>{e.preventDefault();setDragOver(false);const f=e.dataTransfer.files[0];if(f)uploadNoticeFile(f);}}
-            style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,padding:"20px 12px",background:dragOver?"#ede9fe":"#fff",border:`2px dashed ${dragOver?"#7c3aed":"#c4b5fd"}`,borderRadius:10,cursor:"pointer",transition:"all 0.2s"}}>
+            onDragOver={e=>{e.preventDefault();setDragOverSlot(slot);}}
+            onDragLeave={()=>setDragOverSlot(null)}
+            onDrop={e=>{e.preventDefault();setDragOverSlot(null);const f=e.dataTransfer.files[0];if(f)uploadNoticeFile(f,slot);}}
+            style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,padding:"20px 12px",background:dragOverSlot===slot?"#ede9fe":"#fff",border:`2px dashed ${dragOverSlot===slot?"#7c3aed":"#c4b5fd"}`,borderRadius:10,cursor:"pointer",transition:"all 0.2s"}}>
             <span style={{fontSize:28}}>📎</span>
             <span style={{fontSize:13,color:"#7c3aed",fontWeight:600}}>{uploadLoading?"업로드 중...":"파일 선택 또는 드래그 앤 드롭"}</span>
             <span style={{fontSize:11,color:"#a78bfa"}}>PDF, JPG, PNG 지원</span>
-            <input type="file" accept=".pdf,image/*" style={{display:"none"}} onChange={e=>e.target.files[0]&&uploadNoticeFile(e.target.files[0])} disabled={uploadLoading}/>
+            <input type="file" accept=".pdf,image/*" style={{display:"none"}} onChange={e=>{ if(e.target.files[0]) uploadNoticeFile(e.target.files[0],slot); e.target.value=""; }} disabled={uploadLoading}/>
           </label>
           {uploadMsg && <div style={{fontSize:12,marginTop:8,color:uploadMsg.includes("완료")?"#16a34a":"#dc2626"}}>{uploadMsg}</div>}
-          {noticeFileUrl && (
+          {cur.fileUrl && (
             <div style={{marginTop:12,padding:"10px 12px",background:"#fff",border:"1px solid #c4b5fd",borderRadius:8,display:"flex",alignItems:"center",justifyContent:"space-between",gap:8}}>
-              <span style={{fontSize:12,color:"#7c3aed",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>✅ {noticeFileUrl.split("/").pop()}</span>
-              <button type="button" onClick={()=>setNoticeFileUrl("")} style={{fontSize:12,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
+              <span style={{fontSize:12,color:"#7c3aed",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>✅ {cur.fileUrl.split("/").pop()}</span>
+              <button type="button" onClick={()=>patchNotice(slot,{ fileUrl:"" })} style={{fontSize:12,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
             </div>
           )}
-          <button type="button" onClick={saveAllSettings}
+          <button type="button" onClick={saveNoticesOnly}
             style={{width:"100%",marginTop:16,padding:"12px",fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:8,cursor:"pointer"}}>
-            {saveMsg || "💾 공지 저장"}
+            {saveMsg || "💾 공지 3개 모두 저장"}
           </button>
         </div>
-        {(notice || noticeFileUrl) && (
+        {(cur.text || cur.fileUrl) && (
           <div style={{marginTop:16,padding:12,background:"#fff",border:"1px solid #e5e7eb",borderRadius:12}}>
-            <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:8}}>미리보기</div>
-            {notice && <div style={{fontSize:13,color:"#374151",lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:noticeFileUrl?12:0}}>{notice}</div>}
-            {noticeFileUrl && <div style={{fontSize:11,color:"#7c3aed"}}>📎 첨부 파일 연결됨</div>}
+            <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:8}}>미리보기 · {cur.title || `Notice ${slot + 1}`}</div>
+            {cur.text && <div style={{fontSize:13,color:"#374151",lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:cur.fileUrl?12:0}}>{cur.text}</div>}
+            {cur.fileUrl && <div style={{fontSize:11,color:"#7c3aed"}}>📎 첨부 파일 연결됨</div>}
           </div>
         )}
+        <div style={{marginTop:12,padding:12,background:"#fff",border:"1px solid #e5e7eb",borderRadius:12}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:8}}>전체 요약</div>
+          {notices.map((n, i) => (
+            <div key={i} style={{fontSize:12,color:"#374151",marginBottom:4}}>
+              공지 {i + 1}: {n.on ? "ON" : "OFF"} · {(n.text || n.fileUrl) ? "내용 있음" : "비어 있음"}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
-  );
+    );
+  }
 
   const costInp = { width:"100%",maxWidth:"100%",minWidth:0,padding:"2px 4px",fontSize:11,fontWeight:700,color:"#1e40af",background:"#fff",border:"1px solid #93c5fd",borderRadius:4,boxSizing:"border-box",textAlign:"right" };
 
@@ -1240,33 +1336,37 @@ export default function App() {
         </div>
       )}
 
-      {/* NOTICE POPUP */}
-      {noticeOn && (notice || noticeFileUrl) && showNotice && (
+      {/* NOTICE POPUP (up to 3, sequential) */}
+      {currentNoticePopup && (
         <div style={{position:"fixed",inset:0,zIndex:50,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
           <div style={{background:"#fff",borderRadius:20,width:"100%",maxWidth:480,maxHeight:"85vh",boxShadow:"0 20px 60px rgba(0,0,0,0.25)",overflow:"hidden",display:"flex",flexDirection:"column"}}>
             <div style={{background:"#1D2B4F",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
               <div style={{display:"flex",alignItems:"center",gap:10}}>
                 <span style={{fontSize:18}}>📢</span>
-                <span style={{fontSize:14,fontWeight:700,color:"#fff"}}>Notice</span>
+                <div>
+                  <span style={{fontSize:14,fontWeight:700,color:"#fff"}}>{currentNoticePopup.title || `Notice ${currentNoticePopup.i + 1}`}</span>
+                  {activeNoticeQueue.length > 1 && (
+                    <div style={{fontSize:10,color:"#94a3b8",marginTop:2}}>
+                      {activeNoticeQueue.findIndex(n => n.i === currentNoticePopup.i) + 1} / {activeNoticeQueue.length}
+                    </div>
+                  )}
+                </div>
               </div>
-              <button onClick={()=>setShowNotice(false)} style={{color:"#9ca3af",background:"none",border:"none",cursor:"pointer",fontSize:20,lineHeight:1}}>✕</button>
+              <button onClick={dismissCurrentNotice} style={{color:"#9ca3af",background:"none",border:"none",cursor:"pointer",fontSize:20,lineHeight:1}}>✕</button>
             </div>
             <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
-              {notice && <div style={{fontSize:13,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap",marginBottom:noticeFileUrl?16:0}}>{notice}</div>}
-              {noticeFileUrl && (() => {
-                const ext = noticeFileUrl.split(".").pop().toLowerCase();
-                if (ext==="pdf") return (
-                  <div style={{width:"100%",borderRadius:8,overflow:"hidden",border:"1px solid #e5e7eb"}}>
-                    <iframe src={noticeFileUrl} style={{width:"100%",height:400,border:"none"}} title="notice"/>
-                  </div>
-                );
-                return <img src={noticeFileUrl} alt="notice" style={{width:"100%",borderRadius:8,border:"1px solid #e5e7eb"}}/>;
-              })()}
+              {currentNoticePopup.text && (
+                <div style={{fontSize:13,color:"#374151",lineHeight:1.8,whiteSpace:"pre-wrap",marginBottom:currentNoticePopup.fileUrl?16:0}}>{currentNoticePopup.text}</div>
+              )}
+              {renderNoticeFile(currentNoticePopup.fileUrl, currentNoticePopup.title)}
             </div>
             <div style={{padding:"12px 20px",borderTop:"1px solid #f3f4f6",flexShrink:0}}>
-              <button onClick={()=>setShowNotice(false)}
+              <button onClick={dismissCurrentNotice}
                 style={{width:"100%",padding:"11px",fontSize:13,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
-                확인
+                {(() => {
+                  const idx = activeNoticeQueue.findIndex(n => n.i === currentNoticePopup.i);
+                  return idx >= 0 && idx < activeNoticeQueue.length - 1 ? "다음" : "확인";
+                })()}
               </button>
             </div>
           </div>
