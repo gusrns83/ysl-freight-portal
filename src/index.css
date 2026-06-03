@@ -453,3 +453,55 @@
 .rental-grid .cg-th-pol {
   background: #f5f3ff;
 }
+
+.rental-grid-wrap {
+  max-width: 100%;
+}
+.rental-grid .cg-rental-city-head {
+  font-size: 10px;
+  padding: 4px 3px;
+  min-width: 72px;
+}
+.rental-grid .cg-rental-city-sub {
+  font-size: 8px;
+  font-weight: 600;
+  color: #7c3aed;
+  padding: 2px 3px;
+}
+.rental-grid .cg-rental-sticky-area {
+  position: sticky;
+  left: 0;
+  z-index: 4;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.04);
+}
+.rental-grid .cg-rental-sticky-pol {
+  position: sticky;
+  left: 52px;
+  z-index: 4;
+  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.04);
+}
+.rental-grid thead .cg-rental-sticky-area,
+.rental-grid thead .cg-rental-sticky-pol {
+  z-index: 5;
+}
+.rental-grid .cg-box {
+  min-width: 68px;
+  padding: 2px 3px;
+}
+.rental-grid .cg-pair-row {
+  padding: 3px 4px;
+}
+.rental-grid .cg-lbl {
+  font-size: 7px;
+}
+.rental-grid .cg-val {
+  font-size: 10px;
+}
+.rental-grid .cg-margin-hint {
+  font-size: 7px;
+  padding: 2px 4px;
+}
+.rental-grid .cg-cell.cg-empty {
+  min-width: 36px;
+  font-size: 10px;
+}
