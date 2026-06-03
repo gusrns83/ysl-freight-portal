@@ -109,6 +109,12 @@ const RN = [
 const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN","Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK","Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)"};
 const DO = {mow:{SNK:[1100,1400],DY:[800,1400],CK:[950,1300]},spb:{SNK:[700,1000],DY:null,CK:null},nsb:{SNK:[700,1000],DY:[400,600],CK:[400,600]},ekb:{SNK:null,DY:null,CK:[550,800]}};
 const CRS = ["SNK","DY","CK"];
+const RATE_TYPES = ["coc20","coc40","soc20","soc40"];
+const defaultValidityInfo = () => Object.fromEntries(CRS.map(k => [k, {
+  current: k === "SNK" ? "Till 15.06.2026" : "Till 30.06.2026",
+  future: k === "SNK" ? "From 16.06.2026" : "From 01.07.2026",
+}]));
+const defaultFutureAdj = () => Object.fromEntries(CRS.map(k => [k, { coc20: 0, coc40: 0, soc20: 0, soc40: 0 }]));
 const CN = {SNK:"Sinokor",DY:"Dongyoung",CK:"CK Line"};
 const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
 const F_TO_R = Object.fromEntries(Object.entries(PM).map(([rental, freight]) => [freight, rental]));
@@ -219,7 +225,9 @@ export default function App() {
   const [selPol, setSelPol] = useState("");
   const [areaEdit, setAreaEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [polEdit, setPolEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
-  const [validity, setValidity] = useState({SNK:"June 1-30, 2026", DY:"June 1-30, 2026", CK:"June 1-30, 2026"});
+  const [validityInfo, setValidityInfo] = useState(defaultValidityInfo);
+  const [futureAdj, setFutureAdj] = useState(defaultFutureAdj);
+  const [ratePeriod, setRatePeriod] = useState("current"); // current | future
   const [notices, setNotices] = useState(mkNotices);
   const [dismissedNotices, setDismissedNotices] = useState(() => new Set());
   const [noticeAdminTab, setNoticeAdminTab] = useState(0);
@@ -346,9 +354,11 @@ export default function App() {
         saveSetting("notice_text", notices[0].text),
         saveSetting("notice_on", notices[0].on),
         saveSetting("notice_file_url", notices[0].fileUrl),
-        saveSetting("validity_snk", validity.SNK),
-        saveSetting("validity_dy", validity.DY),
-        saveSetting("validity_ck", validity.CK),
+        saveSetting("validity_info_json", JSON.stringify(validityInfo)),
+        saveSetting("future_adj_json", JSON.stringify(futureAdj)),
+        saveSetting("validity_snk", validityInfo.SNK?.current ?? ""),
+        saveSetting("validity_dy", validityInfo.DY?.current ?? ""),
+        saveSetting("validity_ck", validityInfo.CK?.current ?? ""),
         saveSetting("global_margins", JSON.stringify(margins)),
         saveSetting("area_margins", JSON.stringify(areaM)),
         saveSetting("pol_margins", JSON.stringify(polM)),
@@ -382,9 +392,32 @@ export default function App() {
           fileUrl: s.notice_file_url ?? "",
         } : n));
       }
-      if (s.validity_snk !== undefined) setValidity(p=>({...p, SNK: s.validity_snk}));
-      if (s.validity_dy !== undefined) setValidity(p=>({...p, DY: s.validity_dy}));
-      if (s.validity_ck !== undefined) setValidity(p=>({...p, CK: s.validity_ck}));
+      if (s.validity_info_json) {
+        try {
+          const parsed = JSON.parse(s.validity_info_json);
+          if (parsed && typeof parsed === "object") {
+            setValidityInfo(Object.fromEntries(
+              CRS.map(k => [k, { ...defaultValidityInfo()[k], ...(parsed[k] || {}) }])
+            ));
+          }
+        } catch(e) {}
+      } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined) {
+        setValidityInfo(prev => ({
+          SNK: { ...prev.SNK, current: s.validity_snk ?? prev.SNK.current },
+          DY: { ...prev.DY, current: s.validity_dy ?? prev.DY.current },
+          CK: { ...prev.CK, current: s.validity_ck ?? prev.CK.current },
+        }));
+      }
+      if (s.future_adj_json) {
+        try {
+          const parsed = JSON.parse(s.future_adj_json);
+          if (parsed && typeof parsed === "object") {
+            setFutureAdj(Object.fromEntries(
+              CRS.map(k => [k, { ...defaultFutureAdj()[k], ...(parsed[k] || {}) }])
+            ));
+          }
+        } catch(e) {}
+      }
       if (s.global_margins) { try { setMargins(JSON.parse(s.global_margins)); } catch(e){} }
       if (s.area_margins) { try { setAreaM(JSON.parse(s.area_margins)); } catch(e){} }
       if (s.pol_margins) { try { setPolM(JSON.parse(s.pol_margins)); } catch(e){} }
@@ -401,7 +434,13 @@ export default function App() {
   });
   const getCarrierRate = (row, cr, t) => {
     const ov = polCostO[row.pol]?.carrier?.[cr]?.[t];
-    return ov != null ? ov : row.rates[cr][t];
+    const base = ov != null ? ov : row.rates[cr][t];
+    if (base == null) return null;
+    if (ratePeriod === "future") {
+      const adj = futureAdj[cr]?.[t] ?? 0;
+      return base + adj;
+    }
+    return base;
   };
   const applyCarrierRate = (pol, cr, t, value) => {
     const v = parseInt(value, 10);
@@ -788,14 +827,58 @@ export default function App() {
     <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
       <div style={{textAlign:"right"}}>
         <div style={{fontSize:10,color:"#9ca3af"}}>{prefix?`${prefix} 20'`:"20'"}</div>
-        <div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>
+        <div style={{fontSize:14,fontWeight:700,color:ratePeriod==="future"?"#b45309":"#1d4ed8"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>
         {d20.cr&&<Bg k={d20.cr}/>}
       </div>
       <div style={{textAlign:"right"}}>
         <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
-        <div style={{fontSize:14,fontWeight:700,color:"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>
+        <div style={{fontSize:14,fontWeight:700,color:ratePeriod==="future"?"#b45309":"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>
         {d40.cr&&<Bg k={d40.cr}/>}
       </div>
+    </div>
+  );
+
+  const getValidityLabel = (cr) => {
+    const info = validityInfo[cr];
+    if (!info) return "";
+    return ratePeriod === "future" ? (info.future || "") : (info.current || "");
+  };
+
+  const ValidityCell = ({carrierKey, compact}) => {
+    const label = getValidityLabel(carrierKey);
+    if (!label) return <span style={{fontSize:10,color:"#d1d5db"}}>—</span>;
+    const isFuture = ratePeriod === "future";
+    return (
+      <span style={{
+        fontSize: compact ? 9 : 10,
+        fontWeight: 600,
+        color: isFuture ? "#b45309" : "#166534",
+        background: isFuture ? "#fffbeb" : "#f0fdf4",
+        border: `1px solid ${isFuture ? "#fde68a" : "#bbf7d0"}`,
+        padding: compact ? "1px 6px" : "2px 8px",
+        borderRadius: 4,
+        whiteSpace: "nowrap",
+        display: "inline-block",
+      }}>{label}</span>
+    );
+  };
+
+  const RatePeriodToggle = ({accentFuture}) => (
+    <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:8,marginTop:10}}>
+      <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
+        {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
+          <button key={k} type="button" onClick={()=>setRatePeriod(k)}
+            style={{padding:"6px 14px",fontSize:11,fontWeight:600,borderRadius:6,border:"none",cursor:"pointer",
+              background:ratePeriod===k?"#fff":"transparent",
+              color:ratePeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af",
+              boxShadow:ratePeriod===k?"0 1px 2px rgba(0,0,0,0.06)":"none"}}>
+            {l}
+          </button>
+        ))}
+      </div>
+      <span style={{fontSize:10,color:ratePeriod==="future"?(accentFuture||"#b45309"):"#9ca3af"}}>
+        {ratePeriod==="current" ? "Validity: Till 날짜 기준" : "Validity: From 날짜 기준 · GRI 반영가"}
+      </span>
     </div>
   );
 
@@ -866,7 +949,7 @@ export default function App() {
                     <div key={k} style={{display:"flex",flexWrap:"wrap",alignItems:"flex-start",gap:6,padding:"8px 0",borderBottom:"1px solid #f9fafb"}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,flex:"1 1 120px",minWidth:0}}>
                         <Bg k={k}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
-                        {validity[k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[k]}</span>}
+                        <ValidityCell carrierKey={k} compact/>
                       </div>
                       <AdminPriceCols d20={cd20} d40={cd40} editable
                         onCost20={v=>applyCarrierRate(row.pol,k,t20,v)}
@@ -878,21 +961,26 @@ export default function App() {
             <table style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
               <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
                 <th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Carrier</th>
+                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Validity</th>
                 <th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>20'</th>
                 <th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>40'</th>
               </tr></thead>
               <tbody>
-                {CRS.map(k=>{ const v20=row.rates[k][t20],v40=row.rates[k][t40]; if(!v20&&!v40)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
+                {CRS.map(k=>{ const v20=getCarrierRate(row,k,t20),v40=getCarrierRate(row,k,t40); if(v20==null&&v40==null)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
+                  const priceColor = ratePeriod==="future"?"#b45309":"#1d4ed8";
+                  const m20=getM(row.pol,row.area,t20), m40=getM(row.pol,row.area,t40);
+                  const s20=v20!=null?v20+m20:null, s40=v40!=null?v40+m40:null;
+                  const best20=b20.val!=null?b20.val+m20:null, best40=b40.val!=null?b40.val+m40:null;
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
                     <td style={{padding:"8px 0"}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
                         <Bg k={k}/>
                         <span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
-                        {validity[k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[k]}</span>}
                       </div>
                     </td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v20===b20.val?700:400,color:v20===b20.val?"#1d4ed8":"#6b7280",cursor:v20?"pointer":"default"}} onClick={()=>v20&&openSC(k,t20,row.pol+" > VVO")}>{v20?n(v20+getM(row.pol,row.area,t20)):"—"}</td>
-                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:v40===b40.val?700:400,color:v40===b40.val?"#1d4ed8":"#6b7280",cursor:v40?"pointer":"default"}} onClick={()=>v40&&openSC(k,t40,row.pol+" > VVO")}>{v40?n(v40+getM(row.pol,row.area,t40)):"—"}</td>
+                    <td style={{padding:"8px 4px 8px 0"}}><ValidityCell carrierKey={k}/></td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,t20,row.pol+" > VVO")}>{s20!=null?n(s20):"—"}</td>
+                    <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&openSC(k,t40,row.pol+" > VVO")}>{s40!=null?n(s40):"—"}</td>
                   </tr>; })}
               </tbody>
             </table>
@@ -958,29 +1046,46 @@ export default function App() {
                   </button>
                   {cOpen && (
                     <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
+                      {!isAdmin && carrierRows.length > 0 && (
+                        <div style={{display:"grid",gridTemplateColumns:"28% 32% 20% 20%",padding:"6px 12px 0 20px",fontSize:10,color:"#9ca3af",fontWeight:500}}>
+                          <span>Carrier</span><span>Validity</span><span style={{textAlign:"right"}}>20'</span><span style={{textAlign:"right"}}>40'</span>
+                        </div>
+                      )}
                       {carrierRows.length===0
                         ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
                         : carrierRows.map(({cr,cdC20,cdC40})=>(
+                          isAdmin ? (
                           <div key={cr} style={{display:"flex",flexWrap:"wrap",alignItems:"flex-start",padding:"7px 12px 7px 20px",borderBottom:"1px solid #e0f2fe",gap:6}}>
                             <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
                               <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span>
-                              {validity[cr] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[cr]}</span>}
+                              <ValidityCell carrierKey={cr} compact/>
                             </div>
-                            {isAdmin
-                              ? <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable
-                                  onCost20={v=>{applyCarrierRate(row.pol,cr,"coc20",v);}}
-                                  onCost40={v=>{applyCarrierRate(row.pol,cr,"coc40",v);}}/>
-                              : <>
-                            <div style={{textAlign:"right",marginRight:20,cursor:cdC20.sell?"pointer":"default"}} onClick={()=>cdC20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
-                              <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
-                              <div style={{fontSize:14,fontWeight:700,color:cdC20.sell?"#0369a1":"#d1d5db",textDecoration:cdC20.sell?"underline":"none"}}>{cdC20.sell?`$${n(cdC20.sell)}`:"—"}</div>
-                            </div>
-                            <div style={{textAlign:"right",cursor:cdC40.sell?"pointer":"default"}} onClick={()=>cdC40.sell&&openSC(cr,"coc40",row.pol+" > "+l)}>
-                              <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
-                              <div style={{fontSize:14,fontWeight:700,color:cdC40.sell?"#0369a1":"#d1d5db",textDecoration:cdC40.sell?"underline":"none"}}>{cdC40.sell?`$${n(cdC40.sell)}`:"—"}</div>
-                            </div>
-                            </>}
+                            <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable
+                              onCost20={v=>{applyCarrierRate(row.pol,cr,"coc20",v);}}
+                              onCost40={v=>{applyCarrierRate(row.pol,cr,"coc40",v);}}/>
                           </div>
+                          ) : (
+                          <div key={cr} style={{padding:"0 12px 0 20px",borderBottom:"1px solid #e0f2fe"}}>
+                            <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+                              <tbody>
+                                <tr>
+                                  <td style={{padding:"8px 0",width:"28%"}}>
+                                    <div style={{display:"flex",alignItems:"center",gap:6}}><Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span></div>
+                                  </td>
+                                  <td style={{padding:"8px 4px 8px 0",width:"32%"}}><ValidityCell carrierKey={cr}/></td>
+                                  <td style={{textAlign:"right",padding:"8px 0",cursor:cdC20.sell?"pointer":"default",width:"20%"}} onClick={()=>cdC20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
+                                    <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
+                                    <div style={{fontSize:13,fontWeight:700,color:cdC20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:cdC20.sell?"underline":"none"}}>{cdC20.sell?`$${n(cdC20.sell)}`:"—"}</div>
+                                  </td>
+                                  <td style={{textAlign:"right",padding:"8px 0",cursor:cdC40.sell?"pointer":"default",width:"20%"}} onClick={()=>cdC40.sell&&openSC(cr,"coc40",row.pol+" > "+l)}>
+                                    <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
+                                    <div style={{fontSize:13,fontWeight:700,color:cdC40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:cdC40.sell?"underline":"none"}}>{cdC40.sell?`$${n(cdC40.sell)}`:"—"}</div>
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
+                          </div>
+                          )
                         ))}
                     </div>
                   )}
@@ -1056,7 +1161,7 @@ export default function App() {
                           <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
                             <Bg k={c.k}/>
                             <span style={{fontSize:11,color:"#6b7280"}}>{CN[c.k]}</span>
-                            {validity[c.k] && <span style={{fontSize:9,fontWeight:600,color:"#16a34a",background:"#dcfce7",padding:"1px 6px",borderRadius:20}}>Valid: {validity[c.k]}</span>}
+                            <ValidityCell carrierKey={c.k} compact/>
                           </div>
                           {isAdmin
                             ? <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable
@@ -1225,13 +1330,34 @@ export default function App() {
             </button>
           </div>
           <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:8}}>VALIDITY (선사별)</div>
+            <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:4}}>VALIDITY (선사별)</div>
+            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>현재: Till · 향후: From · 향후 GRI는 +USD (현재가 대비)</div>
             {CRS.map(k=>(
-              <div key={k} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                <Bg k={k}/>
-                <span style={{fontSize:11,color:"#374151",width:60}}>{CN[k]}</span>
-                <input value={validity[k]} onChange={e=>setValidity(p=>({...p,[k]:e.target.value}))} placeholder="e.g. June 1-30, 2026"
-                  style={{flex:1,padding:"6px 10px",fontSize:12,fontWeight:600,color:"#166534",background:"#fff",border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box"}}/>
+              <div key={k} style={{marginBottom:10,padding:10,background:"#fff",border:"1px solid #bbf7d0",borderRadius:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                  <Bg k={k}/><span style={{fontSize:12,fontWeight:700,color:"#374151"}}>{CN[k]}</span>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                  <div>
+                    <div style={{fontSize:9,color:"#166534",marginBottom:2}}>현재 (Till)</div>
+                    <input value={validityInfo[k]?.current??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],current:e.target.value}}))} placeholder="Till 15.06.2026"
+                      style={{width:"100%",padding:"6px 8px",fontSize:11,fontWeight:600,color:"#166534",background:"#f0fdf4",border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box"}}/>
+                  </div>
+                  <div>
+                    <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>향후 (From)</div>
+                    <input value={validityInfo[k]?.future??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],future:e.target.value}}))} placeholder="From 16.06.2026"
+                      style={{width:"100%",padding:"6px 8px",fontSize:11,fontWeight:600,color:"#b45309",background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/>
+                  </div>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
+                  {RATE_TYPES.map(t=>(
+                    <div key={t}>
+                      <div style={{fontSize:9,color:"#6b7280",marginBottom:2}}>+{t.toUpperCase()}</div>
+                      <input type="number" value={futureAdj[k]?.[t]??0} onChange={e=>setFutureAdj(p=>({...p,[k]:{...p[k],[t]:parseInt(e.target.value,10)||0}}))}
+                        style={{width:"100%",padding:"5px 6px",fontSize:11,border:"1px solid #e5e7eb",borderRadius:6,boxSizing:"border-box"}}/>
+                    </div>
+                  ))}
+                </div>
               </div>
             ))}
             <button onClick={saveAllSettings}
@@ -1280,6 +1406,12 @@ export default function App() {
             ))}
           </div>
           <span style={{fontSize:10,color:"#9ca3af",marginLeft:8}}>{ctype==="coc"?"Carrier Owned":"Shipper Owned"}</span>
+          <RatePeriodToggle/>
+        </div>
+      )}
+      {tab==="dropoff" && (
+        <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
+          <RatePeriodToggle accentFuture="#0369a1"/>
         </div>
       )}
 
