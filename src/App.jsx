@@ -227,6 +227,7 @@ export default function App() {
   const [ctype, setCtype] = useState("coc");
   const [exp, setExp] = useState(null);
   const [cityOpen, setCityOpen] = useState(null);
+  const [doCityOpen, setDoCityOpen] = useState(null);
   const [sc, setSc] = useState(null);
 
   // Client mgmt
@@ -805,8 +806,6 @@ export default function App() {
       </div>
     );
   };
-
-  const [doCityOpen, setDoCityOpen] = useState(null);
 
   const DOCrd = ({row,idx}) => {
     const open = exp===`d${idx}`;
