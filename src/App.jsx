@@ -491,7 +491,6 @@ export default function App() {
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
   const [carrierEditCell, setCarrierEditCell] = useState(null);
-  const [rentalAdminCity, setRentalAdminCity] = useState("Moscow");
   const [rentalAdminPeriod, setRentalAdminPeriod] = useState("current");
   const [rentalEditCell, setRentalEditCell] = useState(null);
   const [clients, setClients] = useState([]);
@@ -1363,15 +1362,15 @@ export default function App() {
   // ── RENTAL RATES ADMIN ──
   if (showRentalAdmin && isAdmin) {
     const raPeriod = rentalAdminPeriod;
-    const raCity = rentalAdminCity;
     const isFuture = raPeriod === "future";
-    const cityLabel = RC_LABEL[raCity] || raCity;
-    const applyRentalCellSell = (row, si, sellStr) => {
+    const rentalCityCount = RENT_CITY_ORDER.length;
+    const rentalGridCols = 2 + rentalCityCount * 2;
+    const applyRentalCellSell = (row, city, si, sellStr) => {
       const sell = parseInt(sellStr, 10);
       if (!Number.isFinite(sell)) return;
       const type = si === 0 ? "soc20" : "soc40";
       const margin = getM(row.freightPol, row.area, type);
-      applyRentalRate(row.rentalPol, raCity, si, sell - margin, raPeriod);
+      applyRentalRate(row.rentalPol, city, si, sell - margin, raPeriod);
     };
     const filteredRentalAreaGroups = rentalAreaGroups
       .filter(({ area }) => !(marginTab === "area" && selArea) || area === selArea)
@@ -1388,13 +1387,13 @@ export default function App() {
       : marginTab === "pol" && selPol
         ? `${selPol} · ${rentalGridPolCount}개 POL`
         : `${rentalGridPolCount}개 POL (전체)`;
-    const renderRentalGridCell = (row, si) => {
-      const cost = getRentalBase(row.rentalPol, raCity, si, raPeriod);
+    const renderRentalGridCell = (row, city, si) => {
+      const cost = getRentalBase(row.rentalPol, city, si, raPeriod);
       if (cost == null) return <td className="cg-cell cg-empty">—</td>;
       const type = si === 0 ? "soc20" : "soc40";
       const margin = getM(row.freightPol, row.area, type);
       const sell = cost + margin;
-      const cellKey = `${row.rentalPol}:${si}`;
+      const cellKey = `${row.rentalPol}:${city}:${si}`;
       const isOpen = rentalEditCell === cellKey;
       return (
         <td className={`cg-cell${isFuture ? " cg-future" : ""}${isOpen ? " cg-active" : ""}`}>
@@ -1407,7 +1406,7 @@ export default function App() {
                     <td className="cg-mini-val-cost">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-cost"
                         value={cost ?? ""} placeholder="—"
-                        onChange={e => applyRentalRate(row.rentalPol, raCity, si, e.target.value, raPeriod)}/>
+                        onChange={e => applyRentalRate(row.rentalPol, city, si, e.target.value, raPeriod)}/>
                     </td>
                   </tr>
                   <tr>
@@ -1415,7 +1414,7 @@ export default function App() {
                     <td className="cg-mini-val-sell">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-sell"
                         value={sell ?? ""} placeholder="—"
-                        onChange={e => applyRentalCellSell(row, si, e.target.value)}/>
+                        onChange={e => applyRentalCellSell(row, city, si, e.target.value)}/>
                     </td>
                   </tr>
                   <tr className="cg-mini-margin-tr">
@@ -1456,15 +1455,6 @@ export default function App() {
           </button>
         </div>
         <div className="carrier-admin-page rental-admin-page" onClick={e => e.stopPropagation()}>
-          <div style={{marginBottom:10}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#6b21a8",marginBottom:6}}>Return City (Drop off)</div>
-            <select value={raCity} onChange={e=>{setRentalAdminCity(e.target.value);setRentalEditCell(null);}}
-              style={{width:"100%",padding:"8px 10px",fontSize:12,fontWeight:600,border:"1px solid #ddd6fe",borderRadius:8,background:"#faf5ff",color:"#5b21b6"}}>
-              {RENT_CITY_ORDER.map(city=>(
-                <option key={city} value={city}>{RC_LABEL[city] || city}</option>
-              ))}
-            </select>
-          </div>
           <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:10}}>
             {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
               <button key={k} type="button" onClick={()=>{setRentalAdminPeriod(k);setRentalEditCell(null);}}
@@ -1493,36 +1483,39 @@ export default function App() {
             areas={areas} fData={fData} getM={getM}
           />
           <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
-            {cityLabel} · {isFuture ? "향후" : "현재"} 렌탈 운임 (USD) · 셀 클릭 → 매입·매출·마진 조정 · {rentalGridFilterLabel}
+            Return City 전체 · {isFuture ? "향후" : "현재"} 렌탈 (USD) · 가로 스크롤 · 셀 클릭 → 매입·매출·마진 · {rentalGridFilterLabel}
           </div>
-          <div className="carrier-grid-wrap">
+          <div className="carrier-grid-wrap rental-grid-wrap">
             <table className="carrier-grid rental-grid">
               <thead>
                 <tr className="cg-carrier-row">
-                  <th colSpan={2}></th>
-                  <th colSpan={2}>{cityLabel} · {isFuture ? "향후" : "현재"} Rental (USD)</th>
+                  <th colSpan={2} className="cg-rental-sticky-pol"></th>
+                  {RENT_CITY_ORDER.map(city => (
+                    <th key={city} colSpan={2} className="cg-rental-city-head">{RC_LABEL[city] || city}</th>
+                  ))}
                 </tr>
                 <tr className="cg-head-row">
-                  <th rowSpan={2} className="cg-th-area">AREA</th>
-                  <th rowSpan={2} className="cg-th-pol">POL</th>
-                  <th colSpan={2}>Container Rental</th>
-                </tr>
-                <tr className="cg-head-row">
-                  <th>20&apos;</th>
-                  <th>40&apos;</th>
+                  <th className="cg-th-area cg-rental-sticky-area">AREA</th>
+                  <th className="cg-th-pol cg-rental-sticky-pol">POL</th>
+                  {RENT_CITY_ORDER.flatMap(city => ([
+                    <th key={`${city}-20`}>20&apos;</th>,
+                    <th key={`${city}-40`}>40&apos;</th>,
+                  ]))}
                 </tr>
               </thead>
               <tbody>
                 {filteredRentalAreaGroups.length === 0 ? (
-                  <tr><td colSpan={4} style={{padding:20,color:"#9ca3af",fontSize:12}}>표시할 POL 없음 · 지역/POL 선택 확인</td></tr>
+                  <tr><td colSpan={rentalGridCols} style={{padding:20,color:"#9ca3af",fontSize:12}}>표시할 POL 없음 · 지역/POL 선택 확인</td></tr>
                 ) : filteredRentalAreaGroups.map(({ area, rows }) => rows.map((row, ri) => (
                   <tr key={row.rentalPol} className={ri % 2 === 1 ? "cg-stripe" : ""}>
                     {ri === 0 && (
-                      <td rowSpan={rows.length} className="cg-area">{area}</td>
+                      <td rowSpan={rows.length} className="cg-area cg-rental-sticky-area">{area}</td>
                     )}
-                    <td className="cg-pol">{row.displayPol}</td>
-                    {renderRentalGridCell(row, 0)}
-                    {renderRentalGridCell(row, 1)}
+                    <td className="cg-pol cg-rental-sticky-pol">{row.displayPol}</td>
+                    {RENT_CITY_ORDER.flatMap(city => ([
+                      renderRentalGridCell(row, city, 0),
+                      renderRentalGridCell(row, city, 1),
+                    ]))}
                   </tr>
                 )))}
               </tbody>
