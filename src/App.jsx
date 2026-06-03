@@ -261,6 +261,105 @@ const MAIN_TABS = [
   {id:"rental",label:"Rental+Ocean",Icon:TabIconRental},
 ];
 
+const marginInpStyle = {width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"};
+
+function MarginPanel({
+  onSave, filterHint, saveMsg,
+  marginTab, setMarginTab,
+  margins, setMargins,
+  selArea, setSelArea, areaM, setAreaM, areaEdit, setAreaEdit,
+  selPol, setSelPol, polM, setPolM, polEdit, setPolEdit,
+  areas, fData, getM,
+}) {
+  return (
+    <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:10}}>
+      <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD)</div>
+      <div style={{display:"flex",background:"#fef3c7",borderRadius:8,padding:2,marginBottom:10}}>
+        {[["global","전체"],["area","지역별"],["pol","도시별"]].map(([k,l])=>(
+          <button key={k} type="button" onClick={()=>setMarginTab(k)} style={{flex:1,padding:"6px",fontSize:11,fontWeight:600,borderRadius:6,background:marginTab===k?"#fff":"transparent",border:"none",cursor:"pointer",color:marginTab===k?"#92400e":"#b45309"}}>{l}</button>
+        ))}
+      </div>
+      {filterHint && <div style={{fontSize:9,color:"#b45309",marginBottom:8}}>{filterHint}</div>}
+      {marginTab==="global" && (
+        <div>
+          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>모든 구간에 적용되는 기본 마진</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
+            {RATE_TYPES.map(t=>(
+              <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
+                  style={marginInpStyle}/></div>
+            ))}
+          </div>
+        </div>
+      )}
+      {marginTab==="area" && (
+        <div>
+          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>지역별 마진 (전체 마진보다 우선 · 선택 시 운임표 필터)</div>
+          <select value={selArea} onChange={e=>{setSelArea(e.target.value); const m=areaM[e.target.value]; setAreaEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""}); }}
+            style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
+            <option value="">-- 전체 지역 --</option>
+            {areas.map(a=><option key={a} value={a}>{a} {areaM[a]?"✅":""}</option>)}
+          </select>
+          {selArea && <>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+              {RATE_TYPES.map(t=>(
+                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                  <input type="number" placeholder={String(margins[t])} value={areaEdit[t]} onChange={e=>setAreaEdit(p=>({...p,[t]:e.target.value}))}
+                    style={marginInpStyle}/></div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button type="button" onClick={()=>{const m={coc20:parseInt(areaEdit.coc20)||margins.coc20,coc40:parseInt(areaEdit.coc40)||margins.coc40,soc20:parseInt(areaEdit.soc20)||margins.soc20,soc40:parseInt(areaEdit.soc40)||margins.soc40}; setAreaM(p=>({...p,[selArea]:m}));}}
+                style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
+              <button type="button" onClick={()=>{setAreaM(p=>{const n={...p};delete n[selArea];return n;});setAreaEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
+                style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
+            </div>
+          </>}
+          {Object.keys(areaM).length>0 && (
+            <div style={{marginTop:8,padding:"8px",background:"#fef3c7",borderRadius:6}}>
+              <div style={{fontSize:10,color:"#92400e",fontWeight:700,marginBottom:4}}>적용된 지역 마진:</div>
+              {Object.entries(areaM).map(([area,m])=>(
+                <div key={area} style={{fontSize:11,color:"#78350f",marginBottom:2}}>
+                  <b>{area}</b>: COC {m.coc20}/{m.coc40} SOC {m.soc20}/{m.soc40}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {marginTab==="pol" && (
+        <div>
+          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>도시별 마진 (최우선 · 선택 시 해당 POL만 표시)</div>
+          <select value={selPol} onChange={e=>{setSelPol(e.target.value); const m=polM[e.target.value]; setPolEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""});}}
+            style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
+            <option value="">-- 전체 POL --</option>
+            {fData.map(d=><option key={d.pol} value={d.pol}>{d.area} · {d.pol} {polM[d.pol]?"✅":""}</option>)}
+          </select>
+          {selPol && <>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
+              {RATE_TYPES.map(t=>(
+                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
+                  <input type="number" placeholder={String(getM(selPol,fData.find(d=>d.pol===selPol)?.area||"",t))} value={polEdit[t]} onChange={e=>setPolEdit(p=>({...p,[t]:e.target.value}))}
+                    style={marginInpStyle}/></div>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:6}}>
+              <button type="button" onClick={()=>{const area=fData.find(d=>d.pol===selPol)?.area||""; const m={coc20:parseInt(polEdit.coc20)||getM(selPol,area,"coc20"),coc40:parseInt(polEdit.coc40)||getM(selPol,area,"coc40"),soc20:parseInt(polEdit.soc20)||getM(selPol,area,"soc20"),soc40:parseInt(polEdit.soc40)||getM(selPol,area,"soc40")}; setPolM(p=>({...p,[selPol]:m}));}}
+                style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
+              <button type="button" onClick={()=>{setPolM(p=>{const n={...p};delete n[selPol];return n;});setPolEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
+                style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
+            </div>
+          </>}
+        </div>
+      )}
+      <button type="button" onClick={onSave}
+        style={{width:"100%",marginTop:10,padding:"8px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>
+        {saveMsg || "💾 마진·운임 저장"}
+      </button>
+    </div>
+  );
+}
+
 export default function App() {
   const fData = useMemo(() => FR.map(r => ({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})), []);
   const rData = useMemo(() => RN.map(r => { const r20={},r40={}; RC.forEach((c,i)=>{r20[c]=r[1+i];r40[c]=r[13+i];}); return {pol:r[0],r20,r40}; }), []);
@@ -1023,94 +1122,6 @@ export default function App() {
     </div>
   );
 
-  const MarginPanel = ({ onSave, filterHint }) => (
-    <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:10}}>
-      <div style={{fontSize:10,fontWeight:700,color:"#92400e",marginBottom:8}}>MARGIN (USD)</div>
-      <div style={{display:"flex",background:"#fef3c7",borderRadius:8,padding:2,marginBottom:10}}>
-        {[["global","전체"],["area","지역별"],["pol","도시별"]].map(([k,l])=>(
-          <button key={k} type="button" onClick={()=>setMarginTab(k)} style={{flex:1,padding:"6px",fontSize:11,fontWeight:600,borderRadius:6,background:marginTab===k?"#fff":"transparent",border:"none",cursor:"pointer",color:marginTab===k?"#92400e":"#b45309"}}>{l}</button>
-        ))}
-      </div>
-      {filterHint && <div style={{fontSize:9,color:"#b45309",marginBottom:8}}>{filterHint}</div>}
-      {marginTab==="global" && (
-        <div>
-          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>모든 구간에 적용되는 기본 마진</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
-            {RATE_TYPES.map(t=>(
-              <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
-                <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
-                  style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
-            ))}
-          </div>
-        </div>
-      )}
-      {marginTab==="area" && (
-        <div>
-          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>지역별 마진 (전체 마진보다 우선 · 선택 시 운임표 필터)</div>
-          <select value={selArea} onChange={e=>{setSelArea(e.target.value); const m=areaM[e.target.value]; setAreaEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""}); }}
-            style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
-            <option value="">-- 전체 지역 --</option>
-            {areas.map(a=><option key={a} value={a}>{a} {areaM[a]?"✅":""}</option>)}
-          </select>
-          {selArea && <>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
-              {RATE_TYPES.map(t=>(
-                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
-                  <input type="number" placeholder={String(margins[t])} value={areaEdit[t]} onChange={e=>setAreaEdit(p=>({...p,[t]:e.target.value}))}
-                    style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
-              ))}
-            </div>
-            <div style={{display:"flex",gap:6}}>
-              <button type="button" onClick={()=>{const m={coc20:parseInt(areaEdit.coc20)||margins.coc20,coc40:parseInt(areaEdit.coc40)||margins.coc40,soc20:parseInt(areaEdit.soc20)||margins.soc20,soc40:parseInt(areaEdit.soc40)||margins.soc40}; setAreaM(p=>({...p,[selArea]:m}));}}
-                style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
-              <button type="button" onClick={()=>{setAreaM(p=>{const n={...p};delete n[selArea];return n;});setAreaEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
-                style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
-            </div>
-          </>}
-          {Object.keys(areaM).length>0 && (
-            <div style={{marginTop:8,padding:"8px",background:"#fef3c7",borderRadius:6}}>
-              <div style={{fontSize:10,color:"#92400e",fontWeight:700,marginBottom:4}}>적용된 지역 마진:</div>
-              {Object.entries(areaM).map(([area,m])=>(
-                <div key={area} style={{fontSize:11,color:"#78350f",marginBottom:2}}>
-                  <b>{area}</b>: COC {m.coc20}/{m.coc40} SOC {m.soc20}/{m.soc40}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-      {marginTab==="pol" && (
-        <div>
-          <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>도시별 마진 (최우선 · 선택 시 해당 POL만 표시)</div>
-          <select value={selPol} onChange={e=>{setSelPol(e.target.value); const m=polM[e.target.value]; setPolEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""});}}
-            style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
-            <option value="">-- 전체 POL --</option>
-            {fData.map(d=><option key={d.pol} value={d.pol}>{d.area} · {d.pol} {polM[d.pol]?"✅":""}</option>)}
-          </select>
-          {selPol && <>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
-              {RATE_TYPES.map(t=>(
-                <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
-                  <input type="number" placeholder={String(getM(selPol,fData.find(d=>d.pol===selPol)?.area||"",t))} value={polEdit[t]} onChange={e=>setPolEdit(p=>({...p,[t]:e.target.value}))}
-                    style={{width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/></div>
-              ))}
-            </div>
-            <div style={{display:"flex",gap:6}}>
-              <button type="button" onClick={()=>{const area=fData.find(d=>d.pol===selPol)?.area||""; const m={coc20:parseInt(polEdit.coc20)||getM(selPol,area,"coc20"),coc40:parseInt(polEdit.coc40)||getM(selPol,area,"coc40"),soc20:parseInt(polEdit.soc20)||getM(selPol,area,"soc20"),soc40:parseInt(polEdit.soc40)||getM(selPol,area,"soc40")}; setPolM(p=>({...p,[selPol]:m}));}}
-                style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
-              <button type="button" onClick={()=>{setPolM(p=>{const n={...p};delete n[selPol];return n;});setPolEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
-                style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
-            </div>
-          </>}
-        </div>
-      )}
-      <button type="button" onClick={onSave}
-        style={{width:"100%",marginTop:10,padding:"8px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>
-        {saveMsg || "💾 마진·운임 저장"}
-      </button>
-    </div>
-  );
-
   const PolAdjustBar = ({pol,area,types,costHint,onCost20,onCost40,onClearCost}) => (
     <div style={{padding:"10px 16px",background:"#fffbeb",borderBottom:"1px solid #fde68a"}} onClick={e=>e.stopPropagation()}>
       <div style={{fontSize:10,fontWeight:700,color:"#1e40af",marginBottom:6}}>{pol} · 매입가 조정 (USD)</div>
@@ -1255,11 +1266,24 @@ export default function App() {
               </button>
             ))}
           </div>
-          <MarginPanel onSave={saveCarrierPricing} filterHint={
-            marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
-            marginTab === "pol" && selPol ? `운임표: ${selPol} 만 표시` :
-            marginTab === "area" ? "지역 선택 시 해당 지역 운임만 표시" : null
-          }/>
+          <MarginPanel
+            onSave={saveCarrierPricing}
+            saveMsg={saveMsg}
+            filterHint={
+              marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
+              marginTab === "pol" && selPol ? `운임표: ${selPol} 만 표시` :
+              marginTab === "area" ? "지역 선택 시 해당 지역 운임만 표시" : null
+            }
+            marginTab={marginTab} setMarginTab={setMarginTab}
+            margins={margins} setMargins={setMargins}
+            selArea={selArea} setSelArea={setSelArea}
+            areaM={areaM} setAreaM={setAreaM}
+            areaEdit={areaEdit} setAreaEdit={setAreaEdit}
+            selPol={selPol} setSelPol={setSelPol}
+            polM={polM} setPolM={setPolM}
+            polEdit={polEdit} setPolEdit={setPolEdit}
+            areas={areas} fData={fData} getM={getM}
+          />
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:10}}>
             {CRS.map(k=>(
               <div key={k} style={{opacity:caCr===k?1:0.45}}>
