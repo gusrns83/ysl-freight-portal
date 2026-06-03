@@ -210,12 +210,12 @@
   border-radius: 4px;
 }
 .carrier-grid .cg-row-cost {
-  background: #f8fafc;
-  border-left: 2px solid #e2e8f0;
+  background: #eef4fc;
+  border-left: 2px solid #bdd3ef;
 }
 .carrier-grid .cg-row-sell {
-  background: #fafaf9;
-  border-left: 2px solid #e7e5e4;
+  background: #fdf6ee;
+  border-left: 2px solid #ecd9c4;
   margin-top: 2px;
 }
 .carrier-grid .cg-lbl {
@@ -223,8 +223,8 @@
   font-weight: 600;
   flex-shrink: 0;
 }
-.carrier-grid .cg-lbl-cost { color: #64748b; }
-.carrier-grid .cg-lbl-sell { color: #78716c; }
+.carrier-grid .cg-lbl-cost { color: #5b8fc7; }
+.carrier-grid .cg-lbl-sell { color: #c4956a; }
 .carrier-grid .cg-val {
   font-size: 11px;
   font-weight: 600;
@@ -232,8 +232,8 @@
   flex: 1;
   color: #374151;
 }
-.carrier-grid .cg-val-cost { color: #475569; }
-.carrier-grid .cg-val-sell { color: #44403c; }
+.carrier-grid .cg-val-cost { color: #3d6a9e; }
+.carrier-grid .cg-val-sell { color: #6b5038; }
 .carrier-grid .cg-margin-hint {
   display: flex;
   align-items: center;
@@ -241,16 +241,16 @@
   gap: 4px;
   font-size: 7px;
   font-weight: 500;
-  color: #a8a29e;
+  color: #9b87b8;
   text-align: center;
   margin-top: 2px;
   padding: 2px 4px;
   border-radius: 3px;
-  background: #f3f4f6;
+  background: #f3effa;
   line-height: 1.1;
 }
 .carrier-grid .cg-lbl-margin {
-  color: #a8a29e;
+  color: #9b87b8;
   font-size: 7px;
   font-weight: 500;
 }
@@ -282,25 +282,25 @@
   width: 30px;
 }
 .carrier-grid .cg-mini-label-cost {
-  color: #64748b;
-  background: #f8fafc;
+  color: #5b8fc7;
+  background: #eef4fc;
 }
 .carrier-grid .cg-mini-val-cost {
-  background: #f8fafc;
+  background: #eef4fc;
 }
 .carrier-grid .cg-mini-label-sell {
-  color: #78716c;
-  background: #fafaf9;
+  color: #c4956a;
+  background: #fdf6ee;
 }
 .carrier-grid .cg-mini-val-sell {
-  background: #fafaf9;
+  background: #fdf6ee;
 }
 .carrier-grid .cg-mini-label-margin {
-  color: #a8a29e;
-  background: #f3f4f6;
+  color: #9b87b8;
+  background: #f3effa;
 }
 .carrier-grid .cg-mini-val-margin {
-  background: #f3f4f6;
+  background: #f3effa;
 }
 .carrier-grid .cg-mini-inp {
   width: 100%;
@@ -315,11 +315,11 @@
   font-family: inherit;
   color: #374151;
 }
-.carrier-grid .cg-inp-cost { color: #475569; }
-.carrier-grid .cg-inp-sell { color: #44403c; }
-.carrier-grid .cg-inp-margin { color: #78716c; font-size: 10px; font-weight: 500; }
+.carrier-grid .cg-inp-cost { color: #3d6a9e; }
+.carrier-grid .cg-inp-sell { color: #6b5038; }
+.carrier-grid .cg-inp-margin { color: #9b87b8; font-size: 10px; font-weight: 500; }
 .carrier-grid .cg-mini-margin-tr td {
-  border-top: 1px solid #e5e7eb !important;
+  border-top: 1px solid #e4ddf0 !important;
 }
 .carrier-grid .cg-close {
   display: block;
