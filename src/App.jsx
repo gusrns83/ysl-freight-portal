@@ -493,6 +493,7 @@ export default function App() {
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
   const [carrierEditCell, setCarrierEditCell] = useState(null);
   const [rentalAdminPeriod, setRentalAdminPeriod] = useState("current");
+  const [selReturnCity, setSelReturnCity] = useState("");
   const [rentalEditCell, setRentalEditCell] = useState(null);
   const [clients, setClients] = useState([]);
   const [addForm, setAddForm] = useState(false);
@@ -1367,7 +1368,10 @@ export default function App() {
   if (showRentalAdmin && isAdmin) {
     const raPeriod = rentalAdminPeriod;
     const isFuture = raPeriod === "future";
-    const rentalCityCount = RENT_CITY_ORDER.length;
+    const visibleReturnCities = selReturnCity
+      ? RENT_CITY_ORDER.filter(c => c === selReturnCity)
+      : RENT_CITY_ORDER;
+    const rentalCityCount = visibleReturnCities.length;
     const rentalGridCols = 2 + rentalCityCount * 2;
     const applyRentalCellSell = (row, city, si, sellStr) => {
       const sell = parseInt(sellStr, 10);
@@ -1391,6 +1395,9 @@ export default function App() {
       : marginTab === "pol" && selPol
         ? `${selPol} · ${rentalGridPolCount}개 POL`
         : `${rentalGridPolCount}개 POL (전체)`;
+    const rentalCityFilterLabel = selReturnCity
+      ? RC_LABEL[selReturnCity] || selReturnCity
+      : `전체 ${RENT_CITY_ORDER.length}개 반납지`;
     const renderRentalGridCell = (row, city, si) => {
       const cost = getRentalBase(row.rentalPol, city, si, raPeriod);
       if (cost == null) return <td className="cg-cell cg-empty">—</td>;
@@ -1502,22 +1509,48 @@ export default function App() {
             polEdit={polEdit} setPolEdit={setPolEdit}
             areas={areas} fData={fData} getM={getM}
           />
+          <div style={{marginBottom:10,padding:10,background:"#faf5ff",border:"1px solid #ddd6fe",borderRadius:10}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#6b21a8",marginBottom:6}}>반납지 (Return City) · 운임표 필터</div>
+            <select value={selReturnCity} onChange={e=>{setSelReturnCity(e.target.value);setRentalEditCell(null);}}
+              style={{width:"100%",padding:"8px 10px",fontSize:12,fontWeight:600,border:"1px solid #ddd6fe",borderRadius:8,background:"#fff",color:"#5b21b6",marginBottom:8}}>
+              <option value="">-- 전체 반납지 --</option>
+              {RENT_CITY_ORDER.map(city=>(
+                <option key={city} value={city}>{RC_LABEL[city] || city}</option>
+              ))}
+            </select>
+            <div style={{display:"flex",gap:6,overflowX:"auto",paddingBottom:2}}>
+              <button type="button" onClick={()=>{setSelReturnCity("");setRentalEditCell(null);}}
+                style={{fontSize:10,fontWeight:600,padding:"5px 10px",borderRadius:16,whiteSpace:"nowrap",cursor:"pointer",border:`1px solid ${!selReturnCity?"#7c3aed":"#e9d5ff"}`,background:!selReturnCity?"#7c3aed":"#fff",color:!selReturnCity?"#fff":"#7c3aed"}}>
+                전체
+              </button>
+              {RENT_CITY_ORDER.map(city=>{
+                const on = selReturnCity === city;
+                const label = RC_LABEL[city] || city;
+                return (
+                  <button key={city} type="button" onClick={()=>{setSelReturnCity(on?"":city);setRentalEditCell(null);}}
+                    style={{fontSize:10,fontWeight:600,padding:"5px 10px",borderRadius:16,whiteSpace:"nowrap",cursor:"pointer",border:`1px solid ${on?"#7c3aed":"#e9d5ff"}`,background:on?"#7c3aed":"#fff",color:on?"#fff":"#7c3aed"}}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
-            Return City 전체 · {isFuture ? "향후" : "현재"} 렌탈 (USD) · 가로 스크롤 · 셀 클릭 → 매입·매출·마진 · {rentalGridFilterLabel}
+            {rentalCityFilterLabel} · {isFuture ? "향후" : "현재"} 렌탈 (USD) · 셀 클릭 → 매입·매출·마진 · {rentalGridFilterLabel}
           </div>
           <div className="carrier-grid-wrap rental-grid-wrap">
             <table className="carrier-grid rental-grid">
               <thead>
                 <tr className="cg-carrier-row">
                   <th colSpan={2} className="cg-rental-sticky-pol"></th>
-                  {RENT_CITY_ORDER.map(city => (
+                  {visibleReturnCities.map(city => (
                     <th key={city} colSpan={2} className="cg-rental-city-head">{RC_LABEL[city] || city}</th>
                   ))}
                 </tr>
                 <tr className="cg-head-row">
                   <th className="cg-th-area cg-rental-sticky-area">AREA</th>
                   <th className="cg-th-pol cg-rental-sticky-pol">POL</th>
-                  {RENT_CITY_ORDER.flatMap(city => ([
+                  {visibleReturnCities.flatMap(city => ([
                     <th key={`${city}-20`}>20&apos;</th>,
                     <th key={`${city}-40`}>40&apos;</th>,
                   ]))}
@@ -1525,14 +1558,14 @@ export default function App() {
               </thead>
               <tbody>
                 {filteredRentalAreaGroups.length === 0 ? (
-                  <tr><td colSpan={rentalGridCols} style={{padding:20,color:"#9ca3af",fontSize:12}}>표시할 POL 없음 · 지역/POL 선택 확인</td></tr>
+                  <tr><td colSpan={rentalGridCols} style={{padding:20,color:"#9ca3af",fontSize:12}}>표시할 POL 없음 · 지역/POL·반납지 선택 확인</td></tr>
                 ) : filteredRentalAreaGroups.map(({ area, rows }) => rows.map((row, ri) => (
                   <tr key={row.rentalPol} className={ri % 2 === 1 ? "cg-stripe" : ""}>
                     {ri === 0 && (
                       <td rowSpan={rows.length} className="cg-area cg-rental-sticky-area">{area}</td>
                     )}
                     <td className="cg-pol cg-rental-sticky-pol">{row.displayPol}</td>
-                    {RENT_CITY_ORDER.flatMap(city => ([
+                    {visibleReturnCities.flatMap(city => ([
                       renderRentalGridCell(row, city, 0),
                       renderRentalGridCell(row, city, 1),
                     ]))}
