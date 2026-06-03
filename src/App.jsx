@@ -114,7 +114,10 @@ const defaultValidityInfo = () => Object.fromEntries(CRS.map(k => [k, {
   current: k === "SNK" ? "Till 15.06.2026" : "Till 30.06.2026",
   future: k === "SNK" ? "From 16.06.2026" : "From 01.07.2026",
 }]));
-const defaultFutureAdj = () => Object.fromEntries(CRS.map(k => [k, { coc20: 0, coc40: 0, soc20: 0, soc40: 0 }]));
+const defaultCarrierRates = () => Object.fromEntries(CRS.map(k => [k, {
+  current: { coc20: "", coc40: "", soc20: "", soc40: "" },
+  future: { coc20: "", coc40: "", soc20: "", soc40: "" },
+}]));
 const CN = {SNK:"Sinokor",DY:"Dongyoung",CK:"CK Line"};
 const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
 const F_TO_R = Object.fromEntries(Object.entries(PM).map(([rental, freight]) => [freight, rental]));
@@ -226,7 +229,7 @@ export default function App() {
   const [areaEdit, setAreaEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [polEdit, setPolEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [validityInfo, setValidityInfo] = useState(defaultValidityInfo);
-  const [futureAdj, setFutureAdj] = useState(defaultFutureAdj);
+  const [carrierRates, setCarrierRates] = useState(defaultCarrierRates);
   const [ratePeriod, setRatePeriod] = useState("current"); // current | future
   const [notices, setNotices] = useState(mkNotices);
   const [dismissedNotices, setDismissedNotices] = useState(() => new Set());
@@ -355,7 +358,7 @@ export default function App() {
         saveSetting("notice_on", notices[0].on),
         saveSetting("notice_file_url", notices[0].fileUrl),
         saveSetting("validity_info_json", JSON.stringify(validityInfo)),
-        saveSetting("future_adj_json", JSON.stringify(futureAdj)),
+        saveSetting("carrier_rates_json", JSON.stringify(carrierRates)),
         saveSetting("validity_snk", validityInfo.SNK?.current ?? ""),
         saveSetting("validity_dy", validityInfo.DY?.current ?? ""),
         saveSetting("validity_ck", validityInfo.CK?.current ?? ""),
@@ -408,12 +411,15 @@ export default function App() {
           CK: { ...prev.CK, current: s.validity_ck ?? prev.CK.current },
         }));
       }
-      if (s.future_adj_json) {
+      if (s.carrier_rates_json) {
         try {
-          const parsed = JSON.parse(s.future_adj_json);
+          const parsed = JSON.parse(s.carrier_rates_json);
           if (parsed && typeof parsed === "object") {
-            setFutureAdj(Object.fromEntries(
-              CRS.map(k => [k, { ...defaultFutureAdj()[k], ...(parsed[k] || {}) }])
+            setCarrierRates(Object.fromEntries(
+              CRS.map(k => [k, {
+                current: { ...defaultCarrierRates()[k].current, ...(parsed[k]?.current || {}) },
+                future: { ...defaultCarrierRates()[k].future, ...(parsed[k]?.future || {}) },
+              }])
             ));
           }
         } catch(e) {}
@@ -432,24 +438,50 @@ export default function App() {
     sell: cost != null ? cost + (margin ?? 0) : null,
     cr,
   });
-  const getCarrierRate = (row, cr, t) => {
-    const ov = polCostO[row.pol]?.carrier?.[cr]?.[t];
-    const base = ov != null ? ov : row.rates[cr][t];
-    if (base == null) return null;
-    if (ratePeriod === "future") {
-      const adj = futureAdj[cr]?.[t] ?? 0;
-      return base + adj;
-    }
-    return base;
+  const getCarrierCostOverride = (pol, cr, t, period) => {
+    const c = polCostO[pol]?.carrier?.[cr];
+    if (c?.[period]?.[t] != null && c[period][t] !== "") return c[period][t];
+    if (period === "current" && c?.[t] != null && c[t] !== "") return c[t];
+    const g = carrierRates[cr]?.[period]?.[t];
+    if (g != null && g !== "") return Number(g);
+    return null;
   };
-  const applyCarrierRate = (pol, cr, t, value) => {
-    const v = parseInt(value, 10);
-    if (!Number.isFinite(v)) return;
-    setPolCostO(p => ({
+
+  const getCarrierRate = (row, cr, t, period = ratePeriod) => {
+    const p = period === "future" ? "future" : "current";
+    const ov = getCarrierCostOverride(row.pol, cr, t, p);
+    return ov != null ? ov : row.rates[cr][t];
+  };
+
+  const applyCarrierRate = (pol, cr, t, value, period = "current") => {
+    const raw = String(value).trim();
+    setPolCostO(p => {
+      const prev = { ...(p[pol]?.carrier?.[cr] || {}) };
+      const bucket = { ...(prev[period] || {}) };
+      if (raw === "") delete bucket[t];
+      else {
+        const v = parseInt(raw, 10);
+        if (!Number.isFinite(v)) return p;
+        bucket[t] = v;
+      }
+      const nextCr = { ...prev, [period]: bucket };
+      delete nextCr[t];
+      return {
+        ...p,
+        [pol]: {
+          ...(p[pol] || {}),
+          carrier: { ...(p[pol]?.carrier || {}), [cr]: nextCr },
+        },
+      };
+    });
+  };
+
+  const setGlobalCarrierRate = (cr, period, t, value) => {
+    setCarrierRates(p => ({
       ...p,
-      [pol]: {
-        ...(p[pol] || {}),
-        carrier: { ...(p[pol]?.carrier || {}), [cr]: { ...(p[pol]?.carrier?.[cr] || {}), [t]: v } },
+      [cr]: {
+        ...p[cr],
+        [period]: { ...p[cr][period], [t]: value },
       },
     }));
   };
@@ -579,9 +611,9 @@ export default function App() {
     const cost = getDropCityCost(row, cityKey, si);
     return mkPrice(cost, getM(row.pol, row.area, t), b.cr);
   };
-  const dropCarrierDetail = (row, cityKey, cr, si) => {
+  const dropCarrierDetail = (row, cityKey, cr, si, period = ratePeriod) => {
     const t = si === 0 ? "coc20" : "coc40";
-    const o = getCarrierRate(row, cr, t);
+    const o = getCarrierRate(row, cr, t, period);
     const d = DO[cityKey]?.[cr];
     const cost = o != null && d ? o + d[si] : null;
     return mkPrice(cost, getM(row.pol, row.area, t), cr);
@@ -877,7 +909,7 @@ export default function App() {
         ))}
       </div>
       <span style={{fontSize:10,color:ratePeriod==="future"?(accentFuture||"#b45309"):"#9ca3af"}}>
-        {ratePeriod==="current" ? "Validity: Till 날짜 기준" : "Validity: From 날짜 기준 · GRI 반영가"}
+        {ratePeriod==="current" ? "Validity: Till 날짜 기준" : "Validity: From 날짜 기준"}
       </span>
     </div>
   );
@@ -942,18 +974,28 @@ export default function App() {
             <div style={{padding:"0 16px 16px"}}>
             {isAdmin ? (
               <div style={{marginTop:12}}>
-                {CRS.map(k=>{ const v20=getCarrierRate(row,k,t20),v40=getCarrierRate(row,k,t40); if(v20==null&&v40==null)return null;
-                  const cd20=mkPrice(v20,getM(row.pol,row.area,t20),k);
-                  const cd40=mkPrice(v40,getM(row.pol,row.area,t40),k);
+                {CRS.map(k=>{ 
+                  const cv20=getCarrierRate(row,k,t20,"current"),cv40=getCarrierRate(row,k,t40,"current");
+                  const fv20=getCarrierRate(row,k,t20,"future"),fv40=getCarrierRate(row,k,t40,"future");
+                  if(cv20==null&&cv40==null&&fv20==null&&fv40==null)return null;
+                  const cd20=mkPrice(cv20,getM(row.pol,row.area,t20),k);
+                  const cd40=mkPrice(cv40,getM(row.pol,row.area,t40),k);
+                  const fd20=mkPrice(fv20,getM(row.pol,row.area,t20),k);
+                  const fd40=mkPrice(fv40,getM(row.pol,row.area,t40),k);
                   return (
-                    <div key={k} style={{display:"flex",flexWrap:"wrap",alignItems:"flex-start",gap:6,padding:"8px 0",borderBottom:"1px solid #f9fafb"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6,flex:"1 1 120px",minWidth:0}}>
-                        <Bg k={k}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
+                    <div key={k} style={{padding:"10px 0",borderBottom:"1px solid #f9fafb"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
+                        <Bg k={k}/><span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[k]}</span>
                         <ValidityCell carrierKey={k} compact/>
                       </div>
+                      <div style={{fontSize:9,fontWeight:700,color:"#166534",marginBottom:4}}>현재 운임 · {validityInfo[k]?.current||"Till"}</div>
                       <AdminPriceCols d20={cd20} d40={cd40} editable
-                        onCost20={v=>applyCarrierRate(row.pol,k,t20,v)}
-                        onCost40={v=>applyCarrierRate(row.pol,k,t40,v)}/>
+                        onCost20={v=>applyCarrierRate(row.pol,k,t20,v,"current")}
+                        onCost40={v=>applyCarrierRate(row.pol,k,t40,v,"current")}/>
+                      <div style={{fontSize:9,fontWeight:700,color:"#b45309",margin:"10px 0 4px"}}>향후 운임 · {validityInfo[k]?.future||"From"}</div>
+                      <AdminPriceCols d20={fd20} d40={fd40} editable
+                        onCost20={v=>applyCarrierRate(row.pol,k,t20,v,"future")}
+                        onCost40={v=>applyCarrierRate(row.pol,k,t40,v,"future")}/>
                     </div>
                   ); })}
               </div>
@@ -1025,9 +1067,10 @@ export default function App() {
               const cd20=doDetail(row,k,0),cd40=doDetail(row,k,1);
               const cityKey=`${idx}-${k}`,cOpen=doCityOpen===cityKey;
               const carrierRows = CRS.map(cr=>{
-                const cdC20=dropCarrierDetail(row,k,cr,0),cdC40=dropCarrierDetail(row,k,cr,1);
-                return {cr,cdC20,cdC40};
-              }).filter(x=>x.cdC20.cost!=null||x.cdC40.cost!=null);
+                const cdC20=dropCarrierDetail(row,k,cr,0,"current"),cdC40=dropCarrierDetail(row,k,cr,1,"current");
+                const fdC20=dropCarrierDetail(row,k,cr,0,"future"),fdC40=dropCarrierDetail(row,k,cr,1,"future");
+                return {cr,cdC20,cdC40,fdC20,fdC40};
+              }).filter(x=>x.cdC20.cost!=null||x.cdC40.cost!=null||x.fdC20.cost!=null||x.fdC40.cost!=null);
               return (
                 <div key={k}>
                   <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 12px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
@@ -1053,16 +1096,21 @@ export default function App() {
                       )}
                       {carrierRows.length===0
                         ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
-                        : carrierRows.map(({cr,cdC20,cdC40})=>(
+                        : carrierRows.map(({cr,cdC20,cdC40,fdC20,fdC40})=>(
                           isAdmin ? (
-                          <div key={cr} style={{display:"flex",flexWrap:"wrap",alignItems:"flex-start",padding:"7px 12px 7px 20px",borderBottom:"1px solid #e0f2fe",gap:6}}>
-                            <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
-                              <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span>
+                          <div key={cr} style={{padding:"10px 12px 10px 20px",borderBottom:"1px solid #e0f2fe"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                              <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[cr]}</span>
                               <ValidityCell carrierKey={cr} compact/>
                             </div>
-                            <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable
-                              onCost20={v=>{applyCarrierRate(row.pol,cr,"coc20",v);}}
-                              onCost40={v=>{applyCarrierRate(row.pol,cr,"coc40",v);}}/>
+                            <div style={{fontSize:9,fontWeight:700,color:"#166534",marginBottom:4}}>현재 운임</div>
+                            <AdminPriceCols d20={cdC20} d40={cdC40} editable
+                              onCost20={v=>applyCarrierRate(row.pol,cr,"coc20",v,"current")}
+                              onCost40={v=>applyCarrierRate(row.pol,cr,"coc40",v,"current")}/>
+                            <div style={{fontSize:9,fontWeight:700,color:"#b45309",margin:"8px 0 4px"}}>향후 운임</div>
+                            <AdminPriceCols d20={fdC20} d40={fdC40} editable
+                              onCost20={v=>applyCarrierRate(row.pol,cr,"coc20",v,"future")}
+                              onCost40={v=>applyCarrierRate(row.pol,cr,"coc40",v,"future")}/>
                           </div>
                           ) : (
                           <div key={cr} style={{padding:"0 12px 0 20px",borderBottom:"1px solid #e0f2fe"}}>
@@ -1331,33 +1379,41 @@ export default function App() {
           </div>
           <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:4}}>VALIDITY (선사별)</div>
-            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>현재: Till · 향후: From · 향후 GRI는 +USD (현재가 대비)</div>
+            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Validity 날짜 + 선사별 기본 매입가 (POL별 세부 수정은 카드 펼침)</div>
             {CRS.map(k=>(
               <div key={k} style={{marginBottom:10,padding:10,background:"#fff",border:"1px solid #bbf7d0",borderRadius:8}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
                   <Bg k={k}/><span style={{fontSize:12,fontWeight:700,color:"#374151"}}>{CN[k]}</span>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:8}}>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
                   <div>
-                    <div style={{fontSize:9,color:"#166534",marginBottom:2}}>현재 (Till)</div>
+                    <div style={{fontSize:9,color:"#166534",marginBottom:2}}>현재 Validity (Till)</div>
                     <input value={validityInfo[k]?.current??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],current:e.target.value}}))} placeholder="Till 15.06.2026"
                       style={{width:"100%",padding:"6px 8px",fontSize:11,fontWeight:600,color:"#166534",background:"#f0fdf4",border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box"}}/>
                   </div>
                   <div>
-                    <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>향후 (From)</div>
+                    <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>향후 Validity (From)</div>
                     <input value={validityInfo[k]?.future??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],future:e.target.value}}))} placeholder="From 16.06.2026"
                       style={{width:"100%",padding:"6px 8px",fontSize:11,fontWeight:600,color:"#b45309",background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/>
                   </div>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
-                  {RATE_TYPES.map(t=>(
-                    <div key={t}>
-                      <div style={{fontSize:9,color:"#6b7280",marginBottom:2}}>+{t.toUpperCase()}</div>
-                      <input type="number" value={futureAdj[k]?.[t]??0} onChange={e=>setFutureAdj(p=>({...p,[k]:{...p[k],[t]:parseInt(e.target.value,10)||0}}))}
-                        style={{width:"100%",padding:"5px 6px",fontSize:11,border:"1px solid #e5e7eb",borderRadius:6,boxSizing:"border-box"}}/>
+                {["current","future"].map(period=>(
+                  <div key={period} style={{marginBottom:period==="current"?8:0}}>
+                    <div style={{fontSize:9,fontWeight:700,color:period==="current"?"#166534":"#b45309",marginBottom:4}}>
+                      {period==="current"?"현재 운임 (매입가 USD)":"향후 운임 (매입가 USD)"}
                     </div>
-                  ))}
-                </div>
+                    <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6}}>
+                      {RATE_TYPES.map(t=>(
+                        <div key={t}>
+                          <div style={{fontSize:9,color:"#6b7280",marginBottom:2}}>{t.toUpperCase()}</div>
+                          <input type="number" value={carrierRates[k]?.[period]?.[t]??""} placeholder="자동"
+                            onChange={e=>setGlobalCarrierRate(k,period,t,e.target.value)}
+                            style={{width:"100%",padding:"5px 6px",fontSize:11,border:`1px solid ${period==="current"?"#86efac":"#fcd34d"}`,borderRadius:6,boxSizing:"border-box",background:period==="current"?"#f0fdf4":"#fffbeb"}}/>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
               </div>
             ))}
             <button onClick={saveAllSettings}
