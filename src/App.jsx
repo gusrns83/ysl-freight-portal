@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 
 const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
+const ADMIN_PIN = "0000";
 const NOTICE_COUNT = 3;
 const mkNotices = () => Array.from({ length: NOTICE_COUNT }, (_, i) => ({
   text: "",
