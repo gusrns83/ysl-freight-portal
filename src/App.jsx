@@ -263,11 +263,41 @@ const MAIN_TABS = [
 
 const marginInpStyle = {width:"100%",padding:"6px 8px",fontSize:13,fontWeight:700,color:"#92400e",background:"#fff",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"};
 
+const clearPolMarginType = (polM, type) => {
+  const next = { ...polM };
+  for (const pol of Object.keys(next)) {
+    if (next[pol]?.[type] == null) continue;
+    const row = { ...next[pol] };
+    delete row[type];
+    if (Object.keys(row).length === 0) delete next[pol];
+    else next[pol] = row;
+  }
+  return next;
+};
+
+const clearPolMarginsForArea = (polM, fData, area) => {
+  const next = { ...polM };
+  fData.filter(d => d.area === area).forEach(d => delete next[d.pol]);
+  return next;
+};
+
+const clearPolMarginTypeForArea = (polM, fData, area, type) => {
+  const next = { ...polM };
+  fData.filter(d => d.area === area).forEach(d => {
+    if (next[d.pol]?.[type] == null) return;
+    const row = { ...next[d.pol] };
+    delete row[type];
+    if (Object.keys(row).length === 0) delete next[d.pol];
+    else next[d.pol] = row;
+  });
+  return next;
+};
+
 function MarginPanel({
   onSave, filterHint, saveMsg,
   marginTab, setMarginTab,
-  margins, setMargins,
-  selArea, setSelArea, areaM, setAreaM, areaEdit, setAreaEdit,
+  margins, applyGlobalMargin,
+  selArea, setSelArea, areaM, applyAreaMarginType, applyAreaMargins,
   selPol, setSelPol, polM, setPolM, polEdit, setPolEdit,
   areas, fData, getM,
 }) {
@@ -286,7 +316,7 @@ function MarginPanel({
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8}}>
             {RATE_TYPES.map(t=>(
               <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
-                <input type="number" value={margins[t]} onChange={e=>setMargins(p=>({...p,[t]:parseInt(e.target.value)||0}))}
+                <input type="number" value={margins[t]} onChange={e=>applyGlobalMargin(t, e.target.value)}
                   style={marginInpStyle}/></div>
             ))}
           </div>
@@ -295,7 +325,7 @@ function MarginPanel({
       {marginTab==="area" && (
         <div>
           <div style={{fontSize:10,color:"#b45309",marginBottom:6}}>지역별 마진 (전체 마진보다 우선 · 선택 시 운임표 필터)</div>
-          <select value={selArea} onChange={e=>{setSelArea(e.target.value); const m=areaM[e.target.value]; setAreaEdit(m||{coc20:"",coc40:"",soc20:"",soc40:""}); }}
+          <select value={selArea} onChange={e=>setSelArea(e.target.value)}
             style={{width:"100%",padding:"8px",fontSize:13,border:"1px solid #fcd34d",borderRadius:6,marginBottom:8,background:"#fff"}}>
             <option value="">-- 전체 지역 --</option>
             {areas.map(a=><option key={a} value={a}>{a} {areaM[a]?"✅":""}</option>)}
@@ -304,14 +334,12 @@ function MarginPanel({
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:8,marginBottom:8}}>
               {RATE_TYPES.map(t=>(
                 <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{t.toUpperCase()}</div>
-                  <input type="number" placeholder={String(margins[t])} value={areaEdit[t]} onChange={e=>setAreaEdit(p=>({...p,[t]:e.target.value}))}
+                  <input type="number" value={areaM[selArea]?.[t] ?? margins[t]} onChange={e=>applyAreaMarginType(selArea, t, e.target.value)}
                     style={marginInpStyle}/></div>
               ))}
             </div>
             <div style={{display:"flex",gap:6}}>
-              <button type="button" onClick={()=>{const m={coc20:parseInt(areaEdit.coc20)||margins.coc20,coc40:parseInt(areaEdit.coc40)||margins.coc40,soc20:parseInt(areaEdit.soc20)||margins.soc20,soc40:parseInt(areaEdit.soc40)||margins.soc40}; setAreaM(p=>({...p,[selArea]:m}));}}
-                style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
-              <button type="button" onClick={()=>{setAreaM(p=>{const n={...p};delete n[selArea];return n;});setAreaEdit({coc20:"",coc40:"",soc20:"",soc40:""});}}
+              <button type="button" onClick={()=>{applyAreaMargins(selArea, null);}}
                 style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
             </div>
           </>}
@@ -320,7 +348,7 @@ function MarginPanel({
               <div style={{fontSize:10,color:"#92400e",fontWeight:700,marginBottom:4}}>적용된 지역 마진:</div>
               {Object.entries(areaM).map(([area,m])=>(
                 <div key={area} style={{fontSize:11,color:"#78350f",marginBottom:2}}>
-                  <b>{area}</b>: COC {m.coc20}/{m.coc40} SOC {m.soc20}/{m.soc40}
+                  <b>{area}</b>: COC {m.coc20 ?? margins.coc20}/{m.coc40 ?? margins.coc40} SOC {m.soc20 ?? margins.soc20}/{m.soc40 ?? margins.soc40}
                 </div>
               ))}
             </div>
@@ -394,7 +422,6 @@ export default function App() {
   const [marginTab, setMarginTab] = useState("global");
   const [selArea, setSelArea] = useState("");
   const [selPol, setSelPol] = useState("");
-  const [areaEdit, setAreaEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [polEdit, setPolEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [validityInfo, setValidityInfo] = useState(defaultValidityInfo);
   const [carrierRates, setCarrierRates] = useState(defaultCarrierRates);
@@ -475,6 +502,24 @@ export default function App() {
   const applyPolMargin = (pol, type, value) => {
     const v = parseInt(value, 10);
     setPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: Number.isFinite(v) ? v : 0 } }));
+  };
+
+  const applyGlobalMargin = (type, value) => {
+    const v = parseInt(value, 10) || 0;
+    setMargins(p => ({ ...p, [type]: v }));
+    setPolM(p => clearPolMarginType(p, type));
+  };
+
+  const applyAreaMarginType = (area, type, value) => {
+    const v = parseInt(value, 10) || 0;
+    setAreaM(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: v } }));
+    setPolM(p => clearPolMarginTypeForArea(p, fData, area, type));
+  };
+
+  const applyAreaMargins = (area, m) => {
+    if (m) setAreaM(p => ({ ...p, [area]: m }));
+    else setAreaM(p => { const n = { ...p }; delete n[area]; return n; });
+    setPolM(p => clearPolMarginsForArea(p, fData, area));
   };
 
   const updateCarrierValidity = (carrier, field, value) => {
@@ -1275,10 +1320,9 @@ export default function App() {
               marginTab === "area" ? "지역 선택 시 해당 지역 운임만 표시" : null
             }
             marginTab={marginTab} setMarginTab={setMarginTab}
-            margins={margins} setMargins={setMargins}
+            margins={margins} applyGlobalMargin={applyGlobalMargin}
             selArea={selArea} setSelArea={setSelArea}
-            areaM={areaM} setAreaM={setAreaM}
-            areaEdit={areaEdit} setAreaEdit={setAreaEdit}
+            areaM={areaM} applyAreaMarginType={applyAreaMarginType} applyAreaMargins={applyAreaMargins}
             selPol={selPol} setSelPol={setSelPol}
             polM={polM} setPolM={setPolM}
             polEdit={polEdit} setPolEdit={setPolEdit}
