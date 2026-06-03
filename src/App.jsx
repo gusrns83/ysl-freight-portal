@@ -961,9 +961,6 @@ export default function App() {
     </div>
   );
 
-    </div>
-  );
-
   // ── CARRIER RATES ADMIN ──
   if (showCarrierAdmin && isAdmin) {
     const caGlobal = carrierAdminPol === "__global__";
