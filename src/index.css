@@ -186,37 +186,45 @@
   display: inline-block;
   width: auto;
   min-width: 0;
-  padding: 4px 6px;
-  border: 1px solid #93c5fd;
-  border-radius: 5px;
+  padding: 3px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
   background: #fff;
   cursor: pointer;
   text-align: left;
   font-family: inherit;
   line-height: 1.2;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
 }
 .carrier-grid .cg-box:hover {
-  border-color: #2563eb;
-  background: #eff6ff;
+  border-color: #cbd5e1;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 .carrier-grid .cg-pair-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
   white-space: nowrap;
+  padding: 3px 6px;
+  border-radius: 5px;
 }
-.carrier-grid .cg-pair-row + .cg-pair-row {
-  margin-top: 2px;
-  padding-top: 2px;
-  border-top: 1px solid #e5e7eb;
+.carrier-grid .cg-row-cost {
+  background: #eff6ff;
+  border-left: 3px solid #2563eb;
+}
+.carrier-grid .cg-row-sell {
+  background: #fffbeb;
+  border-left: 3px solid #b45309;
+  margin-top: 3px;
 }
 .carrier-grid .cg-lbl {
   font-size: 8px;
   font-weight: 700;
-  color: #6b7280;
   flex-shrink: 0;
 }
+.carrier-grid .cg-lbl-cost { color: #2563eb; }
+.carrier-grid .cg-lbl-sell { color: #b45309; }
 .carrier-grid .cg-val {
   font-size: 11px;
   font-weight: 700;
@@ -224,22 +232,32 @@
   flex: 1;
 }
 .carrier-grid .cg-val-cost { color: #1e40af; }
-.carrier-grid .cg-val-sell { color: #111; }
+.carrier-grid .cg-val-sell { color: #111827; }
 .carrier-grid .cg-margin-hint {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
   font-size: 7px;
-  font-weight: 600;
-  color: #b45309;
+  font-weight: 700;
+  color: #7c3aed;
   text-align: center;
   margin-top: 3px;
-  padding-top: 2px;
-  border-top: 1px dashed #fde68a;
+  padding: 2px 4px;
+  border-radius: 4px;
+  background: #f5f3ff;
   line-height: 1.1;
 }
+.carrier-grid .cg-lbl-margin {
+  color: #7c3aed;
+  font-size: 7px;
+}
 .carrier-grid .cg-edit-panel {
-  border: 2px solid #111;
-  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
   background: #fff;
   overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 .carrier-grid .cg-mini {
   border-collapse: collapse;
@@ -247,17 +265,40 @@
   font-size: 10px;
 }
 .carrier-grid .cg-mini td {
-  border: 1px solid #111;
-  padding: 2px 3px;
+  border: none;
+  border-bottom: 1px solid #f3f4f6;
+  padding: 4px 5px;
   vertical-align: middle;
 }
+.carrier-grid .cg-mini tr:last-child td {
+  border-bottom: none;
+}
 .carrier-grid .cg-mini-label {
-  background: #f3f4f6;
   font-weight: 700;
   font-size: 9px;
   white-space: nowrap;
-  width: 28px;
-  color: #374151;
+  width: 30px;
+}
+.carrier-grid .cg-mini-label-cost {
+  color: #2563eb;
+  background: #eff6ff;
+}
+.carrier-grid .cg-mini-val-cost {
+  background: #eff6ff;
+}
+.carrier-grid .cg-mini-label-sell {
+  color: #b45309;
+  background: #fffbeb;
+}
+.carrier-grid .cg-mini-val-sell {
+  background: #fffbeb;
+}
+.carrier-grid .cg-mini-label-margin {
+  color: #7c3aed;
+  background: #f5f3ff;
+}
+.carrier-grid .cg-mini-val-margin {
+  background: #f5f3ff;
 }
 .carrier-grid .cg-mini-inp {
   width: 100%;
@@ -272,20 +313,10 @@
   font-family: inherit;
 }
 .carrier-grid .cg-inp-cost { color: #1e40af; }
-.carrier-grid .cg-inp-sell { color: #111; }
+.carrier-grid .cg-inp-sell { color: #111827; }
+.carrier-grid .cg-inp-margin { color: #7c3aed; font-size: 10px; font-weight: 700; }
 .carrier-grid .cg-mini-margin-tr td {
-  background: #fffbeb;
-  border-top: 1px dashed #fcd34d !important;
-}
-.carrier-grid .cg-mini-label-margin {
-  font-size: 8px;
-  color: #92400e;
-  background: #fffbeb;
-}
-.carrier-grid .cg-inp-margin {
-  color: #92400e;
-  font-size: 9px;
-  font-weight: 600;
+  border-top: 1px dashed #ddd6fe !important;
 }
 .carrier-grid .cg-close {
   display: block;
@@ -343,18 +374,22 @@
   .carrier-grid .cg-box {
     display: block;
     width: 100%;
-    min-width: 72px;
-    padding: 6px 8px;
+    min-width: 80px;
+    padding: 4px;
     box-sizing: border-box;
+  }
+  .carrier-grid .cg-pair-row {
+    padding: 5px 8px;
   }
   .carrier-grid .cg-lbl {
     font-size: 9px;
   }
   .carrier-grid .cg-val {
-    font-size: 12px;
+    font-size: 13px;
   }
   .carrier-grid .cg-margin-hint {
     font-size: 8px;
+    padding: 3px 6px;
   }
   .carrier-grid .cg-cell.cg-active {
     min-width: 88px;
