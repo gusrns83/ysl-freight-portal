@@ -227,6 +227,43 @@ const Logo = ({size=32}) => (
   </svg>
 );
 
+const AD_BANNER_URL = "https://www.yslagency.com/en/index.asp";
+
+function FooterAdSlot() {
+  return (
+    <section className="app-ad-slot" aria-label="Advertisement">
+      <div className="app-ad-slot-inner">
+        <div className="app-ad-header">
+          <span className="app-ad-badge">AD</span>
+          <span className="app-ad-title">YSL Agency</span>
+          <a
+            className="app-ad-open"
+            href={AD_BANNER_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            새 창에서 보기
+          </a>
+        </div>
+        <div className="app-ad-frame-wrap">
+          <iframe
+            src={AD_BANNER_URL}
+            title="YSL Agency"
+            className="app-ad-iframe"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
+        </div>
+        <p className="app-ad-note">
+          사이트가 보이지 않으면{" "}
+          <a href={AD_BANNER_URL} target="_blank" rel="noopener noreferrer">여기를 눌러</a>
+          {" "}YSL Agency 웹사이트를 열어주세요.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 const Bg = ({k}) => {
   if (!k) return null;
   const styles = {SNK:{background:"#dbeafe",color:"#1d4ed8"},DY:{background:"#d1fae5",color:"#065f46"},CK:{background:"#ffedd5",color:"#9a3412"},RENTAL:{background:"#ede9fe",color:"#6d21a8"}};
@@ -2353,7 +2390,9 @@ export default function App() {
       </>
       )}
 
-      <div style={{maxWidth:640,margin:"0 auto",padding:16,textAlign:"center"}}>
+      <FooterAdSlot />
+
+      <div style={{maxWidth:640,margin:"0 auto",padding:"8px 16px 24px",textAlign:"center"}}>
         <span style={{fontSize:10,color:"#d1d5db"}}>YSL Agency Far East · Rates subject to change</span>
       </div>
 
