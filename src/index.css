@@ -186,29 +186,53 @@
   display: inline-block;
   width: auto;
   min-width: 0;
-  padding: 3px 5px;
+  padding: 4px 6px;
   border: 1px solid #93c5fd;
   border-radius: 5px;
   background: #fff;
   cursor: pointer;
-  text-align: center;
+  text-align: left;
   font-family: inherit;
-  line-height: 1.1;
+  line-height: 1.2;
 }
 .carrier-grid .cg-box:hover {
   border-color: #2563eb;
   background: #eff6ff;
 }
-.carrier-grid .cg-cost-display {
-  font-size: 12px;
-  font-weight: 700;
-  color: #1e40af;
-  line-height: 1.1;
+.carrier-grid .cg-pair-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  white-space: nowrap;
 }
-.carrier-grid .cg-sell-ref {
-  font-size: 8px;
-  color: #9ca3af;
+.carrier-grid .cg-pair-row + .cg-pair-row {
   margin-top: 2px;
+  padding-top: 2px;
+  border-top: 1px solid #e5e7eb;
+}
+.carrier-grid .cg-lbl {
+  font-size: 8px;
+  font-weight: 700;
+  color: #6b7280;
+  flex-shrink: 0;
+}
+.carrier-grid .cg-val {
+  font-size: 11px;
+  font-weight: 700;
+  text-align: right;
+  flex: 1;
+}
+.carrier-grid .cg-val-cost { color: #1e40af; }
+.carrier-grid .cg-val-sell { color: #111; }
+.carrier-grid .cg-margin-hint {
+  font-size: 7px;
+  font-weight: 600;
+  color: #b45309;
+  text-align: center;
+  margin-top: 3px;
+  padding-top: 2px;
+  border-top: 1px dashed #fde68a;
   line-height: 1.1;
 }
 .carrier-grid .cg-edit-panel {
@@ -235,18 +259,6 @@
   width: 28px;
   color: #374151;
 }
-.carrier-grid .cg-margin-col {
-  background: #fffbeb;
-  text-align: center;
-  width: 42px;
-  padding: 3px 2px !important;
-}
-.carrier-grid .cg-margin-lbl {
-  display: block;
-  font-size: 7px;
-  color: #92400e;
-  margin-top: 1px;
-}
 .carrier-grid .cg-mini-inp {
   width: 100%;
   min-width: 0;
@@ -261,7 +273,20 @@
 }
 .carrier-grid .cg-inp-cost { color: #1e40af; }
 .carrier-grid .cg-inp-sell { color: #111; }
-.carrier-grid .cg-inp-margin { color: #92400e; font-size: 12px; }
+.carrier-grid .cg-mini-margin-tr td {
+  background: #fffbeb;
+  border-top: 1px dashed #fcd34d !important;
+}
+.carrier-grid .cg-mini-label-margin {
+  font-size: 8px;
+  color: #92400e;
+  background: #fffbeb;
+}
+.carrier-grid .cg-inp-margin {
+  color: #92400e;
+  font-size: 9px;
+  font-weight: 600;
+}
 .carrier-grid .cg-close {
   display: block;
   width: 100%;
@@ -319,17 +344,19 @@
     display: block;
     width: 100%;
     min-width: 72px;
-    padding: 8px 10px;
+    padding: 6px 8px;
     box-sizing: border-box;
   }
-  .carrier-grid .cg-cost-display {
-    font-size: 14px;
-  }
-  .carrier-grid .cg-sell-ref {
+  .carrier-grid .cg-lbl {
     font-size: 9px;
-    margin-top: 3px;
+  }
+  .carrier-grid .cg-val {
+    font-size: 12px;
+  }
+  .carrier-grid .cg-margin-hint {
+    font-size: 8px;
   }
   .carrier-grid .cg-cell.cg-active {
-    min-width: 100px;
+    min-width: 88px;
   }
 }
