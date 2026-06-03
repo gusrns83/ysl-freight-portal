@@ -110,8 +110,9 @@ const RN = [
 const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN","Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK","Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)"};
 const DO = {mow:{SNK:[1100,1400],DY:[800,1400],CK:[950,1300]},spb:{SNK:[700,1000],DY:null,CK:null},nsb:{SNK:[700,1000],DY:[400,600],CK:[400,600]},ekb:{SNK:null,DY:null,CK:[550,800]}};
 const CRS = ["SNK","DY","CK"];
+const VALIDITY_KEYS = [...CRS, "RENTAL"];
 const RATE_TYPES = ["coc20","coc40","soc20","soc40"];
-const defaultValidityInfo = () => Object.fromEntries(CRS.map(k => [k, {
+const defaultValidityInfo = () => Object.fromEntries(VALIDITY_KEYS.map(k => [k, {
   current: k === "SNK" ? "Till 15.06.2026" : "Till 30.06.2026",
   future: k === "SNK" ? "From 16.06.2026" : "From 01.07.2026",
 }]));
@@ -145,8 +146,8 @@ const mergeRentalRates = (base, saved) => {
   });
   return next;
 };
-const CN = {SNK:"Sinokor",DY:"Dongyoung",CK:"CK Line"};
-const CN_KR = {SNK:"장금상선",DY:"동영해운",CK:"CK Line"};
+const CN = {SNK:"Sinokor",DY:"Dongyoung",CK:"CK Line",RENTAL:"Container Rental"};
+const CN_KR = {SNK:"장금상선",DY:"동영해운",CK:"CK Line",RENTAL:"Rental"};
 const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
 const F_TO_R = Object.fromEntries(Object.entries(PM).map(([rental, freight]) => [freight, rental]));
 const DOC_RC = {mow:"Moscow",spb:"St.Petersburg",nsb:"Novosibirsk",ekb:"Ekaterinburg"};
@@ -225,8 +226,8 @@ const Logo = ({size=32}) => (
 
 const Bg = ({k}) => {
   if (!k) return null;
-  const styles = {SNK:{background:"#dbeafe",color:"#1d4ed8"},DY:{background:"#d1fae5",color:"#065f46"},CK:{background:"#ffedd5",color:"#9a3412"}};
-  return <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,...styles[k]}}>{k}</span>;
+  const styles = {SNK:{background:"#dbeafe",color:"#1d4ed8"},DY:{background:"#d1fae5",color:"#065f46"},CK:{background:"#ffedd5",color:"#9a3412"},RENTAL:{background:"#ede9fe",color:"#6d21a8"}};
+  return <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,...styles[k]}}>{k === "RENTAL" ? "RENT" : k}</span>;
 };
 
 const tabIconStyle = (active) => ({ opacity: active ? 1 : 0.72, display: "block" });
@@ -681,6 +682,7 @@ export default function App() {
         saveSetting("validity_snk", validityInfo.SNK?.current ?? ""),
         saveSetting("validity_dy", validityInfo.DY?.current ?? ""),
         saveSetting("validity_ck", validityInfo.CK?.current ?? ""),
+        saveSetting("validity_rental", validityInfo.RENTAL?.current ?? ""),
         saveSetting("global_margins", JSON.stringify(margins)),
         saveSetting("area_margins", JSON.stringify(areaM)),
         saveSetting("pol_margins", JSON.stringify(polM)),
@@ -722,15 +724,16 @@ export default function App() {
           const parsed = JSON.parse(s.validity_info_json);
           if (parsed && typeof parsed === "object") {
             setValidityInfo(Object.fromEntries(
-              CRS.map(k => [k, { ...defaultValidityInfo()[k], ...(parsed[k] || {}) }])
+              VALIDITY_KEYS.map(k => [k, { ...defaultValidityInfo()[k], ...(parsed[k] || {}) }])
             ));
           }
         } catch(e) {}
-      } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined) {
+      } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined || s.validity_rental !== undefined) {
         setValidityInfo(prev => ({
           SNK: { ...prev.SNK, current: s.validity_snk ?? prev.SNK.current },
           DY: { ...prev.DY, current: s.validity_dy ?? prev.DY.current },
           CK: { ...prev.CK, current: s.validity_ck ?? prev.CK.current },
+          RENTAL: { ...prev.RENTAL, current: s.validity_rental ?? prev.RENTAL.current },
         }));
       }
       if (s.carrier_rates_json) {
@@ -1072,6 +1075,7 @@ export default function App() {
         saveSetting("margin_timestamps", JSON.stringify(marginTs)),
         saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
         saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
+        saveSetting("validity_info_json", JSON.stringify(validityInfo)),
       ]);
       setSaveMsg("저장 완료!");
       setTimeout(() => setSaveMsg(""), 2000);
@@ -1464,6 +1468,22 @@ export default function App() {
                 {l}
               </button>
             ))}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10,background:"#fff",border:"1px solid #ddd6fe",borderRadius:10,padding:10}}>
+            <div style={{gridColumn:"1 / -1",display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+              <Bg k="RENTAL"/><span style={{fontSize:11,fontWeight:700,color:"#5b21b6"}}>{CN_KR.RENTAL} Validity</span>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
+              <ValidityDateInput kind="till" compact value={validityInfo.RENTAL?.current??""}
+                onChange={v=>updateCarrierValidity("RENTAL","current",v)}/>
+            </div>
+            <div>
+              <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
+              <ValidityDateInput kind="from" compact value={validityInfo.RENTAL?.future??""}
+                min={getFromMinDate(validityInfo.RENTAL?.current)}
+                onChange={v=>updateCarrierValidity("RENTAL","future",v)}/>
+            </div>
           </div>
           <MarginPanel
             onSave={saveRentalPricing}
@@ -2064,8 +2084,8 @@ export default function App() {
             MARGIN 설정은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴에서 관리합니다. 지역/POL 선택 시 운임표가 함께 필터됩니다.
           </div>
           <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:4}}>VALIDITY (선사별)</div>
-            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Till / From 날짜만 · 매입·매출·마진은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴</div>
+            <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:4}}>VALIDITY (선사 · Rental)</div>
+            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Till / From 날짜 · 매입·매출·마진은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴</div>
             {CRS.map(k=>(
               <div key={k} style={{marginBottom:8,padding:10,background:"#fff",border:"1px solid #bbf7d0",borderRadius:8}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
@@ -2086,6 +2106,24 @@ export default function App() {
                 </div>
               </div>
             ))}
+            <div style={{marginBottom:8,padding:10,background:"#faf5ff",border:"1px solid #ddd6fe",borderRadius:8}}>
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+                <Bg k="RENTAL"/><span style={{fontSize:12,fontWeight:700,color:"#5b21b6"}}>{CN.RENTAL}</span>
+              </div>
+              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+                <div>
+                  <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
+                  <ValidityDateInput kind="till" value={validityInfo.RENTAL?.current??""}
+                    onChange={v=>updateCarrierValidity("RENTAL","current",v)}/>
+                </div>
+                <div>
+                  <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
+                  <ValidityDateInput kind="from" value={validityInfo.RENTAL?.future??""}
+                    min={getFromMinDate(validityInfo.RENTAL?.current)}
+                    onChange={v=>updateCarrierValidity("RENTAL","future",v)}/>
+                </div>
+              </div>
+            </div>
             <button onClick={saveAllSettings}
               style={{width:"100%",marginTop:4,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#16a34a",border:"none",borderRadius:6,cursor:"pointer"}}>
               {saveMsg || "💾 저장"}
@@ -2094,6 +2132,8 @@ export default function App() {
         </div>
       )}
 
+      {!isAdmin && (
+      <>
       {/* SEARCH + FILTERS */}
       <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px 8px"}}>
         <input placeholder="Search POL..." value={search} onChange={e=>setSearch(e.target.value)}
@@ -2140,6 +2180,12 @@ export default function App() {
           <RatePeriodToggle accentFuture="#0369a1"/>
         </div>
       )}
+      {tab==="rental" && (
+        <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
+          <RatePeriodToggle accentFuture="#7c3aed"/>
+          <div style={{marginTop:8}}><ValidityCell carrierKey="RENTAL"/></div>
+        </div>
+      )}
 
       {/* CONTENT */}
       <div style={{maxWidth:640,margin:"12px auto",padding:"0 16px 120px"}}>
@@ -2148,6 +2194,8 @@ export default function App() {
         {tab==="dropoff" && filt.map((row,i)=><DOCrd key={i} row={row} idx={i}/>)}
         {tab==="rental" && rFilt.map((row,i)=><RCrd key={i} row={row} idx={i}/>)}
       </div>
+      </>
+      )}
 
       <div style={{maxWidth:640,margin:"0 auto",padding:16,textAlign:"center"}}>
         <span style={{fontSize:10,color:"#d1d5db"}}>YSL Agency Far East · Rates subject to change</span>
