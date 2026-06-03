@@ -3,6 +3,7 @@ import { useState, useMemo, useEffect, useRef } from "react";
 const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
+const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
 const NOTICE_COUNT = 3;
 const mkNotices = () => Array.from({ length: NOTICE_COUNT }, (_, i) => ({
   text: "",
@@ -293,8 +294,13 @@ export default function App() {
   };
 
   const doAdminLogin = () => {
-    if (pin === ADMIN_PIN) { setMode("admin"); setShowLoginModal(false); setPin(""); setMargins({coc20:80,coc40:100,soc20:80,soc40:100}); }
-    else { setLoginErr("Wrong PIN"); }
+    if (ADMIN_SKIP_PIN || pin === ADMIN_PIN) {
+      setMode("admin");
+      setShowLoginModal(false);
+      setPin("");
+      setLoginErr("");
+      setMargins({coc20:80,coc40:100,soc20:80,soc40:100});
+    } else { setLoginErr("Wrong PIN"); }
   };
 
   const logout = () => { setMode("guest"); setClient(null); setMargins({coc20:80,coc40:100,soc20:80,soc40:100}); };
@@ -1000,16 +1006,16 @@ export default function App() {
               <table className="cg-mini">
                 <tbody>
                   <tr>
-                    <td className="cg-mini-label">매입</td>
-                    <td>
+                    <td className="cg-mini-label cg-mini-label-cost">매입</td>
+                    <td className="cg-mini-val-cost">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-cost"
                         value={cost ?? ""} placeholder="—"
                         onChange={e => applyCarrierRate(row.pol, caCr, type, e.target.value, caPeriod)}/>
                     </td>
                   </tr>
                   <tr>
-                    <td className="cg-mini-label">매출</td>
-                    <td>
+                    <td className="cg-mini-label cg-mini-label-sell">매출</td>
+                    <td className="cg-mini-val-sell">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-sell"
                         value={sell ?? ""} placeholder="—"
                         onChange={e => applyCellSell(row, type, e.target.value)}/>
@@ -1017,7 +1023,7 @@ export default function App() {
                   </tr>
                   <tr className="cg-mini-margin-tr">
                     <td className="cg-mini-label cg-mini-label-margin">마진</td>
-                    <td>
+                    <td className="cg-mini-val-margin">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
                         value={margin} onChange={e => applyPolMargin(row.pol, type, e.target.value)}/>
                     </td>
@@ -1028,15 +1034,15 @@ export default function App() {
             </div>
           ) : (
             <button type="button" className="cg-box" onClick={() => setCarrierEditCell(cellKey)}>
-              <div className="cg-pair-row">
-                <span className="cg-lbl">매입</span>
+              <div className="cg-pair-row cg-row-cost">
+                <span className="cg-lbl cg-lbl-cost">매입</span>
                 <span className="cg-val cg-val-cost">{cost != null ? n(cost) : "—"}</span>
               </div>
-              <div className="cg-pair-row">
-                <span className="cg-lbl">매출</span>
+              <div className="cg-pair-row cg-row-sell">
+                <span className="cg-lbl cg-lbl-sell">매출</span>
                 <span className="cg-val cg-val-sell">{sell != null ? n(sell) : "—"}</span>
               </div>
-              <div className="cg-margin-hint">마진 {n(margin)}</div>
+              <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {n(margin)}</div>
             </button>
           )}
         </td>
@@ -1683,6 +1689,17 @@ export default function App() {
                 <button onClick={doLogin} disabled={loginLoading}
                   style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer",opacity:loginLoading?0.6:1}}>
                   {loginLoading?"Checking...":"Login"}
+                </button>
+              </div>
+            ) : ADMIN_SKIP_PIN ? (
+              <div>
+                <div style={{fontSize:12,color:"#6b7280",marginBottom:14,textAlign:"center",lineHeight:1.5}}>
+                  검토 모드 · PIN 없이 Admin 진입
+                </div>
+                {loginErr&&<div style={{fontSize:12,color:"#ef4444",marginBottom:10}}>{loginErr}</div>}
+                <button onClick={doAdminLogin}
+                  style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
+                  Admin 바로 들어가기
                 </button>
               </div>
             ) : (
