@@ -128,6 +128,47 @@ const RC_LABEL = Object.fromEntries(DOC.map(d => [DOC_RC[d.k], d.l]));
 const RENT_CITY_ORDER = [...DOC.map(d => DOC_RC[d.k]), ...RC.filter(c => !Object.values(DOC_RC).includes(c))];
 const n = v => v != null ? v.toLocaleString() : "—";
 
+const MONTH_MAP = {
+  january: 1, february: 2, march: 3, april: 4, may: 5, june: 6,
+  july: 7, august: 8, september: 9, october: 10, november: 11, december: 12,
+};
+
+const parseValidityToISO = (str) => {
+  if (!str) return "";
+  if (/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const dm = str.match(/(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (dm) {
+    const [, d, mo, y] = dm;
+    return `${y}-${mo.padStart(2, "0")}-${d.padStart(2, "0")}`;
+  }
+  const eng = str.match(/([A-Za-z]+)\s+(\d{1,2})\s*-\s*(\d{1,2}),?\s*(\d{4})/);
+  if (eng) {
+    const mo = MONTH_MAP[eng[1].toLowerCase()];
+    if (mo) {
+      return `${eng[4]}-${String(mo).padStart(2, "0")}-${String(eng[3]).padStart(2, "0")}`;
+    }
+  }
+  return "";
+};
+
+const formatValidityDate = (iso, prefix) => {
+  if (!iso) return "";
+  const [y, mo, d] = iso.split("-");
+  return `${prefix} ${parseInt(d, 10)}.${mo}.${y}`;
+};
+
+const ValidityDateInput = ({ kind, value, onChange, compact }) => (
+  <input
+    type="date"
+    className={`validity-date-inp validity-date-${kind}${compact ? " validity-date-compact" : ""}`}
+    value={parseValidityToISO(value)}
+    onChange={(e) => {
+      const v = e.target.value;
+      onChange(v ? formatValidityDate(v, kind === "till" ? "Till" : "From") : "");
+    }}
+  />
+);
+
 const Logo = ({size=32}) => (
   <svg width={size} height={size} viewBox="0 0 100 100">
     <circle cx="50" cy="50" r="49" fill="#1D2B4F"/><circle cx="50" cy="50" r="40" fill="#E8A817"/>
@@ -1079,16 +1120,16 @@ export default function App() {
               </button>
             ))}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr 1fr",gap:6,marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:10}}>
             {CRS.map(k=>(
               <div key={k} style={{opacity:caCr===k?1:0.45}}>
                 <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:4}}><Bg k={k}/><span style={{fontSize:10,fontWeight:700}}>{CN_KR[k]}</span></div>
                 <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
-                <input value={validityInfo[k]?.current??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],current:e.target.value}}))}
-                  style={{width:"100%",padding:"4px 6px",fontSize:10,border:"1px solid #86efac",borderRadius:4,boxSizing:"border-box",background:"#f0fdf4",marginBottom:4}}/>
-                <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
-                <input value={validityInfo[k]?.future??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],future:e.target.value}}))}
-                  style={{width:"100%",padding:"4px 6px",fontSize:10,border:"1px solid #fcd34d",borderRadius:4,boxSizing:"border-box",background:"#fffbeb"}}/>
+                <ValidityDateInput kind="till" compact value={validityInfo[k]?.current??""}
+                  onChange={v=>setValidityInfo(p=>({...p,[k]:{...p[k],current:v}}))}/>
+                <div style={{fontSize:9,color:"#b45309",marginBottom:2,marginTop:4}}>From</div>
+                <ValidityDateInput kind="from" compact value={validityInfo[k]?.future??""}
+                  onChange={v=>setValidityInfo(p=>({...p,[k]:{...p[k],future:v}}))}/>
               </div>
             ))}
           </div>
@@ -1586,13 +1627,13 @@ export default function App() {
                 <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
                   <div>
                     <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
-                    <input value={validityInfo[k]?.current??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],current:e.target.value}}))} placeholder="Till 15.06.2026"
-                      style={{width:"100%",padding:"6px 8px",fontSize:11,fontWeight:600,color:"#166534",background:"#f0fdf4",border:"1px solid #86efac",borderRadius:6,boxSizing:"border-box"}}/>
+                    <ValidityDateInput kind="till" value={validityInfo[k]?.current??""}
+                      onChange={v=>setValidityInfo(p=>({...p,[k]:{...p[k],current:v}}))}/>
                   </div>
                   <div>
                     <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
-                    <input value={validityInfo[k]?.future??""} onChange={e=>setValidityInfo(p=>({...p,[k]:{...p[k],future:e.target.value}}))} placeholder="From 16.06.2026"
-                      style={{width:"100%",padding:"6px 8px",fontSize:11,fontWeight:600,color:"#b45309",background:"#fffbeb",border:"1px solid #fcd34d",borderRadius:6,boxSizing:"border-box"}}/>
+                    <ValidityDateInput kind="from" value={validityInfo[k]?.future??""}
+                      onChange={v=>setValidityInfo(p=>({...p,[k]:{...p[k],future:v}}))}/>
                   </div>
                 </div>
               </div>
