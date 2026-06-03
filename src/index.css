@@ -207,50 +207,52 @@
   gap: 8px;
   white-space: nowrap;
   padding: 3px 6px;
-  border-radius: 5px;
+  border-radius: 4px;
 }
 .carrier-grid .cg-row-cost {
-  background: #eff6ff;
-  border-left: 3px solid #2563eb;
+  background: #f8fafc;
+  border-left: 2px solid #e2e8f0;
 }
 .carrier-grid .cg-row-sell {
-  background: #fffbeb;
-  border-left: 3px solid #b45309;
-  margin-top: 3px;
+  background: #fafaf9;
+  border-left: 2px solid #e7e5e4;
+  margin-top: 2px;
 }
 .carrier-grid .cg-lbl {
   font-size: 8px;
-  font-weight: 700;
+  font-weight: 600;
   flex-shrink: 0;
 }
-.carrier-grid .cg-lbl-cost { color: #2563eb; }
-.carrier-grid .cg-lbl-sell { color: #b45309; }
+.carrier-grid .cg-lbl-cost { color: #64748b; }
+.carrier-grid .cg-lbl-sell { color: #78716c; }
 .carrier-grid .cg-val {
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   text-align: right;
   flex: 1;
+  color: #374151;
 }
-.carrier-grid .cg-val-cost { color: #1e40af; }
-.carrier-grid .cg-val-sell { color: #111827; }
+.carrier-grid .cg-val-cost { color: #475569; }
+.carrier-grid .cg-val-sell { color: #44403c; }
 .carrier-grid .cg-margin-hint {
   display: flex;
   align-items: center;
   justify-content: center;
   gap: 4px;
   font-size: 7px;
-  font-weight: 700;
-  color: #7c3aed;
+  font-weight: 500;
+  color: #a8a29e;
   text-align: center;
-  margin-top: 3px;
+  margin-top: 2px;
   padding: 2px 4px;
-  border-radius: 4px;
-  background: #f5f3ff;
+  border-radius: 3px;
+  background: #f3f4f6;
   line-height: 1.1;
 }
 .carrier-grid .cg-lbl-margin {
-  color: #7c3aed;
+  color: #a8a29e;
   font-size: 7px;
+  font-weight: 500;
 }
 .carrier-grid .cg-edit-panel {
   border: 1px solid #e5e7eb;
@@ -280,43 +282,44 @@
   width: 30px;
 }
 .carrier-grid .cg-mini-label-cost {
-  color: #2563eb;
-  background: #eff6ff;
+  color: #64748b;
+  background: #f8fafc;
 }
 .carrier-grid .cg-mini-val-cost {
-  background: #eff6ff;
+  background: #f8fafc;
 }
 .carrier-grid .cg-mini-label-sell {
-  color: #b45309;
-  background: #fffbeb;
+  color: #78716c;
+  background: #fafaf9;
 }
 .carrier-grid .cg-mini-val-sell {
-  background: #fffbeb;
+  background: #fafaf9;
 }
 .carrier-grid .cg-mini-label-margin {
-  color: #7c3aed;
-  background: #f5f3ff;
+  color: #a8a29e;
+  background: #f3f4f6;
 }
 .carrier-grid .cg-mini-val-margin {
-  background: #f5f3ff;
+  background: #f3f4f6;
 }
 .carrier-grid .cg-mini-inp {
   width: 100%;
   min-width: 0;
   padding: 2px 3px;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 600;
   border: none;
   background: transparent;
   text-align: center;
   box-sizing: border-box;
   font-family: inherit;
+  color: #374151;
 }
-.carrier-grid .cg-inp-cost { color: #1e40af; }
-.carrier-grid .cg-inp-sell { color: #111827; }
-.carrier-grid .cg-inp-margin { color: #7c3aed; font-size: 10px; font-weight: 700; }
+.carrier-grid .cg-inp-cost { color: #475569; }
+.carrier-grid .cg-inp-sell { color: #44403c; }
+.carrier-grid .cg-inp-margin { color: #78716c; font-size: 10px; font-weight: 500; }
 .carrier-grid .cg-mini-margin-tr td {
-  border-top: 1px dashed #ddd6fe !important;
+  border-top: 1px solid #e5e7eb !important;
 }
 .carrier-grid .cg-close {
   display: block;
