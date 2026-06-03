@@ -1043,7 +1043,7 @@ export default function App() {
             {saveMsg ? saveMsg : "저장"}
           </button>
         </div>
-        <div style={{maxWidth:960,margin:"0 auto",padding:"12px 12px 80px"}} onClick={e => e.stopPropagation()}>
+        <div className="carrier-admin-page" onClick={e => e.stopPropagation()}>
           <div style={{display:"flex",background:"#eff6ff",borderRadius:10,padding:3,marginBottom:8}}>
             {CRS.map(k=>(
               <button key={k} type="button" onClick={()=>{setCarrierAdminCr(k);setCarrierEditCell(null);}}
