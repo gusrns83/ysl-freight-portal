@@ -144,6 +144,13 @@
   min-width: 58px;
   padding: 3px 4px;
 }
+.carrier-grid .cg-cell.cg-active {
+  padding: 2px;
+  min-width: 110px;
+  background: #fff;
+  position: relative;
+  z-index: 2;
+}
 .carrier-grid .cg-cell.cg-future {
   background: #fffbeb;
 }
@@ -151,27 +158,96 @@
   color: #d1d5db;
   background: #f3f4f6;
 }
-.carrier-grid .cg-inp {
+.carrier-grid .cg-box {
+  display: block;
   width: 100%;
-  min-width: 0;
-  padding: 3px 4px;
-  font-size: 11px;
+  padding: 5px 4px;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  text-align: center;
+  font-family: inherit;
+}
+.carrier-grid .cg-box:hover {
+  border-color: #2563eb;
+  background: #eff6ff;
+}
+.carrier-grid .cg-cost-display {
+  font-size: 13px;
   font-weight: 700;
   color: #1e40af;
-  background: #fff;
-  border: 1px solid #93c5fd;
-  border-radius: 3px;
-  box-sizing: border-box;
-  text-align: center;
+  line-height: 1.2;
 }
-.carrier-grid .cg-future .cg-inp {
-  color: #b45309;
-  border-color: #fcd34d;
-  background: #fffbeb;
-}
-.carrier-grid .cg-sell {
+.carrier-grid .cg-sell-ref {
   font-size: 8px;
   color: #9ca3af;
-  margin-top: 1px;
+  margin-top: 2px;
   line-height: 1.1;
+}
+.carrier-grid .cg-edit-panel {
+  border: 2px solid #111;
+  border-radius: 4px;
+  background: #fff;
+  overflow: hidden;
+}
+.carrier-grid .cg-mini {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 10px;
+}
+.carrier-grid .cg-mini td {
+  border: 1px solid #111;
+  padding: 2px 3px;
+  vertical-align: middle;
+}
+.carrier-grid .cg-mini-label {
+  background: #f3f4f6;
+  font-weight: 700;
+  font-size: 9px;
+  white-space: nowrap;
+  width: 28px;
+  color: #374151;
+}
+.carrier-grid .cg-margin-col {
+  background: #fffbeb;
+  text-align: center;
+  width: 42px;
+  padding: 3px 2px !important;
+}
+.carrier-grid .cg-margin-lbl {
+  display: block;
+  font-size: 7px;
+  color: #92400e;
+  margin-top: 1px;
+}
+.carrier-grid .cg-mini-inp {
+  width: 100%;
+  min-width: 0;
+  padding: 2px 3px;
+  font-size: 11px;
+  font-weight: 700;
+  border: none;
+  background: transparent;
+  text-align: center;
+  box-sizing: border-box;
+  font-family: inherit;
+}
+.carrier-grid .cg-inp-cost { color: #1e40af; }
+.carrier-grid .cg-inp-sell { color: #111; }
+.carrier-grid .cg-inp-margin { color: #92400e; font-size: 12px; }
+.carrier-grid .cg-close {
+  display: block;
+  width: 100%;
+  padding: 2px;
+  font-size: 8px;
+  color: #6b7280;
+  background: #f3f4f6;
+  border: none;
+  border-top: 1px solid #d1d5db;
+  cursor: pointer;
+  font-family: inherit;
+}
+.carrier-grid .cg-close:hover {
+  background: #e5e7eb;
 }
