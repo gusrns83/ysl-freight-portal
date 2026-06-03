@@ -119,6 +119,32 @@ const defaultCarrierRates = () => Object.fromEntries(CRS.map(k => [k, {
   current: { coc20: "", coc40: "", soc20: "", soc40: "" },
   future: { coc20: "", coc40: "", soc20: "", soc40: "" },
 }]));
+const buildDefaultRentalRates = () => {
+  const rates = {};
+  RN.forEach(row => {
+    const pol = row[0];
+    const current = {};
+    RC.forEach((city, i) => {
+      const c20 = row[1 + i];
+      const c40 = row[13 + i];
+      if (c20 != null || c40 != null) current[city] = { c20: c20 ?? "", c40: c40 ?? "" };
+    });
+    rates[pol] = { current, future: {} };
+  });
+  return rates;
+};
+const mergeRentalRates = (base, saved) => {
+  const next = { ...base };
+  Object.entries(saved || {}).forEach(([pol, periods]) => {
+    next[pol] = { current: { ...(next[pol]?.current || {}) }, future: { ...(next[pol]?.future || {}) } };
+    ["current", "future"].forEach(p => {
+      Object.entries(periods?.[p] || {}).forEach(([city, vals]) => {
+        next[pol][p][city] = { ...(next[pol][p][city] || {}), ...vals };
+      });
+    });
+  });
+  return next;
+};
 const CN = {SNK:"Sinokor",DY:"Dongyoung",CK:"CK Line"};
 const CN_KR = {SNK:"장금상선",DY:"동영해운",CK:"CK Line"};
 const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
@@ -392,6 +418,25 @@ export default function App() {
     return groups;
   }, [fData]);
   const fMap = useMemo(() => Object.fromEntries(fData.map(d=>[d.pol,d])), [fData]);
+  const rentalRows = useMemo(() => rData.map(row => {
+    const fp = PM[row.pol];
+    const fr = fp ? fMap[fp] : null;
+    return {
+      rentalPol: row.pol,
+      freightPol: fp || row.pol,
+      displayPol: fp || row.pol,
+      area: fr?.area || "OTHERS",
+    };
+  }), [rData, fMap]);
+  const rentalAreaGroups = useMemo(() => {
+    const groups = [];
+    rentalRows.forEach(row => {
+      const last = groups[groups.length - 1];
+      if (!last || last.area !== row.area) groups.push({ area: row.area, rows: [row] });
+      else last.rows.push(row);
+    });
+    return groups;
+  }, [rentalRows]);
 
   // Auth
   const [mode, setMode] = useState("guest"); // guest | client | admin
@@ -418,6 +463,7 @@ export default function App() {
   const [polEdit, setPolEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [validityInfo, setValidityInfo] = useState(defaultValidityInfo);
   const [carrierRates, setCarrierRates] = useState(defaultCarrierRates);
+  const [rentalRates, setRentalRates] = useState(buildDefaultRentalRates);
   const [ratePeriod, setRatePeriod] = useState("current"); // current | future
   const [notices, setNotices] = useState(mkNotices);
   const [dismissedNotices, setDismissedNotices] = useState(() => new Set());
@@ -441,9 +487,13 @@ export default function App() {
   const [showMgr, setShowMgr] = useState(false);
   const [showNoticeAdmin, setShowNoticeAdmin] = useState(false);
   const [showCarrierAdmin, setShowCarrierAdmin] = useState(false);
+  const [showRentalAdmin, setShowRentalAdmin] = useState(false);
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
   const [carrierEditCell, setCarrierEditCell] = useState(null);
+  const [rentalAdminCity, setRentalAdminCity] = useState("Moscow");
+  const [rentalAdminPeriod, setRentalAdminPeriod] = useState("current");
+  const [rentalEditCell, setRentalEditCell] = useState(null);
   const [clients, setClients] = useState([]);
   const [addForm, setAddForm] = useState(false);
   const [editC, setEditC] = useState(null);
@@ -628,6 +678,7 @@ export default function App() {
         saveSetting("notice_file_url", notices[0].fileUrl),
         saveSetting("validity_info_json", JSON.stringify(validityInfo)),
         saveSetting("carrier_rates_json", JSON.stringify(carrierRates)),
+        saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
         saveSetting("validity_snk", validityInfo.SNK?.current ?? ""),
         saveSetting("validity_dy", validityInfo.DY?.current ?? ""),
         saveSetting("validity_ck", validityInfo.CK?.current ?? ""),
@@ -696,6 +747,14 @@ export default function App() {
           }
         } catch(e) {}
       }
+      if (s.rental_rates_json) {
+        try {
+          const parsed = JSON.parse(s.rental_rates_json);
+          if (parsed && typeof parsed === "object") {
+            setRentalRates(prev => mergeRentalRates(prev, parsed));
+          }
+        } catch(e) {}
+      }
       let loadedAreaM = {};
       let loadedPolM = {};
       if (s.global_margins) { try { setMargins(JSON.parse(s.global_margins)); } catch(e){} }
@@ -740,6 +799,40 @@ export default function App() {
     const p = period === "future" ? "future" : "current";
     const ov = getCarrierCostOverride(row.pol, cr, t, p);
     return ov != null ? ov : row.rates[cr][t];
+  };
+
+  const getRentalBase = (rPol, city, si, period = ratePeriod) => {
+    const p = period === "future" ? "future" : "current";
+    const sk = sz(si);
+    const bucket = rentalRates[rPol]?.[p]?.[city];
+    if (bucket && bucket[sk] != null && bucket[sk] !== "") return Number(bucket[sk]);
+    if (p === "future") {
+      const cur = rentalRates[rPol]?.current?.[city]?.[sk];
+      if (cur != null && cur !== "") return Number(cur);
+    }
+    const row = rData.find(r => r.pol === rPol);
+    if (!row) return null;
+    return si === 0 ? row.r20[city] : row.r40[city];
+  };
+
+  const applyRentalRate = (rPol, city, si, value, period = "current") => {
+    const raw = String(value).trim();
+    const sk = sz(si);
+    const p = period === "future" ? "future" : "current";
+    setRentalRates(prev => {
+      const polBucket = { current: { ...(prev[rPol]?.current || {}) }, future: { ...(prev[rPol]?.future || {}) } };
+      const periodBucket = { ...polBucket[p] };
+      const cityBucket = { ...(periodBucket[city] || {}) };
+      if (raw === "") delete cityBucket[sk];
+      else {
+        const v = parseInt(raw, 10);
+        if (!Number.isFinite(v)) return prev;
+        cityBucket[sk] = v;
+      }
+      if (Object.keys(cityBucket).length === 0) delete periodBucket[city];
+      else periodBucket[city] = cityBucket;
+      return { ...prev, [rPol]: { ...polBucket, [p]: periodBucket } };
+    });
   };
 
   const applyCarrierRate = (pol, cr, t, value, period = "current") => {
@@ -795,7 +888,7 @@ export default function App() {
     if (ov != null) return ov;
     const fp = PM[rPol], fr = fp ? fMap[fp] : null;
     const t = si === 0 ? "soc20" : "soc40";
-    const rental = si === 0 ? rRow.r20[city] : rRow.r40[city];
+    const rental = getRentalBase(rPol, city, si);
     const b = bRent(rPol, city, rRow, si);
     if (!fr || !b.cr) return rental ?? null;
     const soc = getCarrierRate(fr, b.cr, t);
@@ -857,7 +950,7 @@ export default function App() {
     const fp = PM[rPol];
     if (!fp || !fMap[fp]) return [];
     const fr = fMap[fp];
-    const r20 = rRow.r20[city], r40 = rRow.r40[city];
+    const r20 = getRentalBase(rPol, city, 0), r40 = getRentalBase(rPol, city, 1);
     return CRS.map(k => {
       const s20 = getCarrierRate(fr, k, "soc20");
       const s40 = getCarrierRate(fr, k, "soc40");
@@ -955,6 +1048,7 @@ export default function App() {
     try {
       await Promise.all([
         saveSetting("carrier_rates_json", JSON.stringify(carrierRates)),
+        saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
         saveSetting("pol_costs", JSON.stringify(polCostO)),
         saveSetting("pol_margins", JSON.stringify(polM)),
         saveSetting("global_margins", JSON.stringify(margins)),
@@ -963,6 +1057,22 @@ export default function App() {
         saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
         saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
         saveSetting("validity_info_json", JSON.stringify(validityInfo)),
+      ]);
+      setSaveMsg("저장 완료!");
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch(e) { setSaveMsg("저장 실패: " + e.message); }
+  };
+
+  const saveRentalPricing = async () => {
+    try {
+      await Promise.all([
+        saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
+        saveSetting("pol_margins", JSON.stringify(polM)),
+        saveSetting("global_margins", JSON.stringify(margins)),
+        saveSetting("area_margins", JSON.stringify(areaM)),
+        saveSetting("margin_timestamps", JSON.stringify(marginTs)),
+        saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
+        saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
       ]);
       setSaveMsg("저장 완료!");
       setTimeout(() => setSaveMsg(""), 2000);
@@ -1249,6 +1359,179 @@ export default function App() {
       <div style={{fontSize:9,color:"#9ca3af",marginTop:6}}>매입가·마진 변경 후 상단 「설정 저장」</div>
     </div>
   );
+
+  // ── RENTAL RATES ADMIN ──
+  if (showRentalAdmin && isAdmin) {
+    const raPeriod = rentalAdminPeriod;
+    const raCity = rentalAdminCity;
+    const isFuture = raPeriod === "future";
+    const cityLabel = RC_LABEL[raCity] || raCity;
+    const applyRentalCellSell = (row, si, sellStr) => {
+      const sell = parseInt(sellStr, 10);
+      if (!Number.isFinite(sell)) return;
+      const type = si === 0 ? "soc20" : "soc40";
+      const margin = getM(row.freightPol, row.area, type);
+      applyRentalRate(row.rentalPol, raCity, si, sell - margin, raPeriod);
+    };
+    const filteredRentalAreaGroups = rentalAreaGroups
+      .filter(({ area }) => !(marginTab === "area" && selArea) || area === selArea)
+      .map(({ area, rows }) => ({
+        area,
+        rows: marginTab === "pol" && selPol
+          ? rows.filter(r => r.freightPol === selPol || r.displayPol === selPol)
+          : rows,
+      }))
+      .filter(({ rows }) => rows.length > 0);
+    const rentalGridPolCount = filteredRentalAreaGroups.reduce((n, g) => n + g.rows.length, 0);
+    const rentalGridFilterLabel = marginTab === "area" && selArea
+      ? `${selArea} · ${rentalGridPolCount}개 POL`
+      : marginTab === "pol" && selPol
+        ? `${selPol} · ${rentalGridPolCount}개 POL`
+        : `${rentalGridPolCount}개 POL (전체)`;
+    const renderRentalGridCell = (row, si) => {
+      const cost = getRentalBase(row.rentalPol, raCity, si, raPeriod);
+      if (cost == null) return <td className="cg-cell cg-empty">—</td>;
+      const type = si === 0 ? "soc20" : "soc40";
+      const margin = getM(row.freightPol, row.area, type);
+      const sell = cost + margin;
+      const cellKey = `${row.rentalPol}:${si}`;
+      const isOpen = rentalEditCell === cellKey;
+      return (
+        <td className={`cg-cell${isFuture ? " cg-future" : ""}${isOpen ? " cg-active" : ""}`}>
+          {isOpen ? (
+            <div className="cg-edit-panel" onClick={e => e.stopPropagation()}>
+              <table className="cg-mini">
+                <tbody>
+                  <tr>
+                    <td className="cg-mini-label cg-mini-label-cost">매입</td>
+                    <td className="cg-mini-val-cost">
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-cost"
+                        value={cost ?? ""} placeholder="—"
+                        onChange={e => applyRentalRate(row.rentalPol, raCity, si, e.target.value, raPeriod)}/>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="cg-mini-label cg-mini-label-sell">매출</td>
+                    <td className="cg-mini-val-sell">
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-sell"
+                        value={sell ?? ""} placeholder="—"
+                        onChange={e => applyRentalCellSell(row, si, e.target.value)}/>
+                    </td>
+                  </tr>
+                  <tr className="cg-mini-margin-tr">
+                    <td className="cg-mini-label cg-mini-label-margin">마진</td>
+                    <td className="cg-mini-val-margin">
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
+                        value={margin} onChange={e => applyPolMargin(row.freightPol, type, e.target.value)}/>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+              <button type="button" className="cg-close" onClick={() => setRentalEditCell(null)}>닫기</button>
+            </div>
+          ) : (
+            <button type="button" className="cg-box" onClick={() => setRentalEditCell(cellKey)}>
+              <div className="cg-pair-row cg-row-cost">
+                <span className="cg-lbl cg-lbl-cost">매입</span>
+                <span className="cg-val cg-val-cost">{n(cost)}</span>
+              </div>
+              <div className="cg-pair-row cg-row-sell">
+                <span className="cg-lbl cg-lbl-sell">매출</span>
+                <span className="cg-val cg-val-sell">{n(sell)}</span>
+              </div>
+              <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {n(margin)}</div>
+            </button>
+          )}
+        </td>
+      );
+    };
+    return (
+      <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}} onClick={() => setRentalEditCell(null)}>
+        <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
+          <button onClick={()=>setShowRentalAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+          <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
+          <button type="button" onClick={saveRentalPricing}
+            style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:"#7c3aed",color:"#fff",border:"none",cursor:"pointer"}}>
+            {saveMsg ? saveMsg : "저장"}
+          </button>
+        </div>
+        <div className="carrier-admin-page rental-admin-page" onClick={e => e.stopPropagation()}>
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:10,fontWeight:700,color:"#6b21a8",marginBottom:6}}>Return City (Drop off)</div>
+            <select value={raCity} onChange={e=>{setRentalAdminCity(e.target.value);setRentalEditCell(null);}}
+              style={{width:"100%",padding:"8px 10px",fontSize:12,fontWeight:600,border:"1px solid #ddd6fe",borderRadius:8,background:"#faf5ff",color:"#5b21b6"}}>
+              {RENT_CITY_ORDER.map(city=>(
+                <option key={city} value={city}>{RC_LABEL[city] || city}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:10}}>
+            {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
+              <button key={k} type="button" onClick={()=>{setRentalAdminPeriod(k);setRentalEditCell(null);}}
+                style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                  background:rentalAdminPeriod===k?"#fff":"transparent",
+                  color:rentalAdminPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+          <MarginPanel
+            onSave={saveRentalPricing}
+            saveMsg={saveMsg}
+            filterHint={
+              marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
+              marginTab === "pol" && selPol ? `운임표: ${selPol} 만 표시` :
+              marginTab === "area" ? "지역 선택 시 해당 지역 운임만 표시" : null
+            }
+            marginTab={marginTab} setMarginTab={setMarginTab}
+            margins={margins} applyGlobalMargin={applyGlobalMargin}
+            selArea={selArea} setSelArea={setSelArea}
+            areaM={areaM} applyAreaMarginType={applyAreaMarginType} applyAreaMargins={applyAreaMargins}
+            selPol={selPol} setSelPol={setSelPol}
+            polM={polM} applyPolMargins={applyPolMargins} clearPolMargins={clearPolMargins}
+            polEdit={polEdit} setPolEdit={setPolEdit}
+            areas={areas} fData={fData} getM={getM}
+          />
+          <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
+            {cityLabel} · {isFuture ? "향후" : "현재"} 렌탈 운임 (USD) · 셀 클릭 → 매입·매출·마진 조정 · {rentalGridFilterLabel}
+          </div>
+          <div className="carrier-grid-wrap">
+            <table className="carrier-grid rental-grid">
+              <thead>
+                <tr className="cg-carrier-row">
+                  <th colSpan={2}></th>
+                  <th colSpan={2}>{cityLabel} · {isFuture ? "향후" : "현재"} Rental (USD)</th>
+                </tr>
+                <tr className="cg-head-row">
+                  <th rowSpan={2} className="cg-th-area">AREA</th>
+                  <th rowSpan={2} className="cg-th-pol">POL</th>
+                  <th colSpan={2}>Container Rental</th>
+                </tr>
+                <tr className="cg-head-row">
+                  <th>20&apos;</th>
+                  <th>40&apos;</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredRentalAreaGroups.length === 0 ? (
+                  <tr><td colSpan={4} style={{padding:20,color:"#9ca3af",fontSize:12}}>표시할 POL 없음 · 지역/POL 선택 확인</td></tr>
+                ) : filteredRentalAreaGroups.map(({ area, rows }) => rows.map((row, ri) => (
+                  <tr key={row.rentalPol} className={ri % 2 === 1 ? "cg-stripe" : ""}>
+                    {ri === 0 && (
+                      <td rowSpan={rows.length} className="cg-area">{area}</td>
+                    )}
+                    <td className="cg-pol">{row.displayPol}</td>
+                    {renderRentalGridCell(row, 0)}
+                    {renderRentalGridCell(row, 1)}
+                  </tr>
+                )))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── CARRIER RATES ADMIN ──
   if (showCarrierAdmin && isAdmin) {
@@ -1759,6 +2042,7 @@ export default function App() {
             {isAdmin && (
               <>
                 <button onClick={()=>setShowCarrierAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#1e40af",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>선사운임</button>
+                <button onClick={()=>setShowRentalAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#7c3aed",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>렌탈운임</button>
                 <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer",whiteSpace:"nowrap"}}>Notice</button>
                 <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer",whiteSpace:"nowrap"}}>Clients</button>
               </>
@@ -1776,15 +2060,19 @@ export default function App() {
       {isAdmin && (
         <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px"}}>
           <button type="button" onClick={()=>setShowCarrierAdmin(true)}
-            style={{width:"100%",padding:"12px 14px",marginBottom:10,fontSize:13,fontWeight:700,color:"#fff",background:"#1e40af",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#1e40af",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
             선사별 운임 관리 (매입 · 매출 · 마진)
           </button>
+          <button type="button" onClick={()=>setShowRentalAdmin(true)}
+            style={{width:"100%",padding:"12px 14px",marginBottom:10,fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            컨테이너 Rental 운임 관리 (매입 · 매출 · 마진)
+          </button>
           <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:8,fontSize:11,color:"#92400e",lineHeight:1.5}}>
-            MARGIN 설정은 <b>선사운임</b> 메뉴에서 관리합니다. 지역/POL 선택 시 운임표가 함께 필터됩니다.
+            MARGIN 설정은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴에서 관리합니다. 지역/POL 선택 시 운임표가 함께 필터됩니다.
           </div>
           <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:4}}>VALIDITY (선사별)</div>
-            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Till / From 날짜만 · 매입·매출·마진은 <b>선사운임</b> 메뉴</div>
+            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Till / From 날짜만 · 매입·매출·마진은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴</div>
             {CRS.map(k=>(
               <div key={k} style={{marginBottom:8,padding:10,background:"#fff",border:"1px solid #bbf7d0",borderRadius:8}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
