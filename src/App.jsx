@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v2"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v3"; // Admin 저장 로직 버전 (배포 확인용)
 const NOTICE_COUNT = 3;
 const mkNotices = () => Array.from({ length: NOTICE_COUNT }, (_, i) => ({
   text: "",
@@ -273,10 +273,10 @@ const normalizeValidityCarrier = (raw) => ({
 
 const formatValiditySlotLabel = (slot) => {
   const s = normalizeValiditySlot(slot);
-  if (s.furtherNotice) return FURTHER_NOTICE_LABEL;
   const parts = [];
   if (s.from) parts.push(s.from);
-  if (s.till) parts.push(s.till);
+  if (s.furtherNotice) parts.push(FURTHER_NOTICE_LABEL);
+  else if (s.till) parts.push(s.till);
   return parts.join(" · ");
 };
 
@@ -405,41 +405,44 @@ function ValidityPeriodFields({ carrierKey, period, periodLabel, compact, validi
       <div style={{ fontSize: 10, fontWeight: 700, color: isFuture ? "#b45309" : "#166534", marginBottom: 6 }}>
         {periodLabel}
       </div>
-      {slot.furtherNotice ? (
-        <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", fontStyle: "italic" }}>{FURTHER_NOTICE_LABEL}</div>
-      ) : (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-          <div>
-            <div style={{ fontSize: 9, color: "#b45309", marginBottom: 2 }}>From</div>
-            <ValidityDateInput
-              kind="from"
-              compact={compact}
-              value={slot.from}
-              min={futureFromMin}
-              disabled={slot.furtherNotice}
-              onChange={v => onUpdate(carrierKey, period, "from", v)}
-            />
-          </div>
-          <div>
-            <div style={{ fontSize: 9, color: "#166534", marginBottom: 2 }}>Till</div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div>
+          <div style={{ fontSize: 9, color: "#b45309", marginBottom: 2 }}>From</div>
+          <ValidityDateInput
+            kind="from"
+            compact={compact}
+            value={slot.from}
+            min={futureFromMin}
+            onChange={v => onUpdate(carrierKey, period, "from", v)}
+          />
+        </div>
+        <div>
+          <div style={{ fontSize: 9, color: "#166534", marginBottom: 2 }}>Till</div>
+          {slot.furtherNotice ? (
+            <div
+              className={`validity-date-inp validity-date-till${compact ? " validity-date-compact" : ""}`}
+              style={{ display: "flex", alignItems: "center", fontSize: 11, fontWeight: 600, color: "#6b7280", fontStyle: "italic", cursor: "default" }}
+            >
+              {FURTHER_NOTICE_LABEL}
+            </div>
+          ) : (
             <ValidityDateInput
               kind="till"
               compact={compact}
               value={slot.till}
-              disabled={slot.furtherNotice}
               onChange={v => onUpdate(carrierKey, period, "till", v)}
             />
-          </div>
+          )}
+          <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, fontSize: 10, color: "#6b7280", cursor: "pointer" }}>
+            <input
+              type="checkbox"
+              checked={slot.furtherNotice}
+              onChange={e => onUpdate(carrierKey, period, "furtherNotice", e.target.checked)}
+            />
+            Further notice (Till 미정)
+          </label>
         </div>
-      )}
-      <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 10, color: "#6b7280", cursor: "pointer" }}>
-        <input
-          type="checkbox"
-          checked={slot.furtherNotice}
-          onChange={e => onUpdate(carrierKey, period, "furtherNotice", e.target.checked)}
-        />
-        Further notice (기간 미정)
-      </label>
+      </div>
     </div>
   );
 }
@@ -566,7 +569,7 @@ function MarginPanel({
   rateLabel = (t) => t.toUpperCase(),
   gridCols = "1fr 1fr 1fr 1fr",
   polData,
-  globalHint = "모든 구간 기본 마진 · 마지막 수정 기준 우선",
+  globalHint = "전체 마진 변경 시 운임표·매출에 즉시 반영 (셀별 마진은 해당 항목만 해제)",
   formatAreaSummary,
 }) {
   const polList = polData || fData;
@@ -813,6 +816,61 @@ export default function App() {
   const updateMargins = async (id,data) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify(data)}); setEditC(null); loadClients(); };
   const toggleClient = async (id,cur) => { await api(`clients?id=eq.${id}`,{method:"PATCH",body:JSON.stringify({is_active:!cur})}); loadClients(); };
 
+  const stripPolMarginType = (type, polNames = null) => {
+    const allowed = polNames ? new Set(polNames) : null;
+    setPolM(p => {
+      const n = { ...p };
+      Object.keys(n).forEach(pol => {
+        if (allowed && !allowed.has(pol)) return;
+        if (n[pol]?.[type] == null) return;
+        const next = { ...n[pol] };
+        delete next[type];
+        if (Object.keys(next).length === 0) delete n[pol];
+        else n[pol] = next;
+      });
+      return n;
+    });
+    setPolTs(p => {
+      const n = { ...p };
+      Object.keys(n).forEach(pol => {
+        if (allowed && !allowed.has(pol)) return;
+        if (n[pol]?.[type] == null) return;
+        const next = { ...n[pol] };
+        delete next[type];
+        if (Object.keys(next).length === 0) delete n[pol];
+        else n[pol] = next;
+      });
+      return n;
+    });
+  };
+
+  const stripAreaMarginType = (type, areaName = null) => {
+    setAreaM(p => {
+      const n = { ...p };
+      Object.keys(n).forEach(area => {
+        if (areaName && area !== areaName) return;
+        if (n[area]?.[type] == null) return;
+        const next = { ...n[area] };
+        delete next[type];
+        if (Object.keys(next).length === 0) delete n[area];
+        else n[area] = next;
+      });
+      return n;
+    });
+    setAreaTs(p => {
+      const n = { ...p };
+      Object.keys(n).forEach(area => {
+        if (areaName && area !== areaName) return;
+        if (n[area]?.[type] == null) return;
+        const next = { ...n[area] };
+        delete next[type];
+        if (Object.keys(next).length === 0) delete n[area];
+        else n[area] = next;
+      });
+      return n;
+    });
+  };
+
   const getM = (pol, area, type) => {
     const candidates = [{ value: margins[type], ts: marginTs[type] ?? 0 }];
     if (areaM[area]?.[type] != null) {
@@ -849,22 +907,32 @@ export default function App() {
   };
 
   const applyGlobalMargin = (type, value) => {
-    const v = parseInt(value, 10) || 0;
+    const raw = String(value).trim();
+    if (raw === "") return;
+    const v = parseInt(raw, 10);
+    if (!Number.isFinite(v)) return;
     const ts = marginNowTs();
     setMargins(p => ({ ...p, [type]: v }));
     setMarginTs(p => ({ ...p, [type]: ts }));
+    stripPolMarginType(type);
+    stripAreaMarginType(type);
   };
 
   const applyAreaMarginType = (area, type, value) => {
-    const v = parseInt(value, 10) || 0;
+    const raw = String(value).trim();
+    if (raw === "") return;
+    const v = parseInt(raw, 10);
+    if (!Number.isFinite(v)) return;
     const ts = marginNowTs();
     setAreaM(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: v } }));
     setAreaTs(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: ts } }));
+    stripPolMarginType(type, fData.filter(d => d.area === area).map(d => d.pol));
   };
 
   const applyAreaMargins = (area, m) => {
     if (m) {
       const ts = marginNowTs();
+      const pols = fData.filter(d => d.area === area).map(d => d.pol);
       setAreaM(p => ({ ...p, [area]: m }));
       setAreaTs(p => ({
         ...p,
@@ -873,10 +941,66 @@ export default function App() {
           ...Object.fromEntries(Object.keys(m).map(t => [t, ts])),
         },
       }));
+      Object.keys(m).forEach(t => stripPolMarginType(t, pols));
     } else {
       setAreaM(p => { const n = { ...p }; delete n[area]; return n; });
       setAreaTs(p => { const n = { ...p }; delete n[area]; return n; });
     }
+  };
+
+  const stripRentalPolMarginType = (type, polNames = null) => {
+    const allowed = polNames ? new Set(polNames) : null;
+    setRentalPolM(p => {
+      const n = { ...p };
+      Object.keys(n).forEach(pol => {
+        if (allowed && !allowed.has(pol)) return;
+        if (n[pol]?.[type] == null) return;
+        const next = { ...n[pol] };
+        delete next[type];
+        if (Object.keys(next).length === 0) delete n[pol];
+        else n[pol] = next;
+      });
+      return n;
+    });
+    setRentalPolTs(p => {
+      const n = { ...p };
+      Object.keys(n).forEach(pol => {
+        if (allowed && !allowed.has(pol)) return;
+        if (n[pol]?.[type] == null) return;
+        const next = { ...n[pol] };
+        delete next[type];
+        if (Object.keys(next).length === 0) delete n[pol];
+        else n[pol] = next;
+      });
+      return n;
+    });
+  };
+
+  const stripRentalAreaMarginType = (type, areaName = null) => {
+    setRentalAreaM(p => {
+      const n = { ...p };
+      Object.keys(n).forEach(area => {
+        if (areaName && area !== areaName) return;
+        if (n[area]?.[type] == null) return;
+        const next = { ...n[area] };
+        delete next[type];
+        if (Object.keys(next).length === 0) delete n[area];
+        else n[area] = next;
+      });
+      return n;
+    });
+    setRentalAreaTs(p => {
+      const n = { ...p };
+      Object.keys(n).forEach(area => {
+        if (areaName && area !== areaName) return;
+        if (n[area]?.[type] == null) return;
+        const next = { ...n[area] };
+        delete next[type];
+        if (Object.keys(next).length === 0) delete n[area];
+        else n[area] = next;
+      });
+      return n;
+    });
   };
 
   const getRentalM = (pol, area, type) => {
@@ -912,27 +1036,38 @@ export default function App() {
   };
 
   const applyRentalGlobalMargin = (type, value) => {
-    const v = parseInt(value, 10) || 0;
+    const raw = String(value).trim();
+    if (raw === "") return;
+    const v = parseInt(raw, 10);
+    if (!Number.isFinite(v)) return;
     const ts = marginNowTs();
     setRentalMargins(p => ({ ...p, [type]: v }));
     setRentalMarginTs(p => ({ ...p, [type]: ts }));
+    stripRentalPolMarginType(type);
+    stripRentalAreaMarginType(type);
   };
 
   const applyRentalAreaMarginType = (area, type, value) => {
-    const v = parseInt(value, 10) || 0;
+    const raw = String(value).trim();
+    if (raw === "") return;
+    const v = parseInt(raw, 10);
+    if (!Number.isFinite(v)) return;
     const ts = marginNowTs();
     setRentalAreaM(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: v } }));
     setRentalAreaTs(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: ts } }));
+    stripRentalPolMarginType(type, rentalPolData.filter(d => d.area === area).map(d => d.pol));
   };
 
   const applyRentalAreaMargins = (area, m) => {
     if (m) {
       const ts = marginNowTs();
+      const pols = rentalPolData.filter(d => d.area === area).map(d => d.pol);
       setRentalAreaM(p => ({ ...p, [area]: m }));
       setRentalAreaTs(p => ({
         ...p,
         [area]: { ...(p[area] || {}), ...Object.fromEntries(Object.keys(m).map(t => [t, ts])) },
       }));
+      Object.keys(m).forEach(t => stripRentalPolMarginType(t, pols));
     } else {
       setRentalAreaM(p => { const n = { ...p }; delete n[area]; return n; });
       setRentalAreaTs(p => { const n = { ...p }; delete n[area]; return n; });
@@ -947,13 +1082,10 @@ export default function App() {
       const slot = { ...entry[period] };
       if (field === "furtherNotice") {
         slot.furtherNotice = !!value;
-        if (slot.furtherNotice) {
-          slot.from = "";
-          slot.till = "";
-        }
+        if (slot.furtherNotice) slot.till = "";
       } else {
         slot[field] = value;
-        slot.furtherNotice = false;
+        if (field === "till") slot.furtherNotice = false;
         if (period === "current" && field === "till" && value) {
           const fut = { ...entry.future };
           if (!fut.furtherNotice) {
