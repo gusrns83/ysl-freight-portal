@@ -540,6 +540,14 @@ const marginInpStyle = {width:"100%",padding:"6px 8px",fontSize:13,fontWeight:70
 
 const marginNowTs = () => Date.now();
 
+const marginNum = (v) => {
+  if (v === "" || v == null) return 0;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+};
+
+const marginInpVal = (v) => (v === "" || v == null || v === undefined ? "" : v);
+
 const pickLatestMargin = (candidates) =>
   candidates.reduce((best, c) => (c.ts > best.ts ? c : best)).value;
 
@@ -548,12 +556,12 @@ const buildLegacyMarginTimestamps = (areaM, polM, types = RATE_TYPES) => {
   const areaTs = {};
   Object.entries(areaM || {}).forEach(([area, m]) => {
     areaTs[area] = {};
-    types.forEach(t => { if (m[t] != null) areaTs[area][t] = 2; });
+    types.forEach(t => { if (m[t] != null && m[t] !== "") areaTs[area][t] = 2; });
   });
   const polTs = {};
   Object.entries(polM || {}).forEach(([pol, m]) => {
     polTs[pol] = {};
-    types.forEach(t => { if (m[t] != null) polTs[pol][t] = 3; });
+    types.forEach(t => { if (m[t] != null && m[t] !== "") polTs[pol][t] = 3; });
   });
   return { marginTs, areaTs, polTs };
 };
@@ -592,7 +600,7 @@ function MarginPanel({
           <div style={{display:"grid",gridTemplateColumns:gridCols,gap:8}}>
             {rateTypes.map(t=>(
               <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{rateLabel(t)}</div>
-                <input type="number" value={margins[t]} onChange={e=>applyGlobalMargin(t, e.target.value)}
+                <input type="number" value={marginInpVal(margins[t])} onChange={e=>applyGlobalMargin(t, e.target.value)}
                   style={marginInpStyle}/></div>
             ))}
           </div>
@@ -610,7 +618,13 @@ function MarginPanel({
             <div style={{display:"grid",gridTemplateColumns:gridCols,gap:8,marginBottom:8}}>
               {rateTypes.map(t=>(
                 <div key={t}><div style={{fontSize:10,color:"#b45309",marginBottom:2}}>{rateLabel(t)}</div>
-                  <input type="number" value={areaM[selArea]?.[t] ?? margins[t]} onChange={e=>applyAreaMarginType(selArea, t, e.target.value)}
+                  <input type="number"
+                    value={marginInpVal(
+                      areaM[selArea] && Object.prototype.hasOwnProperty.call(areaM[selArea], t)
+                        ? areaM[selArea][t]
+                        : margins[t]
+                    )}
+                    onChange={e=>applyAreaMarginType(selArea, t, e.target.value)}
                     style={marginInpStyle}/></div>
               ))}
             </div>
@@ -648,7 +662,17 @@ function MarginPanel({
               ))}
             </div>
             <div style={{display:"flex",gap:6}}>
-              <button type="button" onClick={()=>{const area=polList.find(d=>d.pol===selPol)?.area||""; const m=Object.fromEntries(rateTypes.map(t=>[t,parseInt(polEdit[t])||getM(selPol,area,t)])); applyPolMargins(selPol, m);}}
+              <button type="button" onClick={()=>{
+                const area=polList.find(d=>d.pol===selPol)?.area||"";
+                const m={};
+                rateTypes.forEach(t=>{
+                  const raw=polEdit[t];
+                  if(raw===""||raw==null) return;
+                  const v=parseInt(raw,10);
+                  if(Number.isFinite(v)) m[t]=v;
+                });
+                applyPolMargins(selPol, m);
+              }}
                 style={{flex:1,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>적용</button>
               <button type="button" onClick={()=>{clearPolMargins(selPol); setPolEdit(emptyPolEdit());}}
                 style={{flex:1,padding:"7px",fontSize:11,color:"#dc2626",background:"#fee2e2",border:"none",borderRadius:6,cursor:"pointer"}}>초기화</button>
@@ -872,20 +896,45 @@ export default function App() {
   };
 
   const getM = (pol, area, type) => {
-    const candidates = [{ value: margins[type], ts: marginTs[type] ?? 0 }];
-    if (areaM[area]?.[type] != null) {
-      candidates.push({ value: areaM[area][type], ts: areaTs[area]?.[type] ?? 0 });
+    const candidates = [{ value: marginNum(margins[type]), ts: marginTs[type] ?? 0 }];
+    const areaVal = areaM[area]?.[type];
+    if (areaVal != null && areaVal !== "") {
+      candidates.push({ value: marginNum(areaVal), ts: areaTs[area]?.[type] ?? 0 });
     }
-    if (polM[pol]?.[type] != null) {
-      candidates.push({ value: polM[pol][type], ts: polTs[pol]?.[type] ?? 0 });
+    const polVal = polM[pol]?.[type];
+    if (polVal != null && polVal !== "") {
+      candidates.push({ value: marginNum(polVal), ts: polTs[pol]?.[type] ?? 0 });
     }
     return pickLatestMargin(candidates);
   };
 
   const applyPolMargin = (pol, type, value) => {
-    const v = parseInt(value, 10);
+    const raw = String(value).trim();
     const ts = marginNowTs();
-    setPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: Number.isFinite(v) ? v : 0 } }));
+    if (raw === "") {
+      setPolM(p => {
+        if (p[pol]?.[type] == null) return p;
+        const next = { ...p[pol] };
+        delete next[type];
+        const n = { ...p };
+        if (Object.keys(next).length === 0) delete n[pol];
+        else n[pol] = next;
+        return n;
+      });
+      setPolTs(p => {
+        if (p[pol]?.[type] == null) return p;
+        const next = { ...p[pol] };
+        delete next[type];
+        const n = { ...p };
+        if (Object.keys(next).length === 0) delete n[pol];
+        else n[pol] = next;
+        return n;
+      });
+      return;
+    }
+    const v = parseInt(raw, 10);
+    if (!Number.isFinite(v)) return;
+    setPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: v } }));
     setPolTs(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: ts } }));
   };
 
@@ -908,10 +957,16 @@ export default function App() {
 
   const applyGlobalMargin = (type, value) => {
     const raw = String(value).trim();
-    if (raw === "") return;
+    const ts = marginNowTs();
+    if (raw === "") {
+      setMargins(p => ({ ...p, [type]: "" }));
+      setMarginTs(p => ({ ...p, [type]: ts }));
+      stripPolMarginType(type);
+      stripAreaMarginType(type);
+      return;
+    }
     const v = parseInt(raw, 10);
     if (!Number.isFinite(v)) return;
-    const ts = marginNowTs();
     setMargins(p => ({ ...p, [type]: v }));
     setMarginTs(p => ({ ...p, [type]: ts }));
     stripPolMarginType(type);
@@ -920,10 +975,15 @@ export default function App() {
 
   const applyAreaMarginType = (area, type, value) => {
     const raw = String(value).trim();
-    if (raw === "") return;
+    const ts = marginNowTs();
+    if (raw === "") {
+      setAreaM(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: "" } }));
+      setAreaTs(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: ts } }));
+      stripPolMarginType(type, fData.filter(d => d.area === area).map(d => d.pol));
+      return;
+    }
     const v = parseInt(raw, 10);
     if (!Number.isFinite(v)) return;
-    const ts = marginNowTs();
     setAreaM(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: v } }));
     setAreaTs(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: ts } }));
     stripPolMarginType(type, fData.filter(d => d.area === area).map(d => d.pol));
@@ -1004,20 +1064,45 @@ export default function App() {
   };
 
   const getRentalM = (pol, area, type) => {
-    const candidates = [{ value: rentalMargins[type], ts: rentalMarginTs[type] ?? 0 }];
-    if (rentalAreaM[area]?.[type] != null) {
-      candidates.push({ value: rentalAreaM[area][type], ts: rentalAreaTs[area]?.[type] ?? 0 });
+    const candidates = [{ value: marginNum(rentalMargins[type]), ts: rentalMarginTs[type] ?? 0 }];
+    const areaVal = rentalAreaM[area]?.[type];
+    if (areaVal != null && areaVal !== "") {
+      candidates.push({ value: marginNum(areaVal), ts: rentalAreaTs[area]?.[type] ?? 0 });
     }
-    if (rentalPolM[pol]?.[type] != null) {
-      candidates.push({ value: rentalPolM[pol][type], ts: rentalPolTs[pol]?.[type] ?? 0 });
+    const polVal = rentalPolM[pol]?.[type];
+    if (polVal != null && polVal !== "") {
+      candidates.push({ value: marginNum(polVal), ts: rentalPolTs[pol]?.[type] ?? 0 });
     }
     return pickLatestMargin(candidates);
   };
 
   const applyRentalPolMargin = (pol, type, value) => {
-    const v = parseInt(value, 10);
+    const raw = String(value).trim();
     const ts = marginNowTs();
-    setRentalPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: Number.isFinite(v) ? v : 0 } }));
+    if (raw === "") {
+      setRentalPolM(p => {
+        if (p[pol]?.[type] == null) return p;
+        const next = { ...p[pol] };
+        delete next[type];
+        const n = { ...p };
+        if (Object.keys(next).length === 0) delete n[pol];
+        else n[pol] = next;
+        return n;
+      });
+      setRentalPolTs(p => {
+        if (p[pol]?.[type] == null) return p;
+        const next = { ...p[pol] };
+        delete next[type];
+        const n = { ...p };
+        if (Object.keys(next).length === 0) delete n[pol];
+        else n[pol] = next;
+        return n;
+      });
+      return;
+    }
+    const v = parseInt(raw, 10);
+    if (!Number.isFinite(v)) return;
+    setRentalPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: v } }));
     setRentalPolTs(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: ts } }));
   };
 
@@ -1037,10 +1122,16 @@ export default function App() {
 
   const applyRentalGlobalMargin = (type, value) => {
     const raw = String(value).trim();
-    if (raw === "") return;
+    const ts = marginNowTs();
+    if (raw === "") {
+      setRentalMargins(p => ({ ...p, [type]: "" }));
+      setRentalMarginTs(p => ({ ...p, [type]: ts }));
+      stripRentalPolMarginType(type);
+      stripRentalAreaMarginType(type);
+      return;
+    }
     const v = parseInt(raw, 10);
     if (!Number.isFinite(v)) return;
-    const ts = marginNowTs();
     setRentalMargins(p => ({ ...p, [type]: v }));
     setRentalMarginTs(p => ({ ...p, [type]: ts }));
     stripRentalPolMarginType(type);
@@ -1049,10 +1140,15 @@ export default function App() {
 
   const applyRentalAreaMarginType = (area, type, value) => {
     const raw = String(value).trim();
-    if (raw === "") return;
+    const ts = marginNowTs();
+    if (raw === "") {
+      setRentalAreaM(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: "" } }));
+      setRentalAreaTs(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: ts } }));
+      stripRentalPolMarginType(type, rentalPolData.filter(d => d.area === area).map(d => d.pol));
+      return;
+    }
     const v = parseInt(raw, 10);
     if (!Number.isFinite(v)) return;
-    const ts = marginNowTs();
     setRentalAreaM(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: v } }));
     setRentalAreaTs(p => ({ ...p, [area]: { ...(p[area] || {}), [type]: ts } }));
     stripRentalPolMarginType(type, rentalPolData.filter(d => d.area === area).map(d => d.pol));
