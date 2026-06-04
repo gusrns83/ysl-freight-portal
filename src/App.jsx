@@ -5,6 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
+const ADMIN_SAVE_REV = "save-v2"; // Admin 저장 로직 버전 (배포 확인용)
 const NOTICE_COUNT = 3;
 const mkNotices = () => Array.from({ length: NOTICE_COUNT }, (_, i) => ({
   text: "",
@@ -1008,11 +1009,11 @@ export default function App() {
   };
 
   const saveNoticeSettings = async () => {
-    await Promise.all([
-      saveSetting("notices_json", JSON.stringify(notices)),
-      saveSetting("notice_text", notices[0].text),
-      saveSetting("notice_on", notices[0].on),
-      saveSetting("notice_file_url", notices[0].fileUrl),
+    await saveSettingsEntries([
+      ["notices_json", JSON.stringify(notices)],
+      ["notice_text", notices[0].text],
+      ["notice_on", notices[0].on],
+      ["notice_file_url", notices[0].fileUrl],
     ]);
   };
 
@@ -1063,6 +1064,15 @@ export default function App() {
   };
 
   const saveSetting = async (key, value) => {
+    await saveSettingsBatch([[key, value]]);
+  };
+
+  const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json"]);
+
+  const saveSettingsBatch = async (entries) => {
+    const rows = entries.map(([key, value]) => ({ key, value: String(value) }));
+    if (!rows.length) return;
+    const keys = rows.map(r => r.key).join(", ");
     let res;
     try {
       res = await fetch(`${SB_URL}/rest/v1/settings`, {
@@ -1073,12 +1083,31 @@ export default function App() {
           "Content-Type": "application/json",
           "Prefer": "resolution=merge-duplicates,return=minimal",
         },
-        body: JSON.stringify({ key, value: String(value) }),
+        body: JSON.stringify(rows),
       });
     } catch (e) {
-      throw new Error(`Supabase 연결 실패 (${key}) — ${e.message}`);
+      throw new Error(`Supabase 연결 실패 (${keys}) — ${e.message}`);
     }
-    if (!res.ok) throw new Error(`${key}: ${await res.text()}`);
+    if (!res.ok) throw new Error(`(${keys}): ${await res.text()}`);
+  };
+
+  /** 큰 JSON은 키별 1회, 나머지는 한 번에 — 병렬 저장 시 Failed to fetch 방지 */
+  const saveSettingsEntries = async (entries) => {
+    const light = [];
+    const flushLight = async () => {
+      if (!light.length) return;
+      const chunk = light.splice(0, light.length);
+      await saveSettingsBatch(chunk);
+    };
+    for (const entry of entries) {
+      if (HEAVY_SETTING_KEYS.has(entry[0])) {
+        await flushLight();
+        await saveSettingsBatch([entry]);
+      } else {
+        light.push(entry);
+      }
+    }
+    await flushLight();
   };
 
   const flashSaveFeedback = (type, message) => {
@@ -1109,46 +1138,41 @@ export default function App() {
     ? createPortal(<AdminSaveToast busy={saveBusy} feedback={saveFeedback} />, document.body)
     : null;
 
-  const saveValidityOnly = () => runSave("Validity", async () => {
-    await saveSetting("validity_info_json", JSON.stringify(validityInfo));
-    await saveSetting("validity_snk", legacyValidityCurrent("SNK"));
-    await saveSetting("validity_dy", legacyValidityCurrent("DY"));
-    await saveSetting("validity_ck", legacyValidityCurrent("CK"));
-    await saveSetting("validity_rental", legacyValidityCurrent("RENTAL"));
-  });
+  const saveValidityOnly = () => runSave("Validity", () => saveSettingsEntries([
+    ["validity_info_json", JSON.stringify(validityInfo)],
+    ["validity_snk", legacyValidityCurrent("SNK")],
+    ["validity_dy", legacyValidityCurrent("DY")],
+    ["validity_ck", legacyValidityCurrent("CK")],
+    ["validity_rental", legacyValidityCurrent("RENTAL")],
+  ]));
 
-  const saveAllSettings = () => runSave("전체 설정", async () => {
-    const entries = [
-      ["notices_json", JSON.stringify(notices)],
-      ["notice_text", notices[0].text],
-      ["notice_on", notices[0].on],
-      ["notice_file_url", notices[0].fileUrl],
-      ["validity_info_json", JSON.stringify(validityInfo)],
-      ["carrier_rates_json", JSON.stringify(carrierRates)],
-      ["rental_rates_json", JSON.stringify(rentalRates)],
-      ["validity_snk", legacyValidityCurrent("SNK")],
-      ["validity_dy", legacyValidityCurrent("DY")],
-      ["validity_ck", legacyValidityCurrent("CK")],
-      ["validity_rental", legacyValidityCurrent("RENTAL")],
-      ["global_margins", JSON.stringify(margins)],
-      ["area_margins", JSON.stringify(areaM)],
-      ["pol_margins", JSON.stringify(polM)],
-      ["margin_timestamps", JSON.stringify(marginTs)],
-      ["area_margin_timestamps", JSON.stringify(areaTs)],
-      ["pol_margin_timestamps", JSON.stringify(polTs)],
-      ["rental_global_margins", JSON.stringify(rentalMargins)],
-      ["rental_area_margins", JSON.stringify(rentalAreaM)],
-      ["rental_pol_margins", JSON.stringify(rentalPolM)],
-      ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
-      ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
-      ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
-      ["pol_costs", JSON.stringify(polCostO)],
-      ["ad_banners_json", JSON.stringify(adBanners)],
-    ];
-    for (const [key, value] of entries) {
-      await saveSetting(key, value);
-    }
-  });
+  const saveAllSettings = () => runSave("전체 설정", () => saveSettingsEntries([
+    ["notices_json", JSON.stringify(notices)],
+    ["notice_text", notices[0].text],
+    ["notice_on", notices[0].on],
+    ["notice_file_url", notices[0].fileUrl],
+    ["validity_info_json", JSON.stringify(validityInfo)],
+    ["carrier_rates_json", JSON.stringify(carrierRates)],
+    ["rental_rates_json", JSON.stringify(rentalRates)],
+    ["validity_snk", legacyValidityCurrent("SNK")],
+    ["validity_dy", legacyValidityCurrent("DY")],
+    ["validity_ck", legacyValidityCurrent("CK")],
+    ["validity_rental", legacyValidityCurrent("RENTAL")],
+    ["global_margins", JSON.stringify(margins)],
+    ["area_margins", JSON.stringify(areaM)],
+    ["pol_margins", JSON.stringify(polM)],
+    ["margin_timestamps", JSON.stringify(marginTs)],
+    ["area_margin_timestamps", JSON.stringify(areaTs)],
+    ["pol_margin_timestamps", JSON.stringify(polTs)],
+    ["rental_global_margins", JSON.stringify(rentalMargins)],
+    ["rental_area_margins", JSON.stringify(rentalAreaM)],
+    ["rental_pol_margins", JSON.stringify(rentalPolM)],
+    ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
+    ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
+    ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
+    ["pol_costs", JSON.stringify(polCostO)],
+    ["ad_banners_json", JSON.stringify(adBanners)],
+  ]));
 
   useEffect(() => {
     api("settings?select=*").then(rows => {
@@ -1522,33 +1546,28 @@ export default function App() {
 
   const saveNoticesOnly = () => runSave("공지", () => saveNoticeSettings());
 
-  const saveCarrierPricing = () => runSave("선사 운임", async () => {
-    await Promise.all([
-      saveSetting("carrier_rates_json", JSON.stringify(carrierRates)),
-      saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
-      saveSetting("pol_costs", JSON.stringify(polCostO)),
-      saveSetting("pol_margins", JSON.stringify(polM)),
-      saveSetting("global_margins", JSON.stringify(margins)),
-      saveSetting("area_margins", JSON.stringify(areaM)),
-      saveSetting("margin_timestamps", JSON.stringify(marginTs)),
-      saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
-      saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
-      saveSetting("validity_info_json", JSON.stringify(validityInfo)),
-    ]);
-  });
+  const saveCarrierPricing = () => runSave("선사 운임", () => saveSettingsEntries([
+    ["pol_costs", JSON.stringify(polCostO)],
+    ["pol_margins", JSON.stringify(polM)],
+    ["global_margins", JSON.stringify(margins)],
+    ["area_margins", JSON.stringify(areaM)],
+    ["margin_timestamps", JSON.stringify(marginTs)],
+    ["area_margin_timestamps", JSON.stringify(areaTs)],
+    ["pol_margin_timestamps", JSON.stringify(polTs)],
+    ["carrier_rates_json", JSON.stringify(carrierRates)],
+    ["validity_info_json", JSON.stringify(validityInfo)],
+  ]));
 
-  const saveRentalPricing = () => runSave("렌탈 운임", async () => {
-    await Promise.all([
-      saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
-      saveSetting("rental_global_margins", JSON.stringify(rentalMargins)),
-      saveSetting("rental_area_margins", JSON.stringify(rentalAreaM)),
-      saveSetting("rental_pol_margins", JSON.stringify(rentalPolM)),
-      saveSetting("rental_margin_timestamps", JSON.stringify(rentalMarginTs)),
-      saveSetting("rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)),
-      saveSetting("rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)),
-      saveSetting("validity_info_json", JSON.stringify(validityInfo)),
-    ]);
-  });
+  const saveRentalPricing = () => runSave("렌탈 운임", () => saveSettingsEntries([
+    ["rental_rates_json", JSON.stringify(rentalRates)],
+    ["rental_global_margins", JSON.stringify(rentalMargins)],
+    ["rental_area_margins", JSON.stringify(rentalAreaM)],
+    ["rental_pol_margins", JSON.stringify(rentalPolM)],
+    ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
+    ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
+    ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
+    ["validity_info_json", JSON.stringify(validityInfo)],
+  ]));
 
   const renderNoticeFile = (fileUrl, title) => {
     if (!fileUrl) return null;
@@ -2138,7 +2157,10 @@ export default function App() {
         {adminSaveToastEl}
         <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
           <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
-          <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
+            <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV}</div>
+          </div>
           <button type="button" onClick={saveCarrierPricing} disabled={saveBusy}
             style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#93c5fd":"#2563eb",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
             {saveBusy ? "저장 중…" : "💾 저장"}
