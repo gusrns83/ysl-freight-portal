@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
@@ -243,9 +244,52 @@ const RATE_TYPES = ["coc20","coc40","soc20","soc40"];
 const RENTAL_RATE_TYPES = ["r20", "r40"];
 const rentalRateLabel = (t) => (t === "r20" ? "20'" : "40'");
 const defaultRentalMargins = () => ({ r20: 80, r40: 100 });
+const FURTHER_NOTICE_LABEL = "Further notice";
+
+const defaultValiditySlot = () => ({ from: "", till: "", furtherNotice: false });
+
+const normalizeValiditySlot = (slot) => {
+  if (!slot) return defaultValiditySlot();
+  if (typeof slot === "string") {
+    const s = slot.trim();
+    if (!s) return defaultValiditySlot();
+    if (/further\s*notice/i.test(s)) return { from: "", till: "", furtherNotice: true };
+    if (/^from\s/i.test(s)) return { from: s, till: "", furtherNotice: false };
+    if (/^till\s/i.test(s)) return { from: "", till: s, furtherNotice: false };
+    return { from: "", till: s, furtherNotice: false };
+  }
+  return {
+    from: slot.from ?? "",
+    till: slot.till ?? "",
+    furtherNotice: !!slot.furtherNotice,
+  };
+};
+
+const normalizeValidityCarrier = (raw) => ({
+  current: normalizeValiditySlot(raw?.current),
+  future: normalizeValiditySlot(raw?.future),
+});
+
+const formatValiditySlotLabel = (slot) => {
+  const s = normalizeValiditySlot(slot);
+  if (s.furtherNotice) return FURTHER_NOTICE_LABEL;
+  const parts = [];
+  if (s.from) parts.push(s.from);
+  if (s.till) parts.push(s.till);
+  return parts.join(" · ");
+};
+
 const defaultValidityInfo = () => Object.fromEntries(VALIDITY_KEYS.map(k => [k, {
-  current: k === "SNK" ? "Till 15.06.2026" : "Till 30.06.2026",
-  future: k === "SNK" ? "From 16.06.2026" : "From 01.07.2026",
+  current: {
+    from: "",
+    till: k === "SNK" ? "Till 15.06.2026" : "Till 30.06.2026",
+    furtherNotice: false,
+  },
+  future: {
+    from: k === "SNK" ? "From 16.06.2026" : (k === "CK" ? "From 16.06.2026" : "From 01.07.2026"),
+    till: "Till 30.06.2026",
+    furtherNotice: false,
+  },
 }]));
 const defaultCarrierRates = () => Object.fromEntries(CRS.map(k => [k, {
   current: { coc20: "", coc40: "", soc20: "", soc40: "" },
@@ -321,22 +365,91 @@ const addDaysToISO = (iso, days) => {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
 };
 
-const syncFromAfterTill = (current, future) => {
-  const tillIso = parseValidityToISO(current);
-  if (!tillIso) return future;
-  const fromIso = parseValidityToISO(future);
+const syncFromAfterTill = (currentTill, futureFrom) => {
+  const tillIso = parseValidityToISO(currentTill);
+  if (!tillIso) return futureFrom;
+  const fromIso = parseValidityToISO(futureFrom);
   if (!fromIso || fromIso <= tillIso) {
     return formatValidityDate(addDaysToISO(tillIso, 1), "From");
   }
-  return future;
+  return futureFrom;
 };
 
-const ValidityDateInput = ({ kind, value, onChange, compact, min }) => (
+function AdminSaveToast({ busy, feedback }) {
+  if (!busy && !feedback?.type) return null;
+  const ok = feedback?.type === "success";
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`admin-save-toast${ok ? " admin-save-toast--ok" : busy ? " admin-save-toast--busy" : " admin-save-toast--err"}`}
+    >
+      {busy ? "저장 중…" : feedback.message}
+    </div>
+  );
+}
+
+function ValidityPeriodFields({ carrierKey, period, periodLabel, compact, validityInfo, onUpdate, futureFromMin }) {
+  const slot = normalizeValiditySlot(validityInfo[carrierKey]?.[period]);
+  const isFuture = period === "future";
+  const boxStyle = {
+    marginBottom: compact ? 8 : 10,
+    padding: compact ? 8 : 10,
+    background: isFuture ? "#fffbeb" : "#f0fdf4",
+    border: `1px solid ${isFuture ? "#fde68a" : "#bbf7d0"}`,
+    borderRadius: 8,
+  };
+  return (
+    <div style={boxStyle}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: isFuture ? "#b45309" : "#166534", marginBottom: 6 }}>
+        {periodLabel}
+      </div>
+      {slot.furtherNotice ? (
+        <div style={{ fontSize: 11, fontWeight: 600, color: "#6b7280", fontStyle: "italic" }}>{FURTHER_NOTICE_LABEL}</div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 9, color: "#b45309", marginBottom: 2 }}>From</div>
+            <ValidityDateInput
+              kind="from"
+              compact={compact}
+              value={slot.from}
+              min={futureFromMin}
+              disabled={slot.furtherNotice}
+              onChange={v => onUpdate(carrierKey, period, "from", v)}
+            />
+          </div>
+          <div>
+            <div style={{ fontSize: 9, color: "#166534", marginBottom: 2 }}>Till</div>
+            <ValidityDateInput
+              kind="till"
+              compact={compact}
+              value={slot.till}
+              disabled={slot.furtherNotice}
+              onChange={v => onUpdate(carrierKey, period, "till", v)}
+            />
+          </div>
+        </div>
+      )}
+      <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 10, color: "#6b7280", cursor: "pointer" }}>
+        <input
+          type="checkbox"
+          checked={slot.furtherNotice}
+          onChange={e => onUpdate(carrierKey, period, "furtherNotice", e.target.checked)}
+        />
+        Further notice (기간 미정)
+      </label>
+    </div>
+  );
+}
+
+const ValidityDateInput = ({ kind, value, onChange, compact, min, disabled }) => (
   <input
     type="date"
     className={`validity-date-inp validity-date-${kind}${compact ? " validity-date-compact" : ""}`}
     value={parseValidityToISO(value)}
     min={min || undefined}
+    disabled={disabled}
     onChange={(e) => {
       const v = e.target.value;
       onChange(v ? formatValidityDate(v, kind === "till" ? "Till" : "From") : "");
@@ -442,7 +555,7 @@ const buildLegacyMarginTimestamps = (areaM, polM, types = RATE_TYPES) => {
 };
 
 function MarginPanel({
-  onSave, filterHint, saveMsg,
+  onSave, filterHint, saveBusy,
   marginTab, setMarginTab,
   margins, applyGlobalMargin,
   selArea, setSelArea, areaM, applyAreaMarginType, applyAreaMargins,
@@ -539,9 +652,9 @@ function MarginPanel({
           </>}
         </div>
       )}
-      <button type="button" onClick={onSave}
-        style={{width:"100%",marginTop:10,padding:"8px",fontSize:11,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:6,cursor:"pointer"}}>
-        {saveMsg || "💾 마진·운임 저장"}
+      <button type="button" onClick={onSave} disabled={saveBusy}
+        style={{width:"100%",marginTop:10,padding:"8px",fontSize:11,fontWeight:700,color:"#fff",background:saveBusy?"#d1d5db":"#d97706",border:"none",borderRadius:6,cursor:saveBusy?"not-allowed":"pointer"}}>
+        {saveBusy ? "저장 중…" : "💾 마진·운임 저장"}
       </button>
     </div>
   );
@@ -628,7 +741,9 @@ export default function App() {
   const [noticeAdminTab, setNoticeAdminTab] = useState(0);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
-  const [saveMsg, setSaveMsg] = useState("");
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveFeedback, setSaveFeedback] = useState({ type: null, message: "" });
+  const saveFeedbackTimerRef = useRef(null);
   const [dragOverSlot, setDragOverSlot] = useState(null);
   const [adBanners, setAdBanners] = useState(mkAds);
   const [adAdminTab, setAdAdminTab] = useState(0);
@@ -829,21 +944,41 @@ export default function App() {
 
   const rentalType = (si) => (si === 0 ? "r20" : "r40");
 
-  const updateCarrierValidity = (carrier, field, value) => {
+  const updateValiditySlot = (carrier, period, field, value) => {
     setValidityInfo(p => {
-      const prev = p[carrier] || { current: "", future: "" };
-      const next = { ...prev, [field]: value };
-      if (field === "current" && value) {
-        next.future = syncFromAfterTill(next.current, next.future);
+      const entry = normalizeValidityCarrier(p[carrier] || {});
+      const slot = { ...entry[period] };
+      if (field === "furtherNotice") {
+        slot.furtherNotice = !!value;
+        if (slot.furtherNotice) {
+          slot.from = "";
+          slot.till = "";
+        }
+      } else {
+        slot[field] = value;
+        slot.furtherNotice = false;
+        if (period === "current" && field === "till" && value) {
+          const fut = { ...entry.future };
+          if (!fut.furtherNotice) {
+            entry.future = { ...fut, from: syncFromAfterTill(value, fut.from) };
+          }
+        }
       }
-      return { ...p, [carrier]: next };
+      entry[period] = slot;
+      return { ...p, [carrier]: entry };
     });
   };
 
-  const getFromMinDate = (current) => {
-    const tillIso = parseValidityToISO(current ?? "");
-    return tillIso ? addDaysToISO(tillIso, 1) : undefined;
+  const getFutureFromMinDate = (carrierKey) => {
+    const cur = normalizeValiditySlot(validityInfo[carrierKey]?.current);
+    const tillIso = parseValidityToISO(cur.till);
+    if (tillIso) return addDaysToISO(tillIso, 1);
+    const fromIso = parseValidityToISO(cur.from);
+    return fromIso ? addDaysToISO(fromIso, 1) : undefined;
   };
+
+  const legacyValidityCurrent = (carrierKey) =>
+    formatValiditySlotLabel(validityInfo[carrierKey]?.current);
 
   const patchNotice = (idx, patch) => setNotices(prev => prev.map((n, i) => i === idx ? { ...n, ...patch } : n));
 
@@ -920,15 +1055,7 @@ export default function App() {
     setAdUploadLoading(false);
   };
 
-  const persistAdBanners = async (banners) => {
-    try {
-      await saveAdBannersSetting(banners);
-      setAdUploadMsg("저장 완료!");
-      setTimeout(() => setAdUploadMsg(""), 2000);
-    } catch (e) {
-      setAdUploadMsg("저장 실패: " + e.message);
-    }
-  };
+  const persistAdBanners = (banners) => runSave("광고", () => saveAdBannersSetting(banners));
 
   const dismissAd = () => {
     setAdDismissed(true);
@@ -954,21 +1081,43 @@ export default function App() {
     if (!res.ok) throw new Error(`${key}: ${await res.text()}`);
   };
 
-  const saveValidityOnly = async () => {
-    try {
-      await saveSetting("validity_info_json", JSON.stringify(validityInfo));
-      await saveSetting("validity_snk", validityInfo.SNK?.current ?? "");
-      await saveSetting("validity_dy", validityInfo.DY?.current ?? "");
-      await saveSetting("validity_ck", validityInfo.CK?.current ?? "");
-      await saveSetting("validity_rental", validityInfo.RENTAL?.current ?? "");
-      setSaveMsg("Validity 저장 완료!");
-      setTimeout(() => setSaveMsg(""), 2000);
-    } catch (e) {
-      setSaveMsg("저장 실패: " + e.message);
+  const flashSaveFeedback = (type, message) => {
+    if (saveFeedbackTimerRef.current) clearTimeout(saveFeedbackTimerRef.current);
+    setSaveFeedback({ type, message });
+    if (type === "success") {
+      saveFeedbackTimerRef.current = setTimeout(() => {
+        setSaveFeedback({ type: null, message: "" });
+      }, 5000);
     }
   };
 
-  const saveAllSettings = async () => {
+  const runSave = async (successLabel, fn) => {
+    if (saveBusy) return;
+    setSaveBusy(true);
+    setSaveFeedback({ type: null, message: "" });
+    try {
+      await fn();
+      flashSaveFeedback("success", `✅ ${successLabel} 저장 완료`);
+    } catch (e) {
+      flashSaveFeedback("error", `저장 실패: ${e.message}`);
+    } finally {
+      setSaveBusy(false);
+    }
+  };
+
+  const adminSaveToastEl = isAdmin && (saveBusy || saveFeedback.type)
+    ? createPortal(<AdminSaveToast busy={saveBusy} feedback={saveFeedback} />, document.body)
+    : null;
+
+  const saveValidityOnly = () => runSave("Validity", async () => {
+    await saveSetting("validity_info_json", JSON.stringify(validityInfo));
+    await saveSetting("validity_snk", legacyValidityCurrent("SNK"));
+    await saveSetting("validity_dy", legacyValidityCurrent("DY"));
+    await saveSetting("validity_ck", legacyValidityCurrent("CK"));
+    await saveSetting("validity_rental", legacyValidityCurrent("RENTAL"));
+  });
+
+  const saveAllSettings = () => runSave("전체 설정", async () => {
     const entries = [
       ["notices_json", JSON.stringify(notices)],
       ["notice_text", notices[0].text],
@@ -977,10 +1126,10 @@ export default function App() {
       ["validity_info_json", JSON.stringify(validityInfo)],
       ["carrier_rates_json", JSON.stringify(carrierRates)],
       ["rental_rates_json", JSON.stringify(rentalRates)],
-      ["validity_snk", validityInfo.SNK?.current ?? ""],
-      ["validity_dy", validityInfo.DY?.current ?? ""],
-      ["validity_ck", validityInfo.CK?.current ?? ""],
-      ["validity_rental", validityInfo.RENTAL?.current ?? ""],
+      ["validity_snk", legacyValidityCurrent("SNK")],
+      ["validity_dy", legacyValidityCurrent("DY")],
+      ["validity_ck", legacyValidityCurrent("CK")],
+      ["validity_rental", legacyValidityCurrent("RENTAL")],
       ["global_margins", JSON.stringify(margins)],
       ["area_margins", JSON.stringify(areaM)],
       ["pol_margins", JSON.stringify(polM)],
@@ -996,16 +1145,10 @@ export default function App() {
       ["pol_costs", JSON.stringify(polCostO)],
       ["ad_banners_json", JSON.stringify(adBanners)],
     ];
-    try {
-      for (const [key, value] of entries) {
-        await saveSetting(key, value);
-      }
-      setSaveMsg("전체 저장 완료!");
-      setTimeout(() => setSaveMsg(""), 2000);
-    } catch (e) {
-      setSaveMsg("저장 실패: " + e.message);
+    for (const [key, value] of entries) {
+      await saveSetting(key, value);
     }
-  };
+  });
 
   useEffect(() => {
     api("settings?select=*").then(rows => {
@@ -1035,16 +1178,16 @@ export default function App() {
           const parsed = JSON.parse(s.validity_info_json);
           if (parsed && typeof parsed === "object") {
             setValidityInfo(Object.fromEntries(
-              VALIDITY_KEYS.map(k => [k, { ...defaultValidityInfo()[k], ...(parsed[k] || {}) }])
+              VALIDITY_KEYS.map(k => [k, normalizeValidityCarrier({ ...defaultValidityInfo()[k], ...(parsed[k] || {}) })])
             ));
           }
         } catch(e) {}
       } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined || s.validity_rental !== undefined) {
         setValidityInfo(prev => ({
-          SNK: { ...prev.SNK, current: s.validity_snk ?? prev.SNK.current },
-          DY: { ...prev.DY, current: s.validity_dy ?? prev.DY.current },
-          CK: { ...prev.CK, current: s.validity_ck ?? prev.CK.current },
-          RENTAL: { ...prev.RENTAL, current: s.validity_rental ?? prev.RENTAL.current },
+          SNK: normalizeValidityCarrier({ ...prev.SNK, current: s.validity_snk ?? prev.SNK?.current }),
+          DY: normalizeValidityCarrier({ ...prev.DY, current: s.validity_dy ?? prev.DY?.current }),
+          CK: normalizeValidityCarrier({ ...prev.CK, current: s.validity_ck ?? prev.CK?.current }),
+          RENTAL: normalizeValidityCarrier({ ...prev.RENTAL, current: s.validity_rental ?? prev.RENTAL?.current }),
         }));
       }
       if (s.carrier_rates_json) {
@@ -1377,49 +1520,35 @@ export default function App() {
     if (currentNoticePopup) setDismissedNotices(prev => new Set([...prev, currentNoticePopup.i]));
   };
 
-  const saveNoticesOnly = async () => {
-    try {
-      await saveNoticeSettings();
-      setSaveMsg("저장 완료!");
-      setTimeout(() => setSaveMsg(""), 2000);
-    } catch(e) { setSaveMsg("저장 실패: " + e.message); }
-  };
+  const saveNoticesOnly = () => runSave("공지", () => saveNoticeSettings());
 
-  const saveCarrierPricing = async () => {
-    try {
-      await Promise.all([
-        saveSetting("carrier_rates_json", JSON.stringify(carrierRates)),
-        saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
-        saveSetting("pol_costs", JSON.stringify(polCostO)),
-        saveSetting("pol_margins", JSON.stringify(polM)),
-        saveSetting("global_margins", JSON.stringify(margins)),
-        saveSetting("area_margins", JSON.stringify(areaM)),
-        saveSetting("margin_timestamps", JSON.stringify(marginTs)),
-        saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
-        saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
-        saveSetting("validity_info_json", JSON.stringify(validityInfo)),
-      ]);
-      setSaveMsg("저장 완료!");
-      setTimeout(() => setSaveMsg(""), 2000);
-    } catch(e) { setSaveMsg("저장 실패: " + e.message); }
-  };
+  const saveCarrierPricing = () => runSave("선사 운임", async () => {
+    await Promise.all([
+      saveSetting("carrier_rates_json", JSON.stringify(carrierRates)),
+      saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
+      saveSetting("pol_costs", JSON.stringify(polCostO)),
+      saveSetting("pol_margins", JSON.stringify(polM)),
+      saveSetting("global_margins", JSON.stringify(margins)),
+      saveSetting("area_margins", JSON.stringify(areaM)),
+      saveSetting("margin_timestamps", JSON.stringify(marginTs)),
+      saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
+      saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
+      saveSetting("validity_info_json", JSON.stringify(validityInfo)),
+    ]);
+  });
 
-  const saveRentalPricing = async () => {
-    try {
-      await Promise.all([
-        saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
-        saveSetting("rental_global_margins", JSON.stringify(rentalMargins)),
-        saveSetting("rental_area_margins", JSON.stringify(rentalAreaM)),
-        saveSetting("rental_pol_margins", JSON.stringify(rentalPolM)),
-        saveSetting("rental_margin_timestamps", JSON.stringify(rentalMarginTs)),
-        saveSetting("rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)),
-        saveSetting("rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)),
-        saveSetting("validity_info_json", JSON.stringify(validityInfo)),
-      ]);
-      setSaveMsg("저장 완료!");
-      setTimeout(() => setSaveMsg(""), 2000);
-    } catch(e) { setSaveMsg("저장 실패: " + e.message); }
-  };
+  const saveRentalPricing = () => runSave("렌탈 운임", async () => {
+    await Promise.all([
+      saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
+      saveSetting("rental_global_margins", JSON.stringify(rentalMargins)),
+      saveSetting("rental_area_margins", JSON.stringify(rentalAreaM)),
+      saveSetting("rental_pol_margins", JSON.stringify(rentalPolM)),
+      saveSetting("rental_margin_timestamps", JSON.stringify(rentalMarginTs)),
+      saveSetting("rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)),
+      saveSetting("rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)),
+      saveSetting("validity_info_json", JSON.stringify(validityInfo)),
+    ]);
+  });
 
   const renderNoticeFile = (fileUrl, title) => {
     if (!fileUrl) return null;
@@ -1435,6 +1564,7 @@ export default function App() {
   // ── CLIENT MANAGEMENT ──
   if (showMgr && isAdmin) return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+      {adminSaveToastEl}
       <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
         <button onClick={()=>setShowMgr(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
         <div style={{fontSize:14,fontWeight:700}}>Client Management</div>
@@ -1509,6 +1639,7 @@ export default function App() {
     const cur = notices[slot] ?? mkNotices()[slot];
     return (
     <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+      {adminSaveToastEl}
       <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
         <button onClick={()=>setShowNoticeAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
         <div style={{fontSize:14,fontWeight:700,color:"#6b21a8"}}>Notice / GRI (최대 3개)</div>
@@ -1562,9 +1693,9 @@ export default function App() {
               <button type="button" onClick={()=>patchNotice(slot,{ fileUrl:"" })} style={{fontSize:12,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
             </div>
           )}
-          <button type="button" onClick={saveNoticesOnly}
-            style={{width:"100%",marginTop:16,padding:"12px",fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:8,cursor:"pointer"}}>
-            {saveMsg || "💾 공지 3개 모두 저장"}
+          <button type="button" onClick={saveNoticesOnly} disabled={saveBusy}
+            style={{width:"100%",marginTop:16,padding:"12px",fontSize:13,fontWeight:700,color:"#fff",background:saveBusy?"#c4b5fd":"#7c3aed",border:"none",borderRadius:8,cursor:saveBusy?"not-allowed":"pointer"}}>
+            {saveBusy ? "저장 중…" : "💾 공지 3개 모두 저장"}
           </button>
         </div>
         {(cur.text || cur.fileUrl) && (
@@ -1630,22 +1761,22 @@ export default function App() {
   );
 
   const getValidityLabel = (cr) => {
-    const info = validityInfo[cr];
-    if (!info) return "";
-    return ratePeriod === "future" ? (info.future || "") : (info.current || "");
+    const period = ratePeriod === "future" ? "future" : "current";
+    return formatValiditySlotLabel(validityInfo[cr]?.[period]);
   };
 
   const ValidityCell = ({carrierKey, compact}) => {
     const label = getValidityLabel(carrierKey);
     if (!label) return <span style={{fontSize:10,color:"#d1d5db"}}>—</span>;
     const isFuture = ratePeriod === "future";
+    const isFn = label === FURTHER_NOTICE_LABEL;
     return (
       <span style={{
         fontSize: compact ? 9 : 10,
         fontWeight: 600,
-        color: isFuture ? "#b45309" : "#166534",
-        background: isFuture ? "#fffbeb" : "#f0fdf4",
-        border: `1px solid ${isFuture ? "#fde68a" : "#bbf7d0"}`,
+        color: isFn ? "#6b7280" : (isFuture ? "#b45309" : "#166534"),
+        background: isFn ? "#f3f4f6" : (isFuture ? "#fffbeb" : "#f0fdf4"),
+        border: `1px solid ${isFn ? "#e5e7eb" : (isFuture ? "#fde68a" : "#bbf7d0")}`,
         padding: compact ? "1px 6px" : "2px 8px",
         borderRadius: 4,
         whiteSpace: "nowrap",
@@ -1668,7 +1799,7 @@ export default function App() {
         ))}
       </div>
       <span style={{fontSize:10,color:ratePeriod==="future"?(accentFuture||"#b45309"):"#9ca3af"}}>
-        {ratePeriod==="current" ? "Validity: Till 날짜 기준" : "Validity: From 날짜 기준"}
+        {ratePeriod==="current" ? "현재 운임 · From / Till" : "향후 운임 · From / Till"}
       </span>
     </div>
   );
@@ -1795,12 +1926,13 @@ export default function App() {
     };
     return (
       <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}} onClick={() => setRentalEditCell(null)}>
+        {adminSaveToastEl}
         <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
           <button onClick={()=>setShowRentalAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
           <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
-          <button type="button" onClick={saveRentalPricing}
-            style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:"#7c3aed",color:"#fff",border:"none",cursor:"pointer"}}>
-            {saveMsg ? saveMsg : "저장"}
+          <button type="button" onClick={saveRentalPricing} disabled={saveBusy}
+            style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#c4b5fd":"#7c3aed",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
+            {saveBusy ? "저장 중…" : "💾 저장"}
           </button>
         </div>
         <div className="carrier-admin-page rental-admin-page" onClick={e => e.stopPropagation()}>
@@ -1814,25 +1946,19 @@ export default function App() {
               </button>
             ))}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10,background:"#fff",border:"1px solid #ddd6fe",borderRadius:10,padding:10}}>
-            <div style={{gridColumn:"1 / -1",display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+          <div style={{marginBottom:10,background:"#fff",border:"1px solid #ddd6fe",borderRadius:10,padding:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
               <Bg k="RENTAL"/><span style={{fontSize:11,fontWeight:700,color:"#5b21b6"}}>{CN_KR.RENTAL} Validity</span>
             </div>
-            <div>
-              <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
-              <ValidityDateInput kind="till" compact value={validityInfo.RENTAL?.current??""}
-                onChange={v=>updateCarrierValidity("RENTAL","current",v)}/>
-            </div>
-            <div>
-              <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
-              <ValidityDateInput kind="from" compact value={validityInfo.RENTAL?.future??""}
-                min={getFromMinDate(validityInfo.RENTAL?.current)}
-                onChange={v=>updateCarrierValidity("RENTAL","future",v)}/>
-            </div>
+            <ValidityPeriodFields carrierKey="RENTAL" period="current" periodLabel="현재 운임" compact
+              validityInfo={validityInfo} onUpdate={updateValiditySlot} />
+            <ValidityPeriodFields carrierKey="RENTAL" period="future" periodLabel="향후 운임" compact
+              validityInfo={validityInfo} onUpdate={updateValiditySlot}
+              futureFromMin={getFutureFromMinDate("RENTAL")} />
           </div>
           <MarginPanel
             onSave={saveRentalPricing}
-            saveMsg={saveMsg}
+            saveBusy={saveBusy}
             filterHint={
               rentalMarginTab === "area" && rentalSelArea ? `운임표: ${rentalSelArea} 지역만 표시` :
               rentalMarginTab === "pol" && rentalSelPol ? `운임표: ${rentalSelPol} 만 표시` :
@@ -2009,12 +2135,13 @@ export default function App() {
     };
     return (
       <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}} onClick={() => setCarrierEditCell(null)}>
+        {adminSaveToastEl}
         <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
           <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
           <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
-          <button type="button" onClick={saveCarrierPricing}
-            style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:"#2563eb",color:"#fff",border:"none",cursor:"pointer"}}>
-            {saveMsg ? saveMsg : "저장"}
+          <button type="button" onClick={saveCarrierPricing} disabled={saveBusy}
+            style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#93c5fd":"#2563eb",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
+            {saveBusy ? "저장 중…" : "💾 저장"}
           </button>
         </div>
         <div className="carrier-admin-page" onClick={e => e.stopPropagation()}>
@@ -2040,7 +2167,7 @@ export default function App() {
           </div>
           <MarginPanel
             onSave={saveCarrierPricing}
-            saveMsg={saveMsg}
+            saveBusy={saveBusy}
             filterHint={
               marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
               marginTab === "pol" && selPol ? `운임표: ${selPol} 만 표시` :
@@ -2055,19 +2182,15 @@ export default function App() {
             polEdit={polEdit} setPolEdit={setPolEdit}
             areas={areas} fData={fData} getM={getM}
           />
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:6,marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:10}}>
-            {CRS.map(k=>(
-              <div key={k} style={{opacity:caCr===k?1:0.45}}>
-                <div style={{display:"flex",alignItems:"center",gap:4,marginBottom:4}}><Bg k={k}/><span style={{fontSize:10,fontWeight:700}}>{CN_KR[k]}</span></div>
-                <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
-                <ValidityDateInput kind="till" compact value={validityInfo[k]?.current??""}
-                  onChange={v=>updateCarrierValidity(k,"current",v)}/>
-                <div style={{fontSize:9,color:"#b45309",marginBottom:2,marginTop:4}}>From</div>
-                <ValidityDateInput kind="from" compact value={validityInfo[k]?.future??""}
-                  min={getFromMinDate(validityInfo[k]?.current)}
-                  onChange={v=>updateCarrierValidity(k,"future",v)}/>
-              </div>
-            ))}
+          <div style={{marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:10}}>
+            <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
+              <Bg k={caCr}/><span style={{fontSize:11,fontWeight:700}}>{CN_KR[caCr]} Validity</span>
+            </div>
+            <ValidityPeriodFields carrierKey={caCr} period="current" periodLabel="현재 운임" compact
+              validityInfo={validityInfo} onUpdate={updateValiditySlot} />
+            <ValidityPeriodFields carrierKey={caCr} period="future" periodLabel="향후 운임" compact
+              validityInfo={validityInfo} onUpdate={updateValiditySlot}
+              futureFromMin={getFutureFromMinDate(caCr)} />
           </div>
           <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
             셀 클릭 → 매입·매출 조정 · {gridFilterLabel}
@@ -2160,11 +2283,11 @@ export default function App() {
                         <Bg k={k}/><span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[k]}</span>
                         <ValidityCell carrierKey={k} compact/>
                       </div>
-                      <div style={{fontSize:9,fontWeight:700,color:"#166534",marginBottom:4}}>현재 운임 · {validityInfo[k]?.current||"Till"}</div>
+                      <div style={{fontSize:9,fontWeight:700,color:"#166534",marginBottom:4}}>현재 운임 · {formatValiditySlotLabel(validityInfo[k]?.current) || "—"}</div>
                       <AdminPriceCols d20={cd20} d40={cd40} editable
                         onCost20={v=>applyCarrierRate(row.pol,k,t20,v,"current")}
                         onCost40={v=>applyCarrierRate(row.pol,k,t40,v,"current")}/>
-                      <div style={{fontSize:9,fontWeight:700,color:"#b45309",margin:"10px 0 4px"}}>향후 운임 · {validityInfo[k]?.future||"From"}</div>
+                      <div style={{fontSize:9,fontWeight:700,color:"#b45309",margin:"10px 0 4px"}}>향후 운임 · {formatValiditySlotLabel(validityInfo[k]?.future) || "—"}</div>
                       <AdminPriceCols d20={fd20} d40={fd40} editable
                         onCost20={v=>applyCarrierRate(row.pol,k,t20,v,"future")}
                         onCost40={v=>applyCarrierRate(row.pol,k,t40,v,"future")}/>
@@ -2415,6 +2538,7 @@ export default function App() {
   // ── MAIN RENDER ──
   return (
     <div className={adVisible ? "app-root app-has-fixed-ad" : "app-root"} style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+      {adminSaveToastEl}
 
       {/* HEADER */}
       <div style={{position:"sticky",top:0,zIndex:30,background:"#fff",borderBottom:"1px solid #e5e7eb",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
@@ -2462,48 +2586,32 @@ export default function App() {
           </div>
           <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:4}}>VALIDITY (선사 · Rental)</div>
-            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>Till / From 날짜 · 매입·매출·마진은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴</div>
+            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>현재·향후 각각 From/Till · Further notice · 매입·마진은 <b>선사운임</b> · <b>렌탈운임</b></div>
             {CRS.map(k=>(
               <div key={k} style={{marginBottom:8,padding:10,background:"#fff",border:"1px solid #bbf7d0",borderRadius:8}}>
                 <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
                   <Bg k={k}/><span style={{fontSize:12,fontWeight:700,color:"#374151"}}>{CN[k]}</span>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                  <div>
-                    <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
-                    <ValidityDateInput kind="till" value={validityInfo[k]?.current??""}
-                      onChange={v=>updateCarrierValidity(k,"current",v)}/>
-                  </div>
-                  <div>
-                    <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
-                    <ValidityDateInput kind="from" value={validityInfo[k]?.future??""}
-                      min={getFromMinDate(validityInfo[k]?.current)}
-                      onChange={v=>updateCarrierValidity(k,"future",v)}/>
-                  </div>
-                </div>
+                <ValidityPeriodFields carrierKey={k} period="current" periodLabel="현재 운임"
+                  validityInfo={validityInfo} onUpdate={updateValiditySlot} />
+                <ValidityPeriodFields carrierKey={k} period="future" periodLabel="향후 운임"
+                  validityInfo={validityInfo} onUpdate={updateValiditySlot}
+                  futureFromMin={getFutureFromMinDate(k)} />
               </div>
             ))}
             <div style={{marginBottom:8,padding:10,background:"#faf5ff",border:"1px solid #ddd6fe",borderRadius:8}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
                 <Bg k="RENTAL"/><span style={{fontSize:12,fontWeight:700,color:"#5b21b6"}}>{CN.RENTAL}</span>
               </div>
-              <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-                <div>
-                  <div style={{fontSize:9,color:"#166534",marginBottom:2}}>Till</div>
-                  <ValidityDateInput kind="till" value={validityInfo.RENTAL?.current??""}
-                    onChange={v=>updateCarrierValidity("RENTAL","current",v)}/>
-                </div>
-                <div>
-                  <div style={{fontSize:9,color:"#b45309",marginBottom:2}}>From</div>
-                  <ValidityDateInput kind="from" value={validityInfo.RENTAL?.future??""}
-                    min={getFromMinDate(validityInfo.RENTAL?.current)}
-                    onChange={v=>updateCarrierValidity("RENTAL","future",v)}/>
-                </div>
-              </div>
+              <ValidityPeriodFields carrierKey="RENTAL" period="current" periodLabel="현재 운임"
+                validityInfo={validityInfo} onUpdate={updateValiditySlot} />
+              <ValidityPeriodFields carrierKey="RENTAL" period="future" periodLabel="향후 운임"
+                validityInfo={validityInfo} onUpdate={updateValiditySlot}
+                futureFromMin={getFutureFromMinDate("RENTAL")} />
             </div>
-            <button onClick={saveValidityOnly}
-              style={{width:"100%",marginTop:4,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#16a34a",border:"none",borderRadius:6,cursor:"pointer"}}>
-              {saveMsg || "💾 Validity 저장"}
+            <button type="button" onClick={saveValidityOnly} disabled={saveBusy}
+              style={{width:"100%",marginTop:4,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:saveBusy?"#86efac":"#16a34a",border:"none",borderRadius:6,cursor:saveBusy?"not-allowed":"pointer"}}>
+              {saveBusy ? "저장 중…" : "💾 Validity 저장"}
             </button>
           </div>
           <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:12,marginBottom:8}}>
@@ -2577,9 +2685,9 @@ export default function App() {
                       <img src={cur.imageUrl} alt="" style={{width:"100%",maxHeight:80,objectFit:"contain",borderRadius:6,background:"#f8fafc"}}/>
                     </div>
                   )}
-                  <button type="button" onClick={() => persistAdBanners(adBanners)}
-                    style={{width:"100%",marginTop:12,padding:"10px",fontSize:12,fontWeight:700,color:"#fff",background:"#ea580c",border:"none",borderRadius:8,cursor:"pointer"}}>
-                    💾 광고 3개 모두 저장
+                  <button type="button" onClick={() => persistAdBanners(adBanners)} disabled={saveBusy}
+                    style={{width:"100%",marginTop:12,padding:"10px",fontSize:12,fontWeight:700,color:"#fff",background:saveBusy?"#fdba74":"#ea580c",border:"none",borderRadius:8,cursor:saveBusy?"not-allowed":"pointer"}}>
+                    {saveBusy ? "저장 중…" : "💾 광고 3개 모두 저장"}
                   </button>
                 </>
               );
