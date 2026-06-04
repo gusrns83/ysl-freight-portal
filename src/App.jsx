@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v8"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v9"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -1483,15 +1483,14 @@ export default function App() {
   };
 
   const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json", "carrier_rates_json"]);
-  const SAVE_GAP_MS = (key) => (HEAVY_SETTING_KEYS.has(key) ? 400 : 120);
 
-  const saveOneSettingWithRetry = async (key, value) => {
-    const body = { key, value: String(value) };
+  const postSettingsRows = async (rows, label) => {
+    if (!rows.length) return;
     let lastErr;
-    for (let attempt = 0; attempt < 5; attempt++) {
-      if (attempt > 0) await new Promise(r => setTimeout(r, 700 * attempt));
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 450 * attempt));
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), 90000);
+      const timer = setTimeout(() => ctrl.abort(), rows.length > 1 ? 45000 : 60000);
       try {
         const res = await fetch(`${SB_URL}/rest/v1/settings`, {
           method: "POST",
@@ -1502,7 +1501,7 @@ export default function App() {
             "Content-Type": "application/json",
             "Prefer": "resolution=merge-duplicates,return=minimal",
           },
-          body: JSON.stringify(body),
+          body: JSON.stringify(rows),
         });
         clearTimeout(timer);
         if (!res.ok) throw new Error(await res.text());
@@ -1512,32 +1511,47 @@ export default function App() {
         lastErr = e;
         const msg = String(e.message || e);
         if (!msg.includes("fetch") && !msg.includes("Failed") && !msg.includes("abort")) {
-          throw new Error(`${key}: ${msg}`);
+          throw new Error(`${label}: ${msg}`);
         }
       }
     }
-    throw new Error(`Supabase 연결 실패 (${key}) — ${lastErr?.message || "Failed to fetch"}`);
+    throw new Error(`Supabase 연결 실패 (${label}) — ${lastErr?.message || "Failed to fetch"}`);
   };
 
-  const saveSettingsBatch = async (entries) => {
-    for (const [key, value] of entries) {
-      await saveOneSettingWithRetry(key, value);
-      if (entries.length > 1) await new Promise(r => setTimeout(r, SAVE_GAP_MS(key)));
+  const saveOneSettingWithRetry = async (key, value) => {
+    await postSettingsRows([{ key, value: String(value) }], key);
+  };
+
+  const saveSettingsBatchPost = async (entries) => {
+    const rows = entries.map(([key, value]) => ({ key, value: String(value) }));
+    const label = rows.map(r => r.key).join(", ");
+    await postSettingsRows(rows, label);
+  };
+
+  /** 작은 설정은 한 번에, 큰 JSON(pol_costs 등)만 개별 전송 */
+  const saveSettingsEntries = async (entries) => {
+    const light = [];
+    const flushLight = async () => {
+      if (!light.length) return;
+      const chunk = light.splice(0, light.length);
+      await saveSettingsBatchPost(chunk);
+    };
+    for (const entry of entries) {
+      if (HEAVY_SETTING_KEYS.has(entry[0])) {
+        await flushLight();
+        await saveOneSettingWithRetry(entry[0], entry[1]);
+        await new Promise(r => setTimeout(r, 120));
+      } else {
+        light.push(entry);
+      }
     }
+    await flushLight();
   };
 
   const enqueueSave = (task) => {
     const job = saveQueueRef.current.then(task);
     saveQueueRef.current = job.catch(() => {});
     return job;
-  };
-
-  /** 큰 JSON은 키별 1회 + 간격 */
-  const saveSettingsEntries = async (entries) => {
-    for (const entry of entries) {
-      await saveOneSettingWithRetry(entry[0], entry[1]);
-      await new Promise(r => setTimeout(r, SAVE_GAP_MS(entry[0])));
-    }
   };
 
   const flashSaveFeedback = (type, message) => {
