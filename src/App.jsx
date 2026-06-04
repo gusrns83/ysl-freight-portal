@@ -936,51 +936,75 @@ export default function App() {
   };
 
   const saveSetting = async (key, value) => {
-    const res = await fetch(`${SB_URL}/rest/v1/settings`, {
-      method: "POST",
-      headers: {
-        "apikey": SB_KEY,
-        "Authorization": `Bearer ${SB_KEY}`,
-        "Content-Type": "application/json",
-        "Prefer": "resolution=merge-duplicates,return=minimal",
-      },
-      body: JSON.stringify({ key, value: String(value) }),
-    });
-    if (!res.ok) throw new Error(await res.text());
+    let res;
+    try {
+      res = await fetch(`${SB_URL}/rest/v1/settings`, {
+        method: "POST",
+        headers: {
+          "apikey": SB_KEY,
+          "Authorization": `Bearer ${SB_KEY}`,
+          "Content-Type": "application/json",
+          "Prefer": "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify({ key, value: String(value) }),
+      });
+    } catch (e) {
+      throw new Error(`Supabase 연결 실패 (${key}) — ${e.message}`);
+    }
+    if (!res.ok) throw new Error(`${key}: ${await res.text()}`);
+  };
+
+  const saveValidityOnly = async () => {
+    try {
+      await saveSetting("validity_info_json", JSON.stringify(validityInfo));
+      await saveSetting("validity_snk", validityInfo.SNK?.current ?? "");
+      await saveSetting("validity_dy", validityInfo.DY?.current ?? "");
+      await saveSetting("validity_ck", validityInfo.CK?.current ?? "");
+      await saveSetting("validity_rental", validityInfo.RENTAL?.current ?? "");
+      setSaveMsg("Validity 저장 완료!");
+      setTimeout(() => setSaveMsg(""), 2000);
+    } catch (e) {
+      setSaveMsg("저장 실패: " + e.message);
+    }
   };
 
   const saveAllSettings = async () => {
+    const entries = [
+      ["notices_json", JSON.stringify(notices)],
+      ["notice_text", notices[0].text],
+      ["notice_on", notices[0].on],
+      ["notice_file_url", notices[0].fileUrl],
+      ["validity_info_json", JSON.stringify(validityInfo)],
+      ["carrier_rates_json", JSON.stringify(carrierRates)],
+      ["rental_rates_json", JSON.stringify(rentalRates)],
+      ["validity_snk", validityInfo.SNK?.current ?? ""],
+      ["validity_dy", validityInfo.DY?.current ?? ""],
+      ["validity_ck", validityInfo.CK?.current ?? ""],
+      ["validity_rental", validityInfo.RENTAL?.current ?? ""],
+      ["global_margins", JSON.stringify(margins)],
+      ["area_margins", JSON.stringify(areaM)],
+      ["pol_margins", JSON.stringify(polM)],
+      ["margin_timestamps", JSON.stringify(marginTs)],
+      ["area_margin_timestamps", JSON.stringify(areaTs)],
+      ["pol_margin_timestamps", JSON.stringify(polTs)],
+      ["rental_global_margins", JSON.stringify(rentalMargins)],
+      ["rental_area_margins", JSON.stringify(rentalAreaM)],
+      ["rental_pol_margins", JSON.stringify(rentalPolM)],
+      ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
+      ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
+      ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
+      ["pol_costs", JSON.stringify(polCostO)],
+      ["ad_banners_json", JSON.stringify(adBanners)],
+    ];
     try {
-      await Promise.all([
-        saveSetting("notices_json", JSON.stringify(notices)),
-        saveSetting("notice_text", notices[0].text),
-        saveSetting("notice_on", notices[0].on),
-        saveSetting("notice_file_url", notices[0].fileUrl),
-        saveSetting("validity_info_json", JSON.stringify(validityInfo)),
-        saveSetting("carrier_rates_json", JSON.stringify(carrierRates)),
-        saveSetting("rental_rates_json", JSON.stringify(rentalRates)),
-        saveSetting("validity_snk", validityInfo.SNK?.current ?? ""),
-        saveSetting("validity_dy", validityInfo.DY?.current ?? ""),
-        saveSetting("validity_ck", validityInfo.CK?.current ?? ""),
-        saveSetting("validity_rental", validityInfo.RENTAL?.current ?? ""),
-        saveSetting("global_margins", JSON.stringify(margins)),
-        saveSetting("area_margins", JSON.stringify(areaM)),
-        saveSetting("pol_margins", JSON.stringify(polM)),
-        saveSetting("margin_timestamps", JSON.stringify(marginTs)),
-        saveSetting("area_margin_timestamps", JSON.stringify(areaTs)),
-        saveSetting("pol_margin_timestamps", JSON.stringify(polTs)),
-        saveSetting("rental_global_margins", JSON.stringify(rentalMargins)),
-        saveSetting("rental_area_margins", JSON.stringify(rentalAreaM)),
-        saveSetting("rental_pol_margins", JSON.stringify(rentalPolM)),
-        saveSetting("rental_margin_timestamps", JSON.stringify(rentalMarginTs)),
-        saveSetting("rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)),
-        saveSetting("rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)),
-        saveSetting("pol_costs", JSON.stringify(polCostO)),
-        saveSetting("ad_banners_json", JSON.stringify(adBanners)),
-      ]);
-      setSaveMsg("저장 완료!");
+      for (const [key, value] of entries) {
+        await saveSetting(key, value);
+      }
+      setSaveMsg("전체 저장 완료!");
       setTimeout(() => setSaveMsg(""), 2000);
-    } catch(e) { setSaveMsg("저장 실패: " + e.message); }
+    } catch (e) {
+      setSaveMsg("저장 실패: " + e.message);
+    }
   };
 
   useEffect(() => {
@@ -2477,9 +2501,9 @@ export default function App() {
                 </div>
               </div>
             </div>
-            <button onClick={saveAllSettings}
+            <button onClick={saveValidityOnly}
               style={{width:"100%",marginTop:4,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:"#16a34a",border:"none",borderRadius:6,cursor:"pointer"}}>
-              {saveMsg || "💾 저장"}
+              {saveMsg || "💾 Validity 저장"}
             </button>
           </div>
           <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:12,marginBottom:8}}>
