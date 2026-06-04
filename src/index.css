@@ -121,6 +121,42 @@
 .validity-date-till.validity-date-compact {
   margin-bottom: 0;
 }
+.validity-date-inp:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  background: #f3f4f6;
+}
+
+.admin-save-toast {
+  position: fixed;
+  bottom: 88px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 200;
+  max-width: min(92vw, 420px);
+  padding: 12px 20px;
+  border-radius: 10px;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: center;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  pointer-events: none;
+}
+.admin-save-toast--ok {
+  background: #dcfce7;
+  color: #166534;
+  border: 2px solid #22c55e;
+}
+.admin-save-toast--err {
+  background: #fee2e2;
+  color: #991b1b;
+  border: 2px solid #ef4444;
+}
+.admin-save-toast--busy {
+  background: #eff6ff;
+  color: #1d4ed8;
+  border: 2px solid #3b82f6;
+}
 
 .carrier-grid-wrap {
   overflow-x: auto;
