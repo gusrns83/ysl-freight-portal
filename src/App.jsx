@@ -5,7 +5,9 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v4"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v5"; // Admin 저장 로직 버전 (배포 확인용)
+const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
+const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
 const ADMIN_SESSION_KEY = "ysl_admin_session";
 const NOTICE_COUNT = 3;
@@ -1673,6 +1675,7 @@ export default function App() {
     const raw = String(value).trim();
     const sk = sz(si);
     const p = period === "future" ? "future" : "current";
+    clearRentCostOverrides(PM[rPol] || null, city);
     setRentalRates(prev => {
       const polBucket = { current: { ...(prev[rPol]?.current || {}) }, future: { ...(prev[rPol]?.future || {}) } };
       const periodBucket = { ...polBucket[p] };
@@ -1689,8 +1692,25 @@ export default function App() {
     });
   };
 
+  const clearRentCostOverrides = (freightPol, city = null) => {
+    if (!freightPol) return;
+    setPolCostO(p => {
+      const rent = p[freightPol]?.rent;
+      if (!rent) return p;
+      const next = { ...p, [freightPol]: { ...p[freightPol], rent: { ...rent } } };
+      if (city) {
+        delete next[freightPol].rent[city];
+        if (Object.keys(next[freightPol].rent).length === 0) delete next[freightPol].rent;
+      } else {
+        delete next[freightPol].rent;
+      }
+      return next;
+    });
+  };
+
   const applyCarrierRate = (pol, cr, t, value, period = "current") => {
     const raw = String(value).trim();
+    if (t === "soc20" || t === "soc40") clearRentCostOverrides(pol);
     setPolCostO(p => {
       const prev = { ...(p[pol]?.carrier?.[cr] || {}) };
       const bucket = { ...(prev[period] || {}) };
@@ -1737,19 +1757,54 @@ export default function App() {
       },
     }));
   };
-  const getRentCityCost = (freightPol, rPol, city, rRow, si) => {
-    const ov = polCostO[freightPol]?.rent?.[city]?.[sz(si)];
-    if (ov != null) return ov;
-    const fp = PM[rPol], fr = fp ? fMap[fp] : null;
-    const t = si === 0 ? "soc20" : "soc40";
+  const getRentCombinedCost = (freightPol, rPol, city, si, carrierCr = null) => {
+    const fp = PM[rPol] || freightPol;
+    const fr = fMap[fp];
+    const t = rentSocType(si);
     const rental = getRentalBase(rPol, city, si);
-    const b = bRent(rPol, city, rRow, si);
-    if (!fr || !b.cr) return rental ?? null;
-    const soc = getCarrierRate(fr, b.cr, t);
-    return soc != null && rental != null ? soc + rental : null;
+    if (!fr) return rental ?? null;
+    if (carrierCr) {
+      const soc = getCarrierRate(fr, carrierCr, t);
+      return soc != null && rental != null ? soc + rental : null;
+    }
+    let best = null;
+    CRS.forEach(k => {
+      const soc = getCarrierRate(fr, k, t);
+      if (soc == null || rental == null) return;
+      const cost = soc + rental;
+      if (best === null || cost < best) best = cost;
+    });
+    return best;
   };
+
+  const getRentCityCost = (freightPol, rPol, city, rRow, si) => {
+    const manual = polCostO[freightPol]?.rent?.[city]?.[sz(si)];
+    if (manual != null && manual !== "") return manual;
+    return getRentCombinedCost(freightPol, rPol, city, si);
+  };
+
+  const getRentSellMargin = (freightPol, rPol, area, si) => {
+    const fp = PM[rPol] || freightPol;
+    if (!fp || !area) return 0;
+    return getM(fp, area, rentSocType(si)) + getRentalM(fp, area, rentRentalType(si));
+  };
+
   const applyRentCityCost = (freightPol, city, si, value) => {
-    const v = parseInt(value, 10);
+    const raw = String(value).trim();
+    if (raw === "") {
+      setPolCostO(p => {
+        const rent = { ...(p[freightPol]?.rent || {}) };
+        const cityBucket = { ...(rent[city] || {}) };
+        delete cityBucket[sz(si)];
+        const next = { ...p, [freightPol]: { ...(p[freightPol] || {}), rent: { ...rent } } };
+        if (Object.keys(cityBucket).length === 0) delete next[freightPol].rent[city];
+        else next[freightPol].rent[city] = cityBucket;
+        if (Object.keys(next[freightPol].rent || {}).length === 0) delete next[freightPol].rent;
+        return next;
+      });
+      return;
+    }
+    const v = parseInt(raw, 10);
     if (!Number.isFinite(v)) return;
     setPolCostO(p => ({
       ...p,
@@ -1808,13 +1863,13 @@ export default function App() {
     return CRS.map(k => {
       const s20 = getCarrierRate(fr, k, "soc20");
       const s40 = getCarrierRate(fr, k, "soc40");
-      const m20 = getRentalM(fp, fr.area, "r20");
-      const m40 = getRentalM(fp, fr.area, "r40");
+      const m20 = getM(fp, fr.area, "soc20") + getRentalM(fp, fr.area, "r20");
+      const m40 = getM(fp, fr.area, "soc40") + getRentalM(fp, fr.area, "r40");
       const cost20 = s20 != null && r20 != null ? s20 + r20 : null;
       const cost40 = s40 != null && r40 != null ? s40 + r40 : null;
       return {
         k,
-        cost20, cost40, m20, m40,
+        cost20, cost40, soc20: s20, soc40: s40, rent20: r20, rent40: r40, m20, m40,
         t20: cost20 != null ? cost20 + m20 : null,
         t40: cost40 != null ? cost40 + m40 : null,
       };
@@ -1830,11 +1885,12 @@ export default function App() {
     return { val: b, cr };
   };
   const rentDetail = (rPol, city, rRow, si) => {
-    const fp = PM[rPol], fr = fp ? fMap[fp] : null;
-    const t = rentalType(si);
-    const margin = fr ? getRentalM(fp, fr.area, t) : 0;
+    const fp = PM[rPol];
+    const freightPol = fp || rPol;
+    const fr = fp ? fMap[fp] : null;
+    const margin = fr ? getRentSellMargin(freightPol, rPol, fr.area, si) : 0;
     const b = bRent(rPol, city, rRow, si);
-    const cost = getRentCityCost(fp || rPol, rPol, city, rRow, si);
+    const cost = getRentCityCost(freightPol, rPol, city, rRow, si);
     return mkPrice(cost, margin, b.cr);
   };
   const oceanDetail = (row, t) => {
@@ -2855,18 +2911,31 @@ export default function App() {
                         :carriers.map(c=>{
                         const cdC20=mkPrice(c.cost20,c.m20,c.k);
                         const cdC40=mkPrice(c.cost40,c.m40,c.k);
+                        const socC20=mkPrice(c.soc20,getM(fp,fr.area,"soc20"),c.k);
+                        const socC40=mkPrice(c.soc40,getM(fp,fr.area,"soc40"),c.k);
+                        const rentC20=mkPrice(c.rent20,getRentalM(fp,fr.area,"r20"),c.k);
+                        const rentC40=mkPrice(c.rent40,getRentalM(fp,fr.area,"r40"),c.k);
                         return (
-                        <div key={c.k} style={{display:"flex",flexWrap:"wrap",alignItems:"flex-start",padding:"8px 12px 8px 20px",borderBottom:"1px solid #ede9fe",gap:6}}>
-                          <div style={{display:"flex",alignItems:"center",gap:8,flex:1,minWidth:0}}>
+                        <div key={c.k} style={{padding:"8px 12px 8px 20px",borderBottom:"1px solid #ede9fe"}}>
+                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
                             <Bg k={c.k}/>
-                            <span style={{fontSize:11,color:"#6b7280"}}>{CN[c.k]}</span>
+                            <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[c.k]}</span>
                             <ValidityCell carrierKey={c.k} compact/>
                           </div>
-                          {isAdmin
-                            ? <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable
+                          {isAdmin ? (
+                            <>
+                              <div style={{fontSize:9,fontWeight:700,color:"#1e40af",marginBottom:4}}>SOC 해상 매입</div>
+                              <AdminPriceCols d20={socC20} d40={socC40} editable
                                 onCost20={v=>fp&&applyCarrierRate(fp,c.k,"soc20",v)}
                                 onCost40={v=>fp&&applyCarrierRate(fp,c.k,"soc40",v)}/>
-                            : <>
+                              <div style={{fontSize:9,fontWeight:700,color:"#7c3aed",margin:"8px 0 4px"}}>렌탈 매입</div>
+                              <AdminPriceCols d20={rentC20} d40={rentC40} editable
+                                onCost20={v=>applyRentalRate(row.pol,city,0,v)}
+                                onCost40={v=>applyRentalRate(row.pol,city,1,v)}/>
+                              <div style={{fontSize:9,color:"#6b7280",marginTop:6}}>합계 매출 (SOC+렌탈+마진)</div>
+                              <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable={false}/>
+                            </>
+                          ) : <>
                           <div style={{textAlign:"right",marginRight:20,cursor:c.t20?"pointer":"default"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
                             <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
                             <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t20?"underline":"none"}}>{c.t20?`$${n(c.t20)}`:"—"}</div>
