@@ -556,7 +556,7 @@ const buildLegacyMarginTimestamps = (areaM, polM, types = RATE_TYPES) => {
 };
 
 function MarginPanel({
-  onSave, filterHint, saveBusy,
+  filterHint,
   marginTab, setMarginTab,
   margins, applyGlobalMargin,
   selArea, setSelArea, areaM, applyAreaMarginType, applyAreaMargins,
@@ -653,10 +653,6 @@ function MarginPanel({
           </>}
         </div>
       )}
-      <button type="button" onClick={onSave} disabled={saveBusy}
-        style={{width:"100%",marginTop:10,padding:"8px",fontSize:11,fontWeight:700,color:"#fff",background:saveBusy?"#d1d5db":"#d97706",border:"none",borderRadius:6,cursor:saveBusy?"not-allowed":"pointer"}}>
-        {saveBusy ? "저장 중…" : "💾 마진·운임 저장"}
-      </button>
     </div>
   );
 }
@@ -1976,8 +1972,6 @@ export default function App() {
               futureFromMin={getFutureFromMinDate("RENTAL")} />
           </div>
           <MarginPanel
-            onSave={saveRentalPricing}
-            saveBusy={saveBusy}
             filterHint={
               rentalMarginTab === "area" && rentalSelArea ? `운임표: ${rentalSelArea} 지역만 표시` :
               rentalMarginTab === "pol" && rentalSelPol ? `운임표: ${rentalSelPol} 만 표시` :
@@ -2188,8 +2182,6 @@ export default function App() {
             ))}
           </div>
           <MarginPanel
-            onSave={saveCarrierPricing}
-            saveBusy={saveBusy}
             filterHint={
               marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
               marginTab === "pol" && selPol ? `운임표: ${selPol} 만 표시` :
