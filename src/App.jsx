@@ -5,10 +5,24 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v5"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v8"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
+
+const readStoredPricingCache = () => {
+  try {
+    const raw = localStorage.getItem(PRICING_CACHE_KEY);
+    if (!raw) return null;
+    const cache = JSON.parse(raw);
+    return cache?.v === 1 ? cache : null;
+  } catch {
+    return null;
+  }
+};
+
+const DEFAULT_MARGINS = { coc20: 80, coc40: 100, soc20: 80, soc40: 100 };
+
 const ADMIN_SESSION_KEY = "ysl_admin_session";
 const NOTICE_COUNT = 3;
 const mkNotices = () => Array.from({ length: NOTICE_COUNT }, (_, i) => ({
@@ -571,6 +585,163 @@ const buildLegacyMarginTimestamps = (areaM, polM, types = RATE_TYPES) => {
   return { marginTs, areaTs, polTs };
 };
 
+const parsePricingFromSettings = (s) => {
+  const snap = {
+    validityInfo: defaultValidityInfo(),
+    carrierRates: defaultCarrierRates(),
+    rentalRates: buildDefaultRentalRates(),
+    margins: { ...DEFAULT_MARGINS },
+    areaM: {},
+    polM: {},
+    marginTs: Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])),
+    areaTs: {},
+    polTs: {},
+    rentalMargins: defaultRentalMargins(),
+    rentalAreaM: {},
+    rentalPolM: {},
+    rentalMarginTs: Object.fromEntries(RENTAL_RATE_TYPES.map(t => [t, marginNowTs()])),
+    rentalAreaTs: {},
+    rentalPolTs: {},
+    polCostO: {},
+  };
+
+  if (s.validity_info_json) {
+    try {
+      const parsed = JSON.parse(s.validity_info_json);
+      if (parsed && typeof parsed === "object") {
+        snap.validityInfo = Object.fromEntries(
+          VALIDITY_KEYS.map(k => [k, normalizeValidityCarrier({ ...defaultValidityInfo()[k], ...(parsed[k] || {}) })])
+        );
+      }
+    } catch (e) {}
+  } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined || s.validity_rental !== undefined) {
+    snap.validityInfo = {
+      SNK: normalizeValidityCarrier({ ...snap.validityInfo.SNK, current: s.validity_snk ?? snap.validityInfo.SNK?.current }),
+      DY: normalizeValidityCarrier({ ...snap.validityInfo.DY, current: s.validity_dy ?? snap.validityInfo.DY?.current }),
+      CK: normalizeValidityCarrier({ ...snap.validityInfo.CK, current: s.validity_ck ?? snap.validityInfo.CK?.current }),
+      RENTAL: normalizeValidityCarrier({ ...snap.validityInfo.RENTAL, current: s.validity_rental ?? snap.validityInfo.RENTAL?.current }),
+    };
+  }
+  if (s.carrier_rates_json) {
+    try {
+      const parsed = JSON.parse(s.carrier_rates_json);
+      if (parsed && typeof parsed === "object") {
+        snap.carrierRates = Object.fromEntries(
+          CRS.map(k => [k, {
+            current: { ...defaultCarrierRates()[k].current, ...(parsed[k]?.current || {}) },
+            future: { ...defaultCarrierRates()[k].future, ...(parsed[k]?.future || {}) },
+          }])
+        );
+      }
+    } catch (e) {}
+  }
+  if (s.rental_rates_json) {
+    try {
+      const parsed = JSON.parse(s.rental_rates_json);
+      if (parsed && typeof parsed === "object") {
+        snap.rentalRates = mergeRentalRates(buildDefaultRentalRates(), parsed);
+      }
+    } catch (e) {}
+  }
+  let loadedAreaM = {};
+  let loadedPolM = {};
+  if (s.global_margins) { try { snap.margins = JSON.parse(s.global_margins); } catch (e) {} }
+  if (s.area_margins) { try { loadedAreaM = JSON.parse(s.area_margins); snap.areaM = loadedAreaM; } catch (e) {} }
+  if (s.pol_margins) { try { loadedPolM = JSON.parse(s.pol_margins); snap.polM = loadedPolM; } catch (e) {} }
+  if (s.margin_timestamps) {
+    try { snap.marginTs = JSON.parse(s.margin_timestamps); } catch (e) {}
+  } else {
+    snap.marginTs = buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).marginTs;
+  }
+  if (s.area_margin_timestamps) {
+    try { snap.areaTs = JSON.parse(s.area_margin_timestamps); } catch (e) {}
+  } else {
+    snap.areaTs = buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).areaTs;
+  }
+  if (s.pol_margin_timestamps) {
+    try { snap.polTs = JSON.parse(s.pol_margin_timestamps); } catch (e) {}
+  } else {
+    snap.polTs = buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).polTs;
+  }
+  let loadedRentalAreaM = {};
+  let loadedRentalPolM = {};
+  if (s.rental_global_margins) { try { snap.rentalMargins = JSON.parse(s.rental_global_margins); } catch (e) {} }
+  if (s.rental_area_margins) { try { loadedRentalAreaM = JSON.parse(s.rental_area_margins); snap.rentalAreaM = loadedRentalAreaM; } catch (e) {} }
+  if (s.rental_pol_margins) { try { loadedRentalPolM = JSON.parse(s.rental_pol_margins); snap.rentalPolM = loadedRentalPolM; } catch (e) {} }
+  if (s.rental_margin_timestamps) {
+    try { snap.rentalMarginTs = JSON.parse(s.rental_margin_timestamps); } catch (e) {}
+  } else {
+    snap.rentalMarginTs = buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).marginTs;
+  }
+  if (s.rental_area_margin_timestamps) {
+    try { snap.rentalAreaTs = JSON.parse(s.rental_area_margin_timestamps); } catch (e) {}
+  } else {
+    snap.rentalAreaTs = buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).areaTs;
+  }
+  if (s.rental_pol_margin_timestamps) {
+    try { snap.rentalPolTs = JSON.parse(s.rental_pol_margin_timestamps); } catch (e) {}
+  } else {
+    snap.rentalPolTs = buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).polTs;
+  }
+  if (s.pol_costs != null && s.pol_costs !== "") {
+    try { snap.polCostO = JSON.parse(s.pol_costs); } catch (e) {}
+  }
+  return snap;
+};
+
+const pricingCacheFromSnapshot = (snap) => ({
+  v: 1,
+  polCostO: snap.polCostO,
+  margins: snap.margins,
+  areaM: snap.areaM,
+  polM: snap.polM,
+  marginTs: snap.marginTs,
+  areaTs: snap.areaTs,
+  polTs: snap.polTs,
+  carrierRates: snap.carrierRates,
+  validityInfo: snap.validityInfo,
+  rentalRates: snap.rentalRates,
+  rentalMargins: snap.rentalMargins,
+  rentalAreaM: snap.rentalAreaM,
+  rentalPolM: snap.rentalPolM,
+  rentalMarginTs: snap.rentalMarginTs,
+  rentalAreaTs: snap.rentalAreaTs,
+  rentalPolTs: snap.rentalPolTs,
+});
+
+const bootPricingFromCache = () => {
+  const cache = readStoredPricingCache();
+  if (!cache) return null;
+  return {
+    polCostO: cache.polCostO ?? {},
+    margins: cache.margins ?? { ...DEFAULT_MARGINS },
+    areaM: cache.areaM ?? {},
+    polM: cache.polM ?? {},
+    marginTs: cache.marginTs ?? Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])),
+    areaTs: cache.areaTs ?? {},
+    polTs: cache.polTs ?? {},
+    carrierRates: cache.carrierRates ?? defaultCarrierRates(),
+    validityInfo: cache.validityInfo ?? defaultValidityInfo(),
+    rentalRates: cache.rentalRates
+      ? mergeRentalRates(buildDefaultRentalRates(), cache.rentalRates)
+      : buildDefaultRentalRates(),
+    rentalMargins: cache.rentalMargins ?? defaultRentalMargins(),
+    rentalAreaM: cache.rentalAreaM ?? {},
+    rentalPolM: cache.rentalPolM ?? {},
+    rentalMarginTs: cache.rentalMarginTs ?? Object.fromEntries(RENTAL_RATE_TYPES.map(t => [t, marginNowTs()])),
+    rentalAreaTs: cache.rentalAreaTs ?? {},
+    rentalPolTs: cache.rentalPolTs ?? {},
+  };
+};
+
+function RatesLoading() {
+  return (
+    <div className="rates-loading" role="status" aria-live="polite">
+      운임 정보 불러오는 중…
+    </div>
+  );
+}
+
 function MarginPanel({
   filterHint,
   marginTab, setMarginTab,
@@ -739,20 +910,22 @@ export default function App() {
   const [loginErr, setLoginErr] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
 
-  // Default margins (used for guest + admin)
-  const [margins, setMargins] = useState({coc20:80,coc40:100,soc20:80,soc40:100});
-  const [marginTs, setMarginTs] = useState(() => Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])));
-  const [areaM, setAreaM] = useState({});
-  const [areaTs, setAreaTs] = useState({});
-  const [polM, setPolM] = useState({});
-  const [polTs, setPolTs] = useState({});
-  const [rentalMargins, setRentalMargins] = useState(defaultRentalMargins);
-  const [rentalMarginTs, setRentalMarginTs] = useState(() => Object.fromEntries(RENTAL_RATE_TYPES.map(t => [t, marginNowTs()])));
-  const [rentalAreaM, setRentalAreaM] = useState({});
-  const [rentalAreaTs, setRentalAreaTs] = useState({});
-  const [rentalPolM, setRentalPolM] = useState({});
-  const [rentalPolTs, setRentalPolTs] = useState({});
-  const [polCostO, setPolCostO] = useState({});
+  // Default margins — localStorage 캐시로 첫 렌더부터 복원 (깜빡임 방지)
+  const [pricingBoot] = useState(() => bootPricingFromCache());
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [margins, setMargins] = useState(() => pricingBoot?.margins ?? { ...DEFAULT_MARGINS });
+  const [marginTs, setMarginTs] = useState(() => pricingBoot?.marginTs ?? Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])));
+  const [areaM, setAreaM] = useState(() => pricingBoot?.areaM ?? {});
+  const [areaTs, setAreaTs] = useState(() => pricingBoot?.areaTs ?? {});
+  const [polM, setPolM] = useState(() => pricingBoot?.polM ?? {});
+  const [polTs, setPolTs] = useState(() => pricingBoot?.polTs ?? {});
+  const [rentalMargins, setRentalMargins] = useState(() => pricingBoot?.rentalMargins ?? defaultRentalMargins());
+  const [rentalMarginTs, setRentalMarginTs] = useState(() => pricingBoot?.rentalMarginTs ?? Object.fromEntries(RENTAL_RATE_TYPES.map(t => [t, marginNowTs()])));
+  const [rentalAreaM, setRentalAreaM] = useState(() => pricingBoot?.rentalAreaM ?? {});
+  const [rentalAreaTs, setRentalAreaTs] = useState(() => pricingBoot?.rentalAreaTs ?? {});
+  const [rentalPolM, setRentalPolM] = useState(() => pricingBoot?.rentalPolM ?? {});
+  const [rentalPolTs, setRentalPolTs] = useState(() => pricingBoot?.rentalPolTs ?? {});
+  const [polCostO, setPolCostO] = useState(() => pricingBoot?.polCostO ?? {});
   const [marginTab, setMarginTab] = useState("global");
   const [rentalMarginTab, setRentalMarginTab] = useState("global");
   const [selArea, setSelArea] = useState("");
@@ -761,9 +934,9 @@ export default function App() {
   const [rentalSelPol, setRentalSelPol] = useState("");
   const [polEdit, setPolEdit] = useState({coc20:"",coc40:"",soc20:"",soc40:""});
   const [rentalPolEdit, setRentalPolEdit] = useState({r20:"",r40:""});
-  const [validityInfo, setValidityInfo] = useState(defaultValidityInfo);
-  const [carrierRates, setCarrierRates] = useState(defaultCarrierRates);
-  const [rentalRates, setRentalRates] = useState(buildDefaultRentalRates);
+  const [validityInfo, setValidityInfo] = useState(() => pricingBoot?.validityInfo ?? defaultValidityInfo());
+  const [carrierRates, setCarrierRates] = useState(() => pricingBoot?.carrierRates ?? defaultCarrierRates());
+  const [rentalRates, setRentalRates] = useState(() => pricingBoot?.rentalRates ?? buildDefaultRentalRates());
   const [ratePeriod, setRatePeriod] = useState("current"); // current | future
   const [notices, setNotices] = useState(mkNotices);
   const [dismissedNotices, setDismissedNotices] = useState(() => new Set());
@@ -775,6 +948,7 @@ export default function App() {
   const saveFeedbackTimerRef = useRef(null);
   const skipAutoSaveRef = useRef(true);
   const autoSaveTimerRef = useRef(null);
+  const saveQueueRef = useRef(Promise.resolve());
   const [dragOverSlot, setDragOverSlot] = useState(null);
   const [adBanners, setAdBanners] = useState(mkAds);
   const [adAdminTab, setAdAdminTab] = useState(0);
@@ -1305,50 +1479,65 @@ export default function App() {
   };
 
   const saveSetting = async (key, value) => {
-    await saveSettingsBatch([[key, value]]);
+    await saveOneSettingWithRetry(key, value);
   };
 
-  const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json"]);
+  const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json", "carrier_rates_json"]);
+  const SAVE_GAP_MS = (key) => (HEAVY_SETTING_KEYS.has(key) ? 400 : 120);
 
-  const saveSettingsBatch = async (entries) => {
-    const rows = entries.map(([key, value]) => ({ key, value: String(value) }));
-    if (!rows.length) return;
-    const keys = rows.map(r => r.key).join(", ");
-    let res;
-    try {
-      res = await fetch(`${SB_URL}/rest/v1/settings`, {
-        method: "POST",
-        headers: {
-          "apikey": SB_KEY,
-          "Authorization": `Bearer ${SB_KEY}`,
-          "Content-Type": "application/json",
-          "Prefer": "resolution=merge-duplicates,return=minimal",
-        },
-        body: JSON.stringify(rows),
-      });
-    } catch (e) {
-      throw new Error(`Supabase 연결 실패 (${keys}) — ${e.message}`);
-    }
-    if (!res.ok) throw new Error(`(${keys}): ${await res.text()}`);
-  };
-
-  /** 큰 JSON은 키별 1회, 나머지는 한 번에 — 병렬 저장 시 Failed to fetch 방지 */
-  const saveSettingsEntries = async (entries) => {
-    const light = [];
-    const flushLight = async () => {
-      if (!light.length) return;
-      const chunk = light.splice(0, light.length);
-      await saveSettingsBatch(chunk);
-    };
-    for (const entry of entries) {
-      if (HEAVY_SETTING_KEYS.has(entry[0])) {
-        await flushLight();
-        await saveSettingsBatch([entry]);
-      } else {
-        light.push(entry);
+  const saveOneSettingWithRetry = async (key, value) => {
+    const body = { key, value: String(value) };
+    let lastErr;
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 700 * attempt));
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 90000);
+      try {
+        const res = await fetch(`${SB_URL}/rest/v1/settings`, {
+          method: "POST",
+          signal: ctrl.signal,
+          headers: {
+            "apikey": SB_KEY,
+            "Authorization": `Bearer ${SB_KEY}`,
+            "Content-Type": "application/json",
+            "Prefer": "resolution=merge-duplicates,return=minimal",
+          },
+          body: JSON.stringify(body),
+        });
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(await res.text());
+        return;
+      } catch (e) {
+        clearTimeout(timer);
+        lastErr = e;
+        const msg = String(e.message || e);
+        if (!msg.includes("fetch") && !msg.includes("Failed") && !msg.includes("abort")) {
+          throw new Error(`${key}: ${msg}`);
+        }
       }
     }
-    await flushLight();
+    throw new Error(`Supabase 연결 실패 (${key}) — ${lastErr?.message || "Failed to fetch"}`);
+  };
+
+  const saveSettingsBatch = async (entries) => {
+    for (const [key, value] of entries) {
+      await saveOneSettingWithRetry(key, value);
+      if (entries.length > 1) await new Promise(r => setTimeout(r, SAVE_GAP_MS(key)));
+    }
+  };
+
+  const enqueueSave = (task) => {
+    const job = saveQueueRef.current.then(task);
+    saveQueueRef.current = job.catch(() => {});
+    return job;
+  };
+
+  /** 큰 JSON은 키별 1회 + 간격 */
+  const saveSettingsEntries = async (entries) => {
+    for (const entry of entries) {
+      await saveOneSettingWithRetry(entry[0], entry[1]);
+      await new Promise(r => setTimeout(r, SAVE_GAP_MS(entry[0])));
+    }
   };
 
   const flashSaveFeedback = (type, message) => {
@@ -1366,7 +1555,7 @@ export default function App() {
     setSaveBusy(true);
     setSaveFeedback({ type: null, message: "" });
     try {
-      await fn();
+      await enqueueSave(fn);
       flashSaveFeedback("success", `✅ ${successLabel} 저장 완료`);
     } catch (e) {
       flashSaveFeedback("error", `저장 실패: ${e.message}`);
@@ -1387,7 +1576,7 @@ export default function App() {
     ["validity_rental", legacyValidityCurrent("RENTAL")],
   ]));
 
-  const getPricingSaveEntries = () => [
+  const getCarrierSaveEntries = () => [
     ["pol_costs", JSON.stringify(polCostO)],
     ["pol_margins", JSON.stringify(polM)],
     ["global_margins", JSON.stringify(margins)],
@@ -1397,6 +1586,9 @@ export default function App() {
     ["pol_margin_timestamps", JSON.stringify(polTs)],
     ["carrier_rates_json", JSON.stringify(carrierRates)],
     ["validity_info_json", JSON.stringify(validityInfo)],
+  ];
+
+  const getRentalSaveEntries = () => [
     ["rental_rates_json", JSON.stringify(rentalRates)],
     ["rental_global_margins", JSON.stringify(rentalMargins)],
     ["rental_area_margins", JSON.stringify(rentalAreaM)],
@@ -1404,7 +1596,23 @@ export default function App() {
     ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
     ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
     ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
+    ["validity_info_json", JSON.stringify(validityInfo)],
   ];
+
+  const getPricingSaveEntries = () => [...getCarrierSaveEntries(), ...getRentalSaveEntries().filter(
+    ([k]) => k !== "validity_info_json"
+  )];
+
+  const persistCarrierQuiet = () => enqueueSave(() => saveSettingsEntries(getCarrierSaveEntries()));
+  const persistRentalQuiet = () => enqueueSave(() => saveSettingsEntries(getRentalSaveEntries()));
+  const persistPricingQuiet = () => enqueueSave(async () => {
+    await saveSettingsEntries(getCarrierSaveEntries());
+    try {
+      await saveSettingsEntries(getRentalSaveEntries());
+    } catch (e) {
+      console.warn("rental save deferred", e);
+    }
+  });
 
   const buildPricingCache = () => ({
     v: 1,
@@ -1426,111 +1634,31 @@ export default function App() {
     rentalPolTs,
   });
 
-  const applyPricingCache = (cache) => {
-    if (!cache || cache.v !== 1) return;
-    if (cache.polCostO) setPolCostO(cache.polCostO);
-    if (cache.margins) setMargins(cache.margins);
-    if (cache.areaM) setAreaM(cache.areaM);
-    if (cache.polM) setPolM(cache.polM);
-    if (cache.marginTs) setMarginTs(cache.marginTs);
-    if (cache.areaTs) setAreaTs(cache.areaTs);
-    if (cache.polTs) setPolTs(cache.polTs);
-    if (cache.carrierRates) setCarrierRates(cache.carrierRates);
-    if (cache.validityInfo) setValidityInfo(cache.validityInfo);
-    if (cache.rentalRates) setRentalRates(prev => mergeRentalRates(prev, cache.rentalRates));
-    if (cache.rentalMargins) setRentalMargins(cache.rentalMargins);
-    if (cache.rentalAreaM) setRentalAreaM(cache.rentalAreaM);
-    if (cache.rentalPolM) setRentalPolM(cache.rentalPolM);
-    if (cache.rentalMarginTs) setRentalMarginTs(cache.rentalMarginTs);
-    if (cache.rentalAreaTs) setRentalAreaTs(cache.rentalAreaTs);
-    if (cache.rentalPolTs) setRentalPolTs(cache.rentalPolTs);
+  const applyPricingSnapshot = (snap) => {
+    if (!snap) return;
+    setValidityInfo(snap.validityInfo);
+    setCarrierRates(snap.carrierRates);
+    setRentalRates(snap.rentalRates);
+    setMargins(snap.margins);
+    setAreaM(snap.areaM);
+    setPolM(snap.polM);
+    setMarginTs(snap.marginTs);
+    setAreaTs(snap.areaTs);
+    setPolTs(snap.polTs);
+    setRentalMargins(snap.rentalMargins);
+    setRentalAreaM(snap.rentalAreaM);
+    setRentalPolM(snap.rentalPolM);
+    setRentalMarginTs(snap.rentalMarginTs);
+    setRentalAreaTs(snap.rentalAreaTs);
+    setRentalPolTs(snap.rentalPolTs);
+    setPolCostO(snap.polCostO);
   };
 
   const applyPricingFromSettings = (s) => {
-    if (s.validity_info_json) {
-      try {
-        const parsed = JSON.parse(s.validity_info_json);
-        if (parsed && typeof parsed === "object") {
-          setValidityInfo(Object.fromEntries(
-            VALIDITY_KEYS.map(k => [k, normalizeValidityCarrier({ ...defaultValidityInfo()[k], ...(parsed[k] || {}) })])
-          ));
-        }
-      } catch (e) {}
-    } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined || s.validity_rental !== undefined) {
-      setValidityInfo(prev => ({
-        SNK: normalizeValidityCarrier({ ...prev.SNK, current: s.validity_snk ?? prev.SNK?.current }),
-        DY: normalizeValidityCarrier({ ...prev.DY, current: s.validity_dy ?? prev.DY?.current }),
-        CK: normalizeValidityCarrier({ ...prev.CK, current: s.validity_ck ?? prev.CK?.current }),
-        RENTAL: normalizeValidityCarrier({ ...prev.RENTAL, current: s.validity_rental ?? prev.RENTAL?.current }),
-      }));
-    }
-    if (s.carrier_rates_json) {
-      try {
-        const parsed = JSON.parse(s.carrier_rates_json);
-        if (parsed && typeof parsed === "object") {
-          setCarrierRates(Object.fromEntries(
-            CRS.map(k => [k, {
-              current: { ...defaultCarrierRates()[k].current, ...(parsed[k]?.current || {}) },
-              future: { ...defaultCarrierRates()[k].future, ...(parsed[k]?.future || {}) },
-            }])
-          ));
-        }
-      } catch (e) {}
-    }
-    if (s.rental_rates_json) {
-      try {
-        const parsed = JSON.parse(s.rental_rates_json);
-        if (parsed && typeof parsed === "object") {
-          setRentalRates(prev => mergeRentalRates(prev, parsed));
-        }
-      } catch (e) {}
-    }
-    let loadedAreaM = {};
-    let loadedPolM = {};
-    if (s.global_margins) { try { setMargins(JSON.parse(s.global_margins)); } catch (e) {} }
-    if (s.area_margins) { try { loadedAreaM = JSON.parse(s.area_margins); setAreaM(loadedAreaM); } catch (e) {} }
-    if (s.pol_margins) { try { loadedPolM = JSON.parse(s.pol_margins); setPolM(loadedPolM); } catch (e) {} }
-    if (s.margin_timestamps) {
-      try { setMarginTs(JSON.parse(s.margin_timestamps)); } catch (e) {}
-    } else {
-      setMarginTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).marginTs);
-    }
-    if (s.area_margin_timestamps) {
-      try { setAreaTs(JSON.parse(s.area_margin_timestamps)); } catch (e) {}
-    } else {
-      setAreaTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).areaTs);
-    }
-    if (s.pol_margin_timestamps) {
-      try { setPolTs(JSON.parse(s.pol_margin_timestamps)); } catch (e) {}
-    } else {
-      setPolTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).polTs);
-    }
-    let loadedRentalAreaM = {};
-    let loadedRentalPolM = {};
-    if (s.rental_global_margins) { try { setRentalMargins(JSON.parse(s.rental_global_margins)); } catch (e) {} }
-    if (s.rental_area_margins) { try { loadedRentalAreaM = JSON.parse(s.rental_area_margins); setRentalAreaM(loadedRentalAreaM); } catch (e) {} }
-    if (s.rental_pol_margins) { try { loadedRentalPolM = JSON.parse(s.rental_pol_margins); setRentalPolM(loadedRentalPolM); } catch (e) {} }
-    if (s.rental_margin_timestamps) {
-      try { setRentalMarginTs(JSON.parse(s.rental_margin_timestamps)); } catch (e) {}
-    } else {
-      setRentalMarginTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).marginTs);
-    }
-    if (s.rental_area_margin_timestamps) {
-      try { setRentalAreaTs(JSON.parse(s.rental_area_margin_timestamps)); } catch (e) {}
-    } else {
-      setRentalAreaTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).areaTs);
-    }
-    if (s.rental_pol_margin_timestamps) {
-      try { setRentalPolTs(JSON.parse(s.rental_pol_margin_timestamps)); } catch (e) {}
-    } else {
-      setRentalPolTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).polTs);
-    }
-    if (s.pol_costs != null && s.pol_costs !== "") {
-      try { setPolCostO(JSON.parse(s.pol_costs)); } catch (e) {}
-    }
+    const snap = parsePricingFromSettings(s);
+    applyPricingSnapshot(snap);
+    writePricingCache(pricingCacheFromSnapshot(snap));
   };
-
-  const persistPricingQuiet = () => saveSettingsEntries(getPricingSaveEntries());
 
   const writePricingCache = (payload) => {
     try {
@@ -1567,11 +1695,6 @@ export default function App() {
   ]));
 
   useEffect(() => {
-    try {
-      const raw = localStorage.getItem(PRICING_CACHE_KEY);
-      if (raw) applyPricingCache(JSON.parse(raw));
-    } catch (_) {}
-
     api("settings?select=key,value")
       .then(rows => {
         if (!Array.isArray(rows)) throw new Error("settings 응답 오류");
@@ -1599,24 +1722,41 @@ export default function App() {
         if (s.ad_banners_json || s.ad_banner_json) {
           setAdBanners(parseAdsFromSettings(s));
         }
+        setSettingsLoaded(true);
         skipAutoSaveRef.current = false;
       })
       .catch(err => {
         console.error("settings load failed", err);
+        setSettingsLoaded(true);
         skipAutoSaveRef.current = false;
       });
   }, []);
 
   useEffect(() => {
-    if (skipAutoSaveRef.current || !isAdmin) return;
+    if (skipAutoSaveRef.current || !isAdmin || saveBusy) return;
     writePricingCache(buildPricingCache());
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
-      persistPricingQuiet().catch(err => console.error("auto-save failed", err));
-    }, 2000);
+      const task = showCarrierAdmin
+        ? () => saveSettingsEntries(getCarrierSaveEntries())
+        : showRentalAdmin
+          ? () => saveSettingsEntries(getRentalSaveEntries())
+          : async () => {
+              await saveSettingsEntries(getCarrierSaveEntries());
+              try {
+                await saveSettingsEntries(getRentalSaveEntries());
+              } catch (e) {
+                console.warn("rental auto-save deferred", e);
+              }
+            };
+      enqueueSave(task).catch(err => console.error("auto-save failed", err));
+    }, 2500);
     return () => clearTimeout(autoSaveTimerRef.current);
   }, [
     isAdmin,
+    saveBusy,
+    showCarrierAdmin,
+    showRentalAdmin,
     polCostO,
     margins,
     areaM,
@@ -1954,12 +2094,14 @@ export default function App() {
   const saveNoticesOnly = () => runSave("공지", () => saveNoticeSettings());
 
   const saveCarrierPricing = () => runSave("선사 운임", async () => {
-    await persistPricingQuiet();
+    clearTimeout(autoSaveTimerRef.current);
+    await saveSettingsEntries(getCarrierSaveEntries());
     writePricingCache();
   });
 
   const saveRentalPricing = () => runSave("렌탈 운임", async () => {
-    await persistPricingQuiet();
+    clearTimeout(autoSaveTimerRef.current);
+    await saveSettingsEntries(getRentalSaveEntries());
     writePricingCache();
   });
 
@@ -2159,15 +2301,15 @@ export default function App() {
   );
 
   const GuestPricePair = ({d20,d40,prefix=""}) => (
-    <div style={{display:"flex",alignItems:"center",gap:10,flexShrink:0}}>
-      <div style={{textAlign:"right"}}>
+    <div className="guest-price-pair">
+      <div className="guest-price-col">
         <div style={{fontSize:10,color:"#9ca3af"}}>{prefix?`${prefix} 20'`:"20'"}</div>
-        <div style={{fontSize:14,fontWeight:700,color:ratePeriod==="future"?"#b45309":"#1d4ed8"}}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>
+        <div className={`guest-price-val${ratePeriod==="future"?" guest-price-val--future":""}`}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>
         {d20.cr&&<Bg k={d20.cr}/>}
       </div>
-      <div style={{textAlign:"right"}}>
+      <div className="guest-price-col">
         <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
-        <div style={{fontSize:14,fontWeight:700,color:ratePeriod==="future"?"#b45309":"#1d4ed8"}}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>
+        <div className={`guest-price-val${ratePeriod==="future"?" guest-price-val--future":""}`}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>
         {d40.cr&&<Bg k={d40.cr}/>}
       </div>
     </div>
@@ -2248,6 +2390,19 @@ export default function App() {
 
   // ── RENTAL RATES ADMIN ──
   if (showRentalAdmin && isAdmin) {
+    if (!settingsLoaded) {
+      return (
+        <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+          {adminSaveToastEl}
+          <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
+            <button onClick={()=>setShowRentalAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+            <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
+            <div style={{width:48}}/>
+          </div>
+          <RatesLoading />
+        </div>
+      );
+    }
     const raPeriod = rentalAdminPeriod;
     const isFuture = raPeriod === "future";
     const visibleReturnCities = selReturnCity
@@ -2462,6 +2617,19 @@ export default function App() {
 
   // ── CARRIER RATES ADMIN ──
   if (showCarrierAdmin && isAdmin) {
+    if (!settingsLoaded) {
+      return (
+        <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+          {adminSaveToastEl}
+          <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
+            <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+            <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
+            <div style={{width:48}}/>
+          </div>
+          <RatesLoading />
+        </div>
+      );
+    }
     const caPeriod = carrierAdminPeriod;
     const caCr = carrierAdminCr;
     const isFuture = caPeriod === "future";
@@ -2916,14 +3084,14 @@ export default function App() {
                         const rentC20=mkPrice(c.rent20,getRentalM(fp,fr.area,"r20"),c.k);
                         const rentC40=mkPrice(c.rent40,getRentalM(fp,fr.area,"r40"),c.k);
                         return (
-                        <div key={c.k} style={{padding:"8px 12px 8px 20px",borderBottom:"1px solid #ede9fe"}}>
+                        <div key={c.k} className="rent-carrier-line" style={{padding:"8px 12px 8px 20px",borderBottom:"1px solid #ede9fe"}}>
+                          {isAdmin ? (
+                            <>
                           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
                             <Bg k={c.k}/>
                             <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[c.k]}</span>
                             <ValidityCell carrierKey={c.k} compact/>
                           </div>
-                          {isAdmin ? (
-                            <>
                               <div style={{fontSize:9,fontWeight:700,color:"#1e40af",marginBottom:4}}>SOC 해상 매입</div>
                               <AdminPriceCols d20={socC20} d40={socC40} editable
                                 onCost20={v=>fp&&applyCarrierRate(fp,c.k,"soc20",v)}
@@ -2935,18 +3103,27 @@ export default function App() {
                               <div style={{fontSize:9,color:"#6b7280",marginTop:6}}>합계 매출 (SOC+렌탈+마진)</div>
                               <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable={false}/>
                             </>
-                          ) : <>
-                          <div style={{textAlign:"right",marginRight:20,cursor:c.t20?"pointer":"default"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
+                          ) : (
+                          <>
+                          <div className="rent-carrier-line-head">
+                            <Bg k={c.k}/>
+                            <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[c.k]}</span>
+                            <ValidityCell carrierKey={c.k} compact/>
+                          </div>
+                          <div className="rent-carrier-guest-row">
+                          <div className="rent-carrier-guest-col" style={{cursor:c.t20?"pointer":"default"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
                             <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
-                            <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t20?"underline":"none"}}>{c.t20?`$${n(c.t20)}`:"—"}</div>
-                            {c.t20&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r20[city])}</div>}
+                            <div className="rent-carrier-guest-price">{c.t20?`$${n(c.t20)}`:"—"}</div>
+                            {c.t20&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental {n(row.r20[city])}</div>}
                           </div>
-                          <div style={{textAlign:"right",cursor:c.t40?"pointer":"default"}} onClick={()=>c.t40&&openSC(c.k,"soc40",row.pol+" > "+city)}>
+                          <div className="rent-carrier-guest-col" style={{cursor:c.t40?"pointer":"default"}} onClick={()=>c.t40&&openSC(c.k,"soc40",row.pol+" > "+city)}>
                             <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
-                            <div style={{fontSize:14,fontWeight:700,color:"#7c3aed",textDecoration:c.t40?"underline":"none"}}>{c.t40?`$${n(c.t40)}`:"—"}</div>
-                            {c.t40&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental ${n(row.r40[city])}</div>}
+                            <div className="rent-carrier-guest-price">{c.t40?`$${n(c.t40)}`:"—"}</div>
+                            {c.t40&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental {n(row.r40[city])}</div>}
                           </div>
-                          </>}
+                          </div>
+                          </>
+                          )}
                         </div>
                       );})}
                     </div>
@@ -2998,6 +3175,10 @@ export default function App() {
       {/* ADMIN MARGIN PANEL */}
       {isAdmin && (
         <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px"}}>
+          {!settingsLoaded ? (
+            <RatesLoading />
+          ) : (
+          <>
           <button type="button" onClick={()=>setShowCarrierAdmin(true)}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#1e40af",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
             선사별 운임 관리 (매입 · 매출 · 마진)
@@ -3118,6 +3299,8 @@ export default function App() {
               );
             })()}
           </div>
+          </>
+          )}
         </div>
       )}
 
@@ -3178,10 +3361,16 @@ export default function App() {
 
       {/* CONTENT */}
       <div style={{maxWidth:640,margin:"12px auto",padding:"0 16px 24px"}}>
-        <div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>{`${tab==="rental"?rFilt.length:filt.length} routes`}</div>
-        {tab==="ocean" && filt.map((row,i)=><OCard key={i} row={row} idx={i}/>)}
-        {tab==="dropoff" && filt.map((row,i)=><DOCrd key={i} row={row} idx={i}/>)}
-        {tab==="rental" && rFilt.map((row,i)=><RCrd key={i} row={row} idx={i}/>)}
+        {!settingsLoaded ? (
+          <RatesLoading />
+        ) : (
+          <>
+            <div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>{`${tab==="rental"?rFilt.length:filt.length} routes`}</div>
+            {tab==="ocean" && filt.map((row,i)=><OCard key={i} row={row} idx={i}/>)}
+            {tab==="dropoff" && filt.map((row,i)=><DOCrd key={i} row={row} idx={i}/>)}
+            {tab==="rental" && rFilt.map((row,i)=><RCrd key={i} row={row} idx={i}/>)}
+          </>
+        )}
       </div>
       </>
       )}
