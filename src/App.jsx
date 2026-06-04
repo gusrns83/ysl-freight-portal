@@ -5,7 +5,9 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v3"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v4"; // Admin 저장 로직 버전 (배포 확인용)
+const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
+const ADMIN_SESSION_KEY = "ysl_admin_session";
 const NOTICE_COUNT = 3;
 const mkNotices = () => Array.from({ length: NOTICE_COUNT }, (_, i) => ({
   text: "",
@@ -150,6 +152,7 @@ const api = async (path, opts = {}) => {
     ...opts,
   });
   const t = await r.text();
+  if (!r.ok) throw new Error(t || `HTTP ${r.status}`);
   return t ? JSON.parse(t) : [];
 };
 
@@ -768,6 +771,8 @@ export default function App() {
   const [saveBusy, setSaveBusy] = useState(false);
   const [saveFeedback, setSaveFeedback] = useState({ type: null, message: "" });
   const saveFeedbackTimerRef = useRef(null);
+  const skipAutoSaveRef = useRef(true);
+  const autoSaveTimerRef = useRef(null);
   const [dragOverSlot, setDragOverSlot] = useState(null);
   const [adBanners, setAdBanners] = useState(mkAds);
   const [adAdminTab, setAdAdminTab] = useState(0);
@@ -829,11 +834,21 @@ export default function App() {
       setShowLoginModal(false);
       setPin("");
       setLoginErr("");
-      setMargins({coc20:80,coc40:100,soc20:80,soc40:100});
+      try { sessionStorage.setItem(ADMIN_SESSION_KEY, "1"); } catch (_) {}
     } else { setLoginErr("Wrong PIN"); }
   };
 
-  const logout = () => { setMode("guest"); setClient(null); setMargins({coc20:80,coc40:100,soc20:80,soc40:100}); };
+  const logout = () => {
+    setMode("guest");
+    setClient(null);
+    try { sessionStorage.removeItem(ADMIN_SESSION_KEY); } catch (_) {}
+  };
+
+  useEffect(() => {
+    if (ADMIN_SKIP_PIN && sessionStorage.getItem(ADMIN_SESSION_KEY) === "1") {
+      setMode("admin");
+    }
+  }, []);
 
   const loadClients = async () => { const d = await api("clients?select=*&order=created_at.desc"); setClients(d); };
   const saveClient = async () => { await api("clients",{method:"POST",body:JSON.stringify(newC)}); setAddForm(false); setNewC({company_name:"",email:"",password_hash:"",margin_coc20:80,margin_coc40:100,margin_soc20:80,margin_soc40:100,notes:""}); loadClients(); };
@@ -1370,6 +1385,157 @@ export default function App() {
     ["validity_rental", legacyValidityCurrent("RENTAL")],
   ]));
 
+  const getPricingSaveEntries = () => [
+    ["pol_costs", JSON.stringify(polCostO)],
+    ["pol_margins", JSON.stringify(polM)],
+    ["global_margins", JSON.stringify(margins)],
+    ["area_margins", JSON.stringify(areaM)],
+    ["margin_timestamps", JSON.stringify(marginTs)],
+    ["area_margin_timestamps", JSON.stringify(areaTs)],
+    ["pol_margin_timestamps", JSON.stringify(polTs)],
+    ["carrier_rates_json", JSON.stringify(carrierRates)],
+    ["validity_info_json", JSON.stringify(validityInfo)],
+    ["rental_rates_json", JSON.stringify(rentalRates)],
+    ["rental_global_margins", JSON.stringify(rentalMargins)],
+    ["rental_area_margins", JSON.stringify(rentalAreaM)],
+    ["rental_pol_margins", JSON.stringify(rentalPolM)],
+    ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
+    ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
+    ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
+  ];
+
+  const buildPricingCache = () => ({
+    v: 1,
+    polCostO,
+    margins,
+    areaM,
+    polM,
+    marginTs,
+    areaTs,
+    polTs,
+    carrierRates,
+    validityInfo,
+    rentalRates,
+    rentalMargins,
+    rentalAreaM,
+    rentalPolM,
+    rentalMarginTs,
+    rentalAreaTs,
+    rentalPolTs,
+  });
+
+  const applyPricingCache = (cache) => {
+    if (!cache || cache.v !== 1) return;
+    if (cache.polCostO) setPolCostO(cache.polCostO);
+    if (cache.margins) setMargins(cache.margins);
+    if (cache.areaM) setAreaM(cache.areaM);
+    if (cache.polM) setPolM(cache.polM);
+    if (cache.marginTs) setMarginTs(cache.marginTs);
+    if (cache.areaTs) setAreaTs(cache.areaTs);
+    if (cache.polTs) setPolTs(cache.polTs);
+    if (cache.carrierRates) setCarrierRates(cache.carrierRates);
+    if (cache.validityInfo) setValidityInfo(cache.validityInfo);
+    if (cache.rentalRates) setRentalRates(prev => mergeRentalRates(prev, cache.rentalRates));
+    if (cache.rentalMargins) setRentalMargins(cache.rentalMargins);
+    if (cache.rentalAreaM) setRentalAreaM(cache.rentalAreaM);
+    if (cache.rentalPolM) setRentalPolM(cache.rentalPolM);
+    if (cache.rentalMarginTs) setRentalMarginTs(cache.rentalMarginTs);
+    if (cache.rentalAreaTs) setRentalAreaTs(cache.rentalAreaTs);
+    if (cache.rentalPolTs) setRentalPolTs(cache.rentalPolTs);
+  };
+
+  const applyPricingFromSettings = (s) => {
+    if (s.validity_info_json) {
+      try {
+        const parsed = JSON.parse(s.validity_info_json);
+        if (parsed && typeof parsed === "object") {
+          setValidityInfo(Object.fromEntries(
+            VALIDITY_KEYS.map(k => [k, normalizeValidityCarrier({ ...defaultValidityInfo()[k], ...(parsed[k] || {}) })])
+          ));
+        }
+      } catch (e) {}
+    } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined || s.validity_rental !== undefined) {
+      setValidityInfo(prev => ({
+        SNK: normalizeValidityCarrier({ ...prev.SNK, current: s.validity_snk ?? prev.SNK?.current }),
+        DY: normalizeValidityCarrier({ ...prev.DY, current: s.validity_dy ?? prev.DY?.current }),
+        CK: normalizeValidityCarrier({ ...prev.CK, current: s.validity_ck ?? prev.CK?.current }),
+        RENTAL: normalizeValidityCarrier({ ...prev.RENTAL, current: s.validity_rental ?? prev.RENTAL?.current }),
+      }));
+    }
+    if (s.carrier_rates_json) {
+      try {
+        const parsed = JSON.parse(s.carrier_rates_json);
+        if (parsed && typeof parsed === "object") {
+          setCarrierRates(Object.fromEntries(
+            CRS.map(k => [k, {
+              current: { ...defaultCarrierRates()[k].current, ...(parsed[k]?.current || {}) },
+              future: { ...defaultCarrierRates()[k].future, ...(parsed[k]?.future || {}) },
+            }])
+          ));
+        }
+      } catch (e) {}
+    }
+    if (s.rental_rates_json) {
+      try {
+        const parsed = JSON.parse(s.rental_rates_json);
+        if (parsed && typeof parsed === "object") {
+          setRentalRates(prev => mergeRentalRates(prev, parsed));
+        }
+      } catch (e) {}
+    }
+    let loadedAreaM = {};
+    let loadedPolM = {};
+    if (s.global_margins) { try { setMargins(JSON.parse(s.global_margins)); } catch (e) {} }
+    if (s.area_margins) { try { loadedAreaM = JSON.parse(s.area_margins); setAreaM(loadedAreaM); } catch (e) {} }
+    if (s.pol_margins) { try { loadedPolM = JSON.parse(s.pol_margins); setPolM(loadedPolM); } catch (e) {} }
+    if (s.margin_timestamps) {
+      try { setMarginTs(JSON.parse(s.margin_timestamps)); } catch (e) {}
+    } else {
+      setMarginTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).marginTs);
+    }
+    if (s.area_margin_timestamps) {
+      try { setAreaTs(JSON.parse(s.area_margin_timestamps)); } catch (e) {}
+    } else {
+      setAreaTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).areaTs);
+    }
+    if (s.pol_margin_timestamps) {
+      try { setPolTs(JSON.parse(s.pol_margin_timestamps)); } catch (e) {}
+    } else {
+      setPolTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).polTs);
+    }
+    let loadedRentalAreaM = {};
+    let loadedRentalPolM = {};
+    if (s.rental_global_margins) { try { setRentalMargins(JSON.parse(s.rental_global_margins)); } catch (e) {} }
+    if (s.rental_area_margins) { try { loadedRentalAreaM = JSON.parse(s.rental_area_margins); setRentalAreaM(loadedRentalAreaM); } catch (e) {} }
+    if (s.rental_pol_margins) { try { loadedRentalPolM = JSON.parse(s.rental_pol_margins); setRentalPolM(loadedRentalPolM); } catch (e) {} }
+    if (s.rental_margin_timestamps) {
+      try { setRentalMarginTs(JSON.parse(s.rental_margin_timestamps)); } catch (e) {}
+    } else {
+      setRentalMarginTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).marginTs);
+    }
+    if (s.rental_area_margin_timestamps) {
+      try { setRentalAreaTs(JSON.parse(s.rental_area_margin_timestamps)); } catch (e) {}
+    } else {
+      setRentalAreaTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).areaTs);
+    }
+    if (s.rental_pol_margin_timestamps) {
+      try { setRentalPolTs(JSON.parse(s.rental_pol_margin_timestamps)); } catch (e) {}
+    } else {
+      setRentalPolTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).polTs);
+    }
+    if (s.pol_costs != null && s.pol_costs !== "") {
+      try { setPolCostO(JSON.parse(s.pol_costs)); } catch (e) {}
+    }
+  };
+
+  const persistPricingQuiet = () => saveSettingsEntries(getPricingSaveEntries());
+
+  const writePricingCache = (payload) => {
+    try {
+      localStorage.setItem(PRICING_CACHE_KEY, JSON.stringify(payload ?? buildPricingCache()));
+    } catch (_) {}
+  };
+
   const saveAllSettings = () => runSave("전체 설정", () => saveSettingsEntries([
     ["notices_json", JSON.stringify(notices)],
     ["notice_text", notices[0].text],
@@ -1399,112 +1565,73 @@ export default function App() {
   ]));
 
   useEffect(() => {
-    api("settings?select=*").then(rows => {
-      if (!rows.length) return;
-      const s = Object.fromEntries(rows.map(r=>[r.key, r.value]));
-      if (s.notices_json) {
-        try {
-          const parsed = JSON.parse(s.notices_json);
-          if (Array.isArray(parsed)) {
-            setNotices(mkNotices().map((n, i) => {
-              const p = parsed[i];
-              if (!p) return n;
-              return { ...n, text: p.text ?? "", fileUrl: p.fileUrl ?? "", title: p.title || n.title, on: parseNoticeOn(p.on) };
-            }));
-          }
-        } catch(e) {}
-      } else if (s.notice_text !== undefined || s.notice_on !== undefined || s.notice_file_url !== undefined) {
-        setNotices(prev => prev.map((n, i) => i === 0 ? {
-          ...n,
-          text: s.notice_text ?? "",
-          on: s.notice_on === "true",
-          fileUrl: s.notice_file_url ?? "",
-        } : n));
-      }
-      if (s.validity_info_json) {
-        try {
-          const parsed = JSON.parse(s.validity_info_json);
-          if (parsed && typeof parsed === "object") {
-            setValidityInfo(Object.fromEntries(
-              VALIDITY_KEYS.map(k => [k, normalizeValidityCarrier({ ...defaultValidityInfo()[k], ...(parsed[k] || {}) })])
-            ));
-          }
-        } catch(e) {}
-      } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined || s.validity_rental !== undefined) {
-        setValidityInfo(prev => ({
-          SNK: normalizeValidityCarrier({ ...prev.SNK, current: s.validity_snk ?? prev.SNK?.current }),
-          DY: normalizeValidityCarrier({ ...prev.DY, current: s.validity_dy ?? prev.DY?.current }),
-          CK: normalizeValidityCarrier({ ...prev.CK, current: s.validity_ck ?? prev.CK?.current }),
-          RENTAL: normalizeValidityCarrier({ ...prev.RENTAL, current: s.validity_rental ?? prev.RENTAL?.current }),
-        }));
-      }
-      if (s.carrier_rates_json) {
-        try {
-          const parsed = JSON.parse(s.carrier_rates_json);
-          if (parsed && typeof parsed === "object") {
-            setCarrierRates(Object.fromEntries(
-              CRS.map(k => [k, {
-                current: { ...defaultCarrierRates()[k].current, ...(parsed[k]?.current || {}) },
-                future: { ...defaultCarrierRates()[k].future, ...(parsed[k]?.future || {}) },
-              }])
-            ));
-          }
-        } catch(e) {}
-      }
-      if (s.rental_rates_json) {
-        try {
-          const parsed = JSON.parse(s.rental_rates_json);
-          if (parsed && typeof parsed === "object") {
-            setRentalRates(prev => mergeRentalRates(prev, parsed));
-          }
-        } catch(e) {}
-      }
-      let loadedAreaM = {};
-      let loadedPolM = {};
-      if (s.global_margins) { try { setMargins(JSON.parse(s.global_margins)); } catch(e){} }
-      if (s.area_margins) { try { loadedAreaM = JSON.parse(s.area_margins); setAreaM(loadedAreaM); } catch(e){} }
-      if (s.pol_margins) { try { loadedPolM = JSON.parse(s.pol_margins); setPolM(loadedPolM); } catch(e){} }
-      if (s.margin_timestamps) {
-        try { setMarginTs(JSON.parse(s.margin_timestamps)); } catch(e){}
-      } else {
-        setMarginTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).marginTs);
-      }
-      if (s.area_margin_timestamps) {
-        try { setAreaTs(JSON.parse(s.area_margin_timestamps)); } catch(e){}
-      } else {
-        setAreaTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).areaTs);
-      }
-      if (s.pol_margin_timestamps) {
-        try { setPolTs(JSON.parse(s.pol_margin_timestamps)); } catch(e){}
-      } else {
-        setPolTs(buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).polTs);
-      }
-      let loadedRentalAreaM = {};
-      let loadedRentalPolM = {};
-      if (s.rental_global_margins) { try { setRentalMargins(JSON.parse(s.rental_global_margins)); } catch(e){} }
-      if (s.rental_area_margins) { try { loadedRentalAreaM = JSON.parse(s.rental_area_margins); setRentalAreaM(loadedRentalAreaM); } catch(e){} }
-      if (s.rental_pol_margins) { try { loadedRentalPolM = JSON.parse(s.rental_pol_margins); setRentalPolM(loadedRentalPolM); } catch(e){} }
-      if (s.rental_margin_timestamps) {
-        try { setRentalMarginTs(JSON.parse(s.rental_margin_timestamps)); } catch(e){}
-      } else {
-        setRentalMarginTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).marginTs);
-      }
-      if (s.rental_area_margin_timestamps) {
-        try { setRentalAreaTs(JSON.parse(s.rental_area_margin_timestamps)); } catch(e){}
-      } else {
-        setRentalAreaTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).areaTs);
-      }
-      if (s.rental_pol_margin_timestamps) {
-        try { setRentalPolTs(JSON.parse(s.rental_pol_margin_timestamps)); } catch(e){}
-      } else {
-        setRentalPolTs(buildLegacyMarginTimestamps(loadedRentalAreaM, loadedRentalPolM, RENTAL_RATE_TYPES).polTs);
-      }
-      if (s.pol_costs) { try { setPolCostO(JSON.parse(s.pol_costs)); } catch(e){} }
-      if (s.ad_banners_json || s.ad_banner_json) {
-        setAdBanners(parseAdsFromSettings(s));
-      }
-    }).catch(()=>{});
+    try {
+      const raw = localStorage.getItem(PRICING_CACHE_KEY);
+      if (raw) applyPricingCache(JSON.parse(raw));
+    } catch (_) {}
+
+    api("settings?select=key,value")
+      .then(rows => {
+        if (!Array.isArray(rows)) throw new Error("settings 응답 오류");
+        const s = Object.fromEntries(rows.map(r => [r.key, r.value]));
+        if (s.notices_json) {
+          try {
+            const parsed = JSON.parse(s.notices_json);
+            if (Array.isArray(parsed)) {
+              setNotices(mkNotices().map((n, i) => {
+                const p = parsed[i];
+                if (!p) return n;
+                return { ...n, text: p.text ?? "", fileUrl: p.fileUrl ?? "", title: p.title || n.title, on: parseNoticeOn(p.on) };
+              }));
+            }
+          } catch (e) {}
+        } else if (s.notice_text !== undefined || s.notice_on !== undefined || s.notice_file_url !== undefined) {
+          setNotices(prev => prev.map((n, i) => i === 0 ? {
+            ...n,
+            text: s.notice_text ?? "",
+            on: s.notice_on === "true",
+            fileUrl: s.notice_file_url ?? "",
+          } : n));
+        }
+        applyPricingFromSettings(s);
+        if (s.ad_banners_json || s.ad_banner_json) {
+          setAdBanners(parseAdsFromSettings(s));
+        }
+        skipAutoSaveRef.current = false;
+      })
+      .catch(err => {
+        console.error("settings load failed", err);
+        skipAutoSaveRef.current = false;
+      });
   }, []);
+
+  useEffect(() => {
+    if (skipAutoSaveRef.current || !isAdmin) return;
+    writePricingCache(buildPricingCache());
+    clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(() => {
+      persistPricingQuiet().catch(err => console.error("auto-save failed", err));
+    }, 2000);
+    return () => clearTimeout(autoSaveTimerRef.current);
+  }, [
+    isAdmin,
+    polCostO,
+    margins,
+    areaM,
+    polM,
+    marginTs,
+    areaTs,
+    polTs,
+    carrierRates,
+    validityInfo,
+    rentalRates,
+    rentalMargins,
+    rentalAreaM,
+    rentalPolM,
+    rentalMarginTs,
+    rentalAreaTs,
+    rentalPolTs,
+  ]);
 
   const sz = si => (si === 0 ? "c20" : "c40");
   const mkPrice = (cost, margin, cr) => ({
@@ -1770,28 +1897,15 @@ export default function App() {
 
   const saveNoticesOnly = () => runSave("공지", () => saveNoticeSettings());
 
-  const saveCarrierPricing = () => runSave("선사 운임", () => saveSettingsEntries([
-    ["pol_costs", JSON.stringify(polCostO)],
-    ["pol_margins", JSON.stringify(polM)],
-    ["global_margins", JSON.stringify(margins)],
-    ["area_margins", JSON.stringify(areaM)],
-    ["margin_timestamps", JSON.stringify(marginTs)],
-    ["area_margin_timestamps", JSON.stringify(areaTs)],
-    ["pol_margin_timestamps", JSON.stringify(polTs)],
-    ["carrier_rates_json", JSON.stringify(carrierRates)],
-    ["validity_info_json", JSON.stringify(validityInfo)],
-  ]));
+  const saveCarrierPricing = () => runSave("선사 운임", async () => {
+    await persistPricingQuiet();
+    writePricingCache();
+  });
 
-  const saveRentalPricing = () => runSave("렌탈 운임", () => saveSettingsEntries([
-    ["rental_rates_json", JSON.stringify(rentalRates)],
-    ["rental_global_margins", JSON.stringify(rentalMargins)],
-    ["rental_area_margins", JSON.stringify(rentalAreaM)],
-    ["rental_pol_margins", JSON.stringify(rentalPolM)],
-    ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
-    ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
-    ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
-    ["validity_info_json", JSON.stringify(validityInfo)],
-  ]));
+  const saveRentalPricing = () => runSave("렌탈 운임", async () => {
+    await persistPricingQuiet();
+    writePricingCache();
+  });
 
   const renderNoticeFile = (fileUrl, title) => {
     if (!fileUrl) return null;
@@ -2381,7 +2495,7 @@ export default function App() {
           <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
           <div style={{textAlign:"center"}}>
             <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
-            <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV}</div>
+            <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV} · 변경 시 자동 저장</div>
           </div>
           <button type="button" onClick={saveCarrierPricing} disabled={saveBusy}
             style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#93c5fd":"#2563eb",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
