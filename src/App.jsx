@@ -539,11 +539,13 @@ const CarrierPortGuide = () => (
   <div className="carrier-port-guide" aria-label="Carrier calling ports">
     <span className="carrier-port-guide-label">Calling port</span>
     {CRS.map((k, i) => (
-      <span key={k} className="carrier-port-guide-item">
+      <span key={k} className="carrier-port-guide-segment">
         {i > 0 && <span className="carrier-port-guide-sep">/</span>}
-        <span className="carrier-port-guide-carrier">{k}</span>
-        <span className="carrier-port-guide-colon">:</span>
-        <span>{CARRIER_CALL_PORTS[k].join(", ")}</span>
+        <span className="carrier-port-guide-item">
+          <span className="carrier-port-guide-carrier">{k}</span>
+          <span className="carrier-port-guide-colon">:</span>
+          <span>{CARRIER_CALL_PORTS[k].join(", ")}</span>
+        </span>
       </span>
     ))}
   </div>
