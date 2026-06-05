@@ -2504,7 +2504,7 @@ export default function App() {
     );
   };
 
-  const RatePeriodToggle = ({accentFuture}) => (
+  const RatePeriodToggle = () => (
     <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:8,marginTop:10}}>
       <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
         {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
@@ -2517,9 +2517,6 @@ export default function App() {
           </button>
         ))}
       </div>
-      <span style={{fontSize:10,color:ratePeriod==="future"?(accentFuture||"#b45309"):"#9ca3af"}}>
-        {ratePeriod==="current" ? "현재 운임 · From / Till" : "향후 운임 · From / Till"}
-      </span>
     </div>
   );
 
@@ -3430,12 +3427,12 @@ export default function App() {
       )}
       {tab==="dropoff" && (
         <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
-          <RatePeriodToggle accentFuture="#0369a1"/>
+          <RatePeriodToggle/>
         </div>
       )}
       {tab==="rental" && (
         <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
-          <RatePeriodToggle accentFuture="#7c3aed"/>
+          <RatePeriodToggle/>
           <div style={{marginTop:8}}><ValidityCell carrierKey="RENTAL"/></div>
         </div>
       )}
