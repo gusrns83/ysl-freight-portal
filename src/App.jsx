@@ -376,6 +376,11 @@ const mergeRentalRates = (base, saved) => {
 };
 const CN = {SNK:"Sinokor",DY:"Dongyoung",CK:"CK Line",RENTAL:"Container Rental"};
 const CN_KR = {SNK:"장금상선",DY:"동영해운",CK:"CK Line",RENTAL:"Rental"};
+const CARRIER_CALL_PORTS = {
+  SNK: ["VMTP", "Fishery", "PL", "VMPP"],
+  DY: ["VMTP", "Fishery"],
+  CK: ["VMTP", "Fishery"],
+};
 const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
 const F_TO_R = Object.fromEntries(Object.entries(PM).map(([rental, freight]) => [freight, rental]));
 const DOC_RC = {mow:"Moscow",spb:"St.Petersburg",nsb:"Novosibirsk",ekb:"Ekaterinburg"};
@@ -529,6 +534,18 @@ const Bg = ({k, title}) => {
   const styles = {SNK:{background:"#dbeafe",color:"#1d4ed8"},DY:{background:"#d1fae5",color:"#065f46"},CK:{background:"#ffedd5",color:"#9a3412"},RENTAL:{background:"#ede9fe",color:"#6d21a8"}};
   return <span title={title || CN[k] || k} style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,...styles[k]}}>{k === "RENTAL" ? "RENT" : k}</span>;
 };
+
+const CarrierPortGuide = () => (
+  <div className="carrier-port-guide" aria-label="Carrier calling ports">
+    <div className="carrier-port-guide-title">Calling Port</div>
+    {CRS.map(k => (
+      <div key={k} className="carrier-port-guide-row">
+        <Bg k={k} title={CN[k]}/>
+        <span className="carrier-port-guide-ports">{CARRIER_CALL_PORTS[k].join(", ")}</span>
+      </div>
+    ))}
+  </div>
+);
 
 const tabIconStyle = (active) => ({ opacity: active ? 1 : 0.72, display: "block" });
 
@@ -3395,14 +3412,21 @@ export default function App() {
 
       {/* COC/SOC TOGGLE */}
       {tab==="ocean" && (
-        <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
-          <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
-            {["coc","soc"].map(t=>(
-              <button key={t} onClick={()=>setCtype(t)} style={{padding:"6px 16px",fontSize:11,fontWeight:600,borderRadius:6,background:ctype===t?"#fff":"transparent",border:"none",cursor:"pointer",color:ctype===t?"#111":"#9ca3af"}}>{t.toUpperCase()}</button>
-            ))}
+        <div className="ocean-toolbar-shell">
+          <div className="ocean-toolbar">
+            <div className="ocean-toolbar-left">
+              <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
+                  {["coc","soc"].map(t=>(
+                    <button key={t} onClick={()=>setCtype(t)} style={{padding:"6px 16px",fontSize:11,fontWeight:600,borderRadius:6,background:ctype===t?"#fff":"transparent",border:"none",cursor:"pointer",color:ctype===t?"#111":"#9ca3af"}}>{t.toUpperCase()}</button>
+                  ))}
+                </div>
+                <span style={{fontSize:10,color:"#9ca3af"}}>{ctype==="coc"?"Carrier Owned":"Shipper Owned"}</span>
+              </div>
+              <RatePeriodToggle/>
+            </div>
+            <CarrierPortGuide/>
           </div>
-          <span style={{fontSize:10,color:"#9ca3af",marginLeft:8}}>{ctype==="coc"?"Carrier Owned":"Shipper Owned"}</span>
-          <RatePeriodToggle/>
         </div>
       )}
       {tab==="dropoff" && (
