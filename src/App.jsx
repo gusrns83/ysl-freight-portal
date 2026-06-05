@@ -3802,8 +3802,9 @@ export default function App() {
     <div className={adVisible ? "app-root app-has-fixed-ad" : "app-root"} style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
       {adminSaveToastEl}
 
+      <div className="portal-sticky-top">
       {/* HEADER */}
-      <div style={{position:"sticky",top:0,zIndex:30,background:"#fff",borderBottom:"1px solid #e5e7eb",boxShadow:"0 1px 3px rgba(0,0,0,0.06)"}}>
+      <div>
         <div style={{maxWidth:640,margin:"0 auto",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             <Logo size={32}/>
@@ -3833,34 +3834,10 @@ export default function App() {
         </div>
       </div>
 
-      {/* ADMIN MARGIN PANEL */}
-      {isAdmin && (
-        <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px"}}>
-          {!settingsLoaded ? (
-            <RatesLoading />
-          ) : (
-          <>
-          <button type="button" onClick={()=>setShowCarrierAdmin(true)}
-            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#1e40af",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            선사별 운임 관리 (매입 · 매출 · 마진)
-          </button>
-          <button type="button" onClick={()=>setShowRentalAdmin(true)}
-            style={{width:"100%",padding:"12px 14px",marginBottom:10,fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            컨테이너 Rental 운임 관리 (매입 · 매출 · 마진)
-          </button>
-          <button type="button" onClick={()=>setShowAdAdmin(true)}
-            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#ea580c",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            하단 광고 배너 관리 (최대 3개)
-          </button>
-          </>
-          )}
-        </div>
-      )}
-
       {!isAdmin && (
       <>
       {/* SEARCH + FILTERS */}
-      <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px 8px"}}>
+      <div style={{maxWidth:640,margin:"0 auto",padding:"0 16px 8px"}}>
         <input placeholder="Search POL..." value={search} onChange={e=>setSearch(e.target.value)}
           style={{width:"100%",padding:"10px 16px",fontSize:14,border:"1px solid #e5e7eb",borderRadius:10,outline:"none",background:"#fff",boxSizing:"border-box"}}/>
         <div style={{display:"flex",gap:6,marginTop:8,overflowX:"auto",paddingBottom:4}}>
@@ -3894,7 +3871,7 @@ export default function App() {
 
       {/* COC/SOC TOGGLE */}
       {tab==="ocean" && (
-        <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
+        <div style={{maxWidth:640,margin:"0 auto",padding:"10px 16px 12px"}}>
           <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
             {["coc","soc"].map(t=>(
               <button key={t} onClick={()=>setCtype(t)} style={{padding:"6px 16px",fontSize:11,fontWeight:600,borderRadius:6,background:ctype===t?"#fff":"transparent",border:"none",cursor:"pointer",color:ctype===t?"#111":"#9ca3af"}}>{t.toUpperCase()}</button>
@@ -3905,16 +3882,45 @@ export default function App() {
         </div>
       )}
       {tab==="dropoff" && (
-        <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
+        <div style={{maxWidth:640,margin:"0 auto",padding:"10px 16px 12px"}}>
           <RatePeriodToggle/>
         </div>
       )}
       {tab==="rental" && (
-        <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
+        <div style={{maxWidth:640,margin:"0 auto",padding:"10px 16px 12px"}}>
           <RatePeriodToggle/>
         </div>
       )}
+      </>
+      )}
+      </div>
 
+      {/* ADMIN MARGIN PANEL */}
+      {isAdmin && (
+        <div style={{maxWidth:640,margin:"12px auto 0",padding:"0 16px"}}>
+          {!settingsLoaded ? (
+            <RatesLoading />
+          ) : (
+          <>
+          <button type="button" onClick={()=>setShowCarrierAdmin(true)}
+            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#1e40af",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            선사별 운임 관리 (매입 · 매출 · 마진)
+          </button>
+          <button type="button" onClick={()=>setShowRentalAdmin(true)}
+            style={{width:"100%",padding:"12px 14px",marginBottom:10,fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            컨테이너 Rental 운임 관리 (매입 · 매출 · 마진)
+          </button>
+          <button type="button" onClick={()=>setShowAdAdmin(true)}
+            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#ea580c",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            하단 광고 배너 관리 (최대 3개)
+          </button>
+          </>
+          )}
+        </div>
+      )}
+
+      {!isAdmin && (
+      <>
       {/* CONTENT */}
       <div style={{maxWidth:640,margin:"12px auto",padding:"0 16px 24px"}}>
         {!settingsLoaded ? (
