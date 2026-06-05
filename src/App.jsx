@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v10"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v11"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -787,6 +787,52 @@ const buildSellingGriMargins = (
   return { polM: nextPolM, polTs: nextPolTs };
 };
 
+/** 현재 운임 매입가 → 향후 운임 pol_costs 복사 */
+const buildCopyCurrentToFutureCosts = (prevCosts, { rows, carrier, carrierRates, fData }) => {
+  let next = { ...prevCosts };
+  rows.forEach(row => {
+    RATE_TYPES.forEach(t => {
+      const cost = resolveCarrierCostFromStore(next, row.pol, carrier, t, "current", carrierRates, fData);
+      if (cost == null) return;
+      const prevCr = { ...(next[row.pol]?.carrier?.[carrier] || {}) };
+      const bucket = { ...(prevCr.future || {}) };
+      bucket[t] = cost;
+      const nextCr = { ...prevCr, future: bucket };
+      delete nextCr[t];
+      next = {
+        ...next,
+        [row.pol]: {
+          ...(next[row.pol] || {}),
+          carrier: { ...(next[row.pol]?.carrier || {}), [carrier]: nextCr },
+        },
+      };
+    });
+  });
+  return next;
+};
+
+const copyCarrierRatesPeriod = (prev, carrier) => {
+  const cur = prev[carrier]?.current || {};
+  return {
+    ...prev,
+    [carrier]: {
+      current: { ...(prev[carrier]?.current || {}) },
+      future: { ...cur },
+    },
+  };
+};
+
+const copyCarrierDropRatesPeriod = (prev, carrier) => {
+  const cur = prev[carrier]?.current || {};
+  return {
+    ...prev,
+    [carrier]: {
+      current: { ...(prev[carrier]?.current || {}) },
+      future: JSON.parse(JSON.stringify(cur)),
+    },
+  };
+};
+
 const pickLatestMargin = (candidates) =>
   candidates.reduce((best, c) => (c.ts > best.ts ? c : best)).value;
 
@@ -1269,6 +1315,7 @@ export default function App() {
   const [polCostO, setPolCostO] = useState(() => pricingBoot?.polCostO ?? {});
   const [griBuyUndo, setGriBuyUndo] = useState(null);
   const [griSellUndo, setGriSellUndo] = useState(null);
+  const [importFreightUndo, setImportFreightUndo] = useState(null);
   const [marginTab, setMarginTab] = useState("global");
   const [rentalMarginTab, setRentalMarginTab] = useState("global");
   const [selArea, setSelArea] = useState("");
@@ -1607,6 +1654,117 @@ export default function App() {
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
         flashSaveFeedback("success", "✅ 매출 GRI 되돌리기 · 저장 완료");
+      })
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+      .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
+  };
+
+  const importCurrentToFutureFreight = (carrier, dropoffMode) => {
+    if (!window.confirm(`${CN_KR[carrier]} 현재 운임을 향후 운임에 복사합니다.\n기존 향후 운임 값은 덮어씁니다. 계속할까요?`)) return;
+    setImportFreightUndo({
+      carrier,
+      dropoffMode,
+      polCostO: JSON.parse(JSON.stringify(polCostO)),
+      carrierRates: JSON.parse(JSON.stringify(carrierRates)),
+      carrierDropRates: JSON.parse(JSON.stringify(carrierDropRates)),
+    });
+    cancelPendingPricingSave();
+    resetSaveQueue();
+    skipAutoSaveRef.current = true;
+    setCarrierEditCell(null);
+
+    if (dropoffMode) {
+      const nextDrop = copyCarrierDropRatesPeriod(carrierDropRates, carrier);
+      setCarrierDropRates(nextDrop);
+      writePricingCache({
+        ...(readStoredPricingCache() || { v: 1 }),
+        v: 1,
+        carrierDropRates: nextDrop,
+        pricingSavedAt: Date.now(),
+      });
+      enqueueSave(async () => {
+        await saveOneSettingWithRetry("carrier_drop_rates_json", JSON.stringify(nextDrop));
+      })
+        .then(() => {
+          writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+          flashSaveFeedback("success", `✅ ${CN_KR[carrier]} Drop off · 기존운임 → 향후 복사 완료`);
+        })
+        .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+        .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
+      return;
+    }
+
+    const nextCosts = buildCopyCurrentToFutureCosts(polCostO, {
+      rows: fData, carrier, carrierRates, fData,
+    });
+    const nextRates = copyCarrierRatesPeriod(carrierRates, carrier);
+    setPolCostO(nextCosts);
+    setCarrierRates(nextRates);
+    writePricingCache({
+      ...(readStoredPricingCache() || { v: 1 }),
+      v: 1,
+      polCostO: nextCosts,
+      carrierRates: nextRates,
+      pricingSavedAt: Date.now(),
+    });
+    enqueueSave(async () => {
+      await saveSettingsEntries([
+        ["pol_costs", JSON.stringify(nextCosts)],
+        ["carrier_rates_json", JSON.stringify(nextRates)],
+      ]);
+    })
+      .then(() => {
+        writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        flashSaveFeedback("success", `✅ ${CN_KR[carrier]} · 기존운임 → 향후 복사 완료 · GRI로 조정하세요`);
+      })
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+      .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
+  };
+
+  const undoImportFreight = () => {
+    if (!importFreightUndo) return;
+    const { carrier, dropoffMode, polCostO: restoredCosts, carrierRates: restoredRates, carrierDropRates: restoredDrop } = importFreightUndo;
+    setImportFreightUndo(null);
+    cancelPendingPricingSave();
+    resetSaveQueue();
+    skipAutoSaveRef.current = true;
+    if (dropoffMode) {
+      setCarrierDropRates(restoredDrop);
+      writePricingCache({
+        ...(readStoredPricingCache() || { v: 1 }),
+        v: 1,
+        carrierDropRates: restoredDrop,
+        pricingSavedAt: Date.now(),
+      });
+      enqueueSave(async () => {
+        await saveOneSettingWithRetry("carrier_drop_rates_json", JSON.stringify(restoredDrop));
+      })
+        .then(() => {
+          writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+          flashSaveFeedback("success", "✅ 기존운임 가져오기 되돌리기 · 저장 완료");
+        })
+        .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+        .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
+      return;
+    }
+    setPolCostO(restoredCosts);
+    setCarrierRates(restoredRates);
+    writePricingCache({
+      ...(readStoredPricingCache() || { v: 1 }),
+      v: 1,
+      polCostO: restoredCosts,
+      carrierRates: restoredRates,
+      pricingSavedAt: Date.now(),
+    });
+    enqueueSave(async () => {
+      await saveSettingsEntries([
+        ["pol_costs", JSON.stringify(restoredCosts)],
+        ["carrier_rates_json", JSON.stringify(restoredRates)],
+      ]);
+    })
+      .then(() => {
+        writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        flashSaveFeedback("success", "✅ 기존운임 가져오기 되돌리기 · 저장 완료");
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
       .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
@@ -3685,6 +3843,26 @@ export default function App() {
         <div className="carrier-admin-page" onClick={e => e.stopPropagation()}>
           {!isDropAdmin && (
           <>
+          {isFuture && (
+            <div className="import-current-freight-box" style={{ marginBottom: 10 }}>
+              <button
+                type="button"
+                className="import-current-freight-btn"
+                onClick={() => importCurrentToFutureFreight(caCr, false)}
+              >
+                <span className="import-current-freight-icon">📋</span>
+                <span className="import-current-freight-text">
+                  <strong>기존운임 가져오기</strong>
+                  <span>현재 {CN_KR[caCr]} 매입 운임을 향후 운임에 복사 · 이후 GRI로 조정</span>
+                </span>
+              </button>
+              {importFreightUndo?.carrier === caCr && !importFreightUndo?.dropoffMode && (
+                <button type="button" className="import-current-freight-undo" onClick={undoImportFreight}>
+                  되돌리기
+                </button>
+              )}
+            </div>
+          )}
           <MarginPanel
             filterHint={
               marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
@@ -3775,6 +3953,26 @@ export default function App() {
                   </div>
                 </div>
               </div>
+              {isFuture && (
+                <div className="import-current-freight-box" style={{ marginBottom: 12 }}>
+                  <button
+                    type="button"
+                    className="import-current-freight-btn import-current-freight-btn--drop"
+                    onClick={() => importCurrentToFutureFreight(caCr, true)}
+                  >
+                    <span className="import-current-freight-icon">📋</span>
+                    <span className="import-current-freight-text">
+                      <strong>기존운임 가져오기</strong>
+                      <span>현재 Drop off 운임을 향후 운임에 복사</span>
+                    </span>
+                  </button>
+                  {importFreightUndo?.carrier === caCr && importFreightUndo?.dropoffMode && (
+                    <button type="button" className="import-current-freight-undo" onClick={undoImportFreight}>
+                      되돌리기
+                    </button>
+                  )}
+                </div>
+              )}
               <div className="carrier-grid-wrap drop-admin-table-wrap">
                 <table className="carrier-grid drop-admin-table">
                   <thead>
