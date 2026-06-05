@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v11"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v12"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -175,8 +175,8 @@ const api = async (path, opts = {}) => {
 const HEAVY_SETTING_KEYS_LIST = ["pol_costs", "rental_rates_json", "carrier_rates_json"];
 
 const PRICING_LIGHT_KEYS = [
-  "global_margins", "area_margins", "pol_margins",
-  "margin_timestamps", "area_margin_timestamps", "pol_margin_timestamps",
+  "global_margins", "area_margins", "pol_margins", "pol_margins_future",
+  "margin_timestamps", "area_margin_timestamps", "pol_margin_timestamps", "pol_margin_timestamps_future",
   "rental_global_margins", "rental_area_margins", "rental_pol_margins",
   "rental_margin_timestamps", "rental_area_margin_timestamps", "rental_pol_margin_timestamps",
   "validity_info_json", "validity_snk", "validity_dy", "validity_ck", "validity_rental",
@@ -756,22 +756,18 @@ const buildBuyingGriCosts = (prevCosts, { deltas, rows, carrier, period, carrier
 const buildSellingGriMargins = (
   prevPolM,
   prevPolTs,
-  { deltas, rows, costs, carrier, period, carrierRates, fData, margins, areaM, polM, marginTs, areaTs, polTs },
+  prevPolMFuture,
+  prevPolTsFuture,
+  { deltas, rows, costs, carrier, period, carrierRates, fData, margins, areaM, polM, polMFuture, marginTs, areaTs, polTs, polTsFuture },
 ) => {
-  const getMLocal = (pol, area, type) => {
-    const candidates = [{ value: marginNum(margins[type]), ts: marginTs[type] ?? 0 }];
-    const areaVal = areaM[area]?.[type];
-    if (areaVal != null && areaVal !== "") {
-      candidates.push({ value: marginNum(areaVal), ts: areaTs[area]?.[type] ?? 0 });
-    }
-    const polVal = polM[pol]?.[type];
-    if (polVal != null && polVal !== "") {
-      candidates.push({ value: marginNum(polVal), ts: polTs[pol]?.[type] ?? 0 });
-    }
-    return pickLatestMargin(candidates);
-  };
-  const nextPolM = { ...prevPolM };
-  const nextPolTs = { ...prevPolTs };
+  const isFuture = period === "future";
+  const marginCtx = { margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture };
+  const resolveM = (pol, area, type) =>
+    pickLatestMargin(resolveMarginCandidates(pol, area, type, period, marginCtx));
+  let nextPolM = { ...prevPolM };
+  let nextPolTs = { ...prevPolTs };
+  let nextPolMFuture = { ...prevPolMFuture };
+  let nextPolTsFuture = { ...prevPolTsFuture };
   const ts = marginNowTs();
   rows.forEach(row => {
     RATE_TYPES.forEach(t => {
@@ -779,13 +775,39 @@ const buildSellingGriMargins = (
       if (!Number.isFinite(delta)) return;
       const cost = resolveCarrierCostFromStore(costs, row.pol, carrier, t, period, carrierRates, fData);
       if (cost == null) return;
-      const curM = getMLocal(row.pol, row.area, t);
-      nextPolM[row.pol] = { ...(nextPolM[row.pol] || {}), [t]: curM + delta };
-      nextPolTs[row.pol] = { ...(nextPolTs[row.pol] || {}), [t]: ts };
+      const curM = resolveM(row.pol, row.area, t);
+      if (isFuture) {
+        nextPolMFuture[row.pol] = { ...(nextPolMFuture[row.pol] || {}), [t]: curM + delta };
+        nextPolTsFuture[row.pol] = { ...(nextPolTsFuture[row.pol] || {}), [t]: ts };
+      } else {
+        nextPolM[row.pol] = { ...(nextPolM[row.pol] || {}), [t]: curM + delta };
+        nextPolTs[row.pol] = { ...(nextPolTs[row.pol] || {}), [t]: ts };
+      }
     });
   });
-  return { polM: nextPolM, polTs: nextPolTs };
+  return { polM: nextPolM, polTs: nextPolTs, polMFuture: nextPolMFuture, polTsFuture: nextPolTsFuture };
 };
+
+const resolveMarginCandidates = (pol, area, type, period, ctx) => {
+  const candidates = [{ value: marginNum(ctx.margins[type]), ts: ctx.marginTs[type] ?? 0 }];
+  const areaVal = ctx.areaM[area]?.[type];
+  if (areaVal != null && areaVal !== "") {
+    candidates.push({ value: marginNum(areaVal), ts: ctx.areaTs[area]?.[type] ?? 0 });
+  }
+  if (period === "future") {
+    const futVal = ctx.polMFuture[pol]?.[type];
+    if (futVal != null && futVal !== "") {
+      candidates.push({ value: marginNum(futVal), ts: ctx.polTsFuture[pol]?.[type] ?? 0 });
+    }
+  }
+  const polVal = ctx.polM[pol]?.[type];
+  if (polVal != null && polVal !== "") {
+    candidates.push({ value: marginNum(polVal), ts: ctx.polTs[pol]?.[type] ?? 0 });
+  }
+  return candidates;
+};
+
+const griPeriodLabel = (period) => (period === "future" ? "향후 운임" : "현재 운임");
 
 /** 현재 운임 매입가 → 향후 운임 pol_costs 복사 */
 const buildCopyCurrentToFutureCosts = (prevCosts, { rows, carrier, carrierRates, fData }) => {
@@ -859,9 +881,11 @@ const parsePricingFromSettings = (s) => {
     margins: { ...DEFAULT_MARGINS },
     areaM: {},
     polM: {},
+    polMFuture: {},
     marginTs: Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])),
     areaTs: {},
     polTs: {},
+    polTsFuture: {},
     rentalMargins: defaultRentalMargins(),
     rentalAreaM: {},
     rentalPolM: {},
@@ -916,6 +940,7 @@ const parsePricingFromSettings = (s) => {
   if (s.global_margins) { try { snap.margins = JSON.parse(s.global_margins); } catch (e) {} }
   if (s.area_margins) { try { loadedAreaM = JSON.parse(s.area_margins); snap.areaM = loadedAreaM; } catch (e) {} }
   if (s.pol_margins) { try { loadedPolM = JSON.parse(s.pol_margins); snap.polM = loadedPolM; } catch (e) {} }
+  if (s.pol_margins_future) { try { snap.polMFuture = JSON.parse(s.pol_margins_future); } catch (e) {} }
   if (s.margin_timestamps) {
     try { snap.marginTs = JSON.parse(s.margin_timestamps); } catch (e) {}
   } else {
@@ -930,6 +955,9 @@ const parsePricingFromSettings = (s) => {
     try { snap.polTs = JSON.parse(s.pol_margin_timestamps); } catch (e) {}
   } else {
     snap.polTs = buildLegacyMarginTimestamps(loadedAreaM, loadedPolM).polTs;
+  }
+  if (s.pol_margin_timestamps_future) {
+    try { snap.polTsFuture = JSON.parse(s.pol_margin_timestamps_future); } catch (e) {}
   }
   let loadedRentalAreaM = {};
   let loadedRentalPolM = {};
@@ -973,9 +1001,11 @@ const pricingCacheFromSnapshot = (snap) => ({
   margins: snap.margins,
   areaM: snap.areaM,
   polM: snap.polM,
+  polMFuture: snap.polMFuture,
   marginTs: snap.marginTs,
   areaTs: snap.areaTs,
   polTs: snap.polTs,
+  polTsFuture: snap.polTsFuture,
   carrierRates: snap.carrierRates,
   carrierDropRates: snap.carrierDropRates,
   carrierDropMargins: snap.carrierDropMargins,
@@ -997,9 +1027,11 @@ const bootPricingFromCache = () => {
     margins: cache.margins ?? { ...DEFAULT_MARGINS },
     areaM: cache.areaM ?? {},
     polM: cache.polM ?? {},
+    polMFuture: cache.polMFuture ?? {},
     marginTs: cache.marginTs ?? Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])),
     areaTs: cache.areaTs ?? {},
     polTs: cache.polTs ?? {},
+    polTsFuture: cache.polTsFuture ?? {},
     carrierRates: cache.carrierRates ?? defaultCarrierRates(),
     carrierDropRates: cache.carrierDropRates
       ? mergeCarrierDropRates(cache.carrierDropRates)
@@ -1151,6 +1183,7 @@ function GriAdjustPanel({
   rateLabel = (t) => t.toUpperCase(),
   gridCols = "1fr 1fr 1fr 1fr",
   filterHint,
+  periodLabel,
   onApplyBuying,
   onApplySelling,
   canUndoBuying = false,
@@ -1189,7 +1222,20 @@ function GriAdjustPanel({
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 10 }}>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#374151", marginBottom: 8 }}>GRI 일괄 조정 (USD)</div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 8 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#374151" }}>GRI 일괄 조정 (USD)</div>
+        {periodLabel && (
+          <span style={{
+            fontSize: 9, fontWeight: 700, padding: "3px 8px", borderRadius: 999,
+            background: periodLabel.includes("향후") ? "#fef3c7" : "#f3f4f6",
+            color: periodLabel.includes("향후") ? "#b45309" : "#374151",
+            border: `1px solid ${periodLabel.includes("향후") ? "#fcd34d" : "#e5e7eb"}`,
+            whiteSpace: "nowrap",
+          }}>
+            {periodLabel}만 적용
+          </span>
+        )}
+      </div>
       {filterHint && <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 8 }}>{filterHint}</div>}
       <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: "#3d6a9e", marginBottom: 6 }}>매입 GRI</div>
@@ -1305,7 +1351,9 @@ export default function App() {
   const [areaM, setAreaM] = useState(() => pricingBoot?.areaM ?? {});
   const [areaTs, setAreaTs] = useState(() => pricingBoot?.areaTs ?? {});
   const [polM, setPolM] = useState(() => pricingBoot?.polM ?? {});
+  const [polMFuture, setPolMFuture] = useState(() => pricingBoot?.polMFuture ?? {});
   const [polTs, setPolTs] = useState(() => pricingBoot?.polTs ?? {});
+  const [polTsFuture, setPolTsFuture] = useState(() => pricingBoot?.polTsFuture ?? {});
   const [rentalMargins, setRentalMargins] = useState(() => pricingBoot?.rentalMargins ?? defaultRentalMargins());
   const [rentalMarginTs, setRentalMarginTs] = useState(() => pricingBoot?.rentalMarginTs ?? Object.fromEntries(RENTAL_RATE_TYPES.map(t => [t, marginNowTs()])));
   const [rentalAreaM, setRentalAreaM] = useState(() => pricingBoot?.rentalAreaM ?? {});
@@ -1389,7 +1437,9 @@ export default function App() {
   pricingSaveRef.current = {
     polCostO,
     polM,
+    polMFuture,
     polTs,
+    polTsFuture,
     margins,
     areaM,
     marginTs,
@@ -1515,18 +1565,10 @@ export default function App() {
     });
   };
 
-  const getM = (pol, area, type) => {
-    const candidates = [{ value: marginNum(margins[type]), ts: marginTs[type] ?? 0 }];
-    const areaVal = areaM[area]?.[type];
-    if (areaVal != null && areaVal !== "") {
-      candidates.push({ value: marginNum(areaVal), ts: areaTs[area]?.[type] ?? 0 });
-    }
-    const polVal = polM[pol]?.[type];
-    if (polVal != null && polVal !== "") {
-      candidates.push({ value: marginNum(polVal), ts: polTs[pol]?.[type] ?? 0 });
-    }
-    return pickLatestMargin(candidates);
-  };
+  const getM = (pol, area, type, period = "current") =>
+    pickLatestMargin(resolveMarginCandidates(pol, area, type, period, {
+      margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture,
+    }));
 
   const applyBuyingGriBulk = (deltas, rows, carrier, period) => {
     if (!rows?.length || !Object.keys(deltas).length) return;
@@ -1549,7 +1591,7 @@ export default function App() {
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
-        flashSaveFeedback("success", "✅ 매입 GRI 적용 · 저장 완료");
+        flashSaveFeedback("success", `✅ 매입 GRI (${griPeriodLabel(period)}) · 저장 완료`);
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
       .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
@@ -1587,8 +1629,12 @@ export default function App() {
       period,
       polM: JSON.parse(JSON.stringify(polM)),
       polTs: JSON.parse(JSON.stringify(polTs)),
+      polMFuture: JSON.parse(JSON.stringify(polMFuture)),
+      polTsFuture: JSON.parse(JSON.stringify(polTsFuture)),
     });
-    const { polM: nextPolM, polTs: nextPolTs } = buildSellingGriMargins(polM, polTs, {
+    const { polM: nextPolM, polTs: nextPolTs, polMFuture: nextPolMFuture, polTsFuture: nextPolTsFuture } = buildSellingGriMargins(
+      polM, polTs, polMFuture, polTsFuture,
+      {
       deltas,
       rows,
       costs: polCostO,
@@ -1599,31 +1645,43 @@ export default function App() {
       margins,
       areaM,
       polM,
+      polMFuture,
       marginTs,
       areaTs,
       polTs,
+      polTsFuture,
     });
     cancelPendingPricingSave();
     resetSaveQueue();
     skipAutoSaveRef.current = true;
     setPolM(nextPolM);
     setPolTs(nextPolTs);
+    setPolMFuture(nextPolMFuture);
+    setPolTsFuture(nextPolTsFuture);
     writePricingCache({
       ...(readStoredPricingCache() || { v: 1 }),
       v: 1,
       polM: nextPolM,
       polTs: nextPolTs,
+      polMFuture: nextPolMFuture,
+      polTsFuture: nextPolTsFuture,
       pricingSavedAt: Date.now(),
     });
+    const sellSaveEntries = period === "future"
+      ? [
+          ["pol_margins_future", JSON.stringify(nextPolMFuture)],
+          ["pol_margin_timestamps_future", JSON.stringify(nextPolTsFuture)],
+        ]
+      : [
+          ["pol_margins", JSON.stringify(nextPolM)],
+          ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
+        ];
     enqueueSave(async () => {
-      await saveSettingsEntries([
-        ["pol_margins", JSON.stringify(nextPolM)],
-        ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
-      ]);
+      await saveSettingsEntries(sellSaveEntries);
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
-        flashSaveFeedback("success", "✅ 매출 GRI 적용 · 저장 완료");
+        flashSaveFeedback("success", `✅ 매출 GRI (${griPeriodLabel(period)}) · 저장 완료`);
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
       .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
@@ -1631,24 +1689,30 @@ export default function App() {
 
   const undoSellingGriBulk = () => {
     if (!griSellUndo) return;
-    const { polM: restoredPolM, polTs: restoredPolTs } = griSellUndo;
+    const { polM: restoredPolM, polTs: restoredPolTs, polMFuture: restoredPolMFuture, polTsFuture: restoredPolTsFuture } = griSellUndo;
     setGriSellUndo(null);
     cancelPendingPricingSave();
     resetSaveQueue();
     skipAutoSaveRef.current = true;
     setPolM(restoredPolM);
     setPolTs(restoredPolTs);
+    setPolMFuture(restoredPolMFuture ?? {});
+    setPolTsFuture(restoredPolTsFuture ?? {});
     writePricingCache({
       ...(readStoredPricingCache() || { v: 1 }),
       v: 1,
       polM: restoredPolM,
       polTs: restoredPolTs,
+      polMFuture: restoredPolMFuture,
+      polTsFuture: restoredPolTsFuture,
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
       await saveSettingsEntries([
         ["pol_margins", JSON.stringify(restoredPolM)],
         ["pol_margin_timestamps", JSON.stringify(restoredPolTs)],
+        ["pol_margins_future", JSON.stringify(restoredPolMFuture)],
+        ["pol_margin_timestamps_future", JSON.stringify(restoredPolTsFuture)],
       ]);
     })
       .then(() => {
@@ -1770,11 +1834,14 @@ export default function App() {
       .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
   };
 
-  const applyPolMargin = (pol, type, value) => {
+  const applyPolMargin = (pol, type, value, period = "current") => {
     const raw = String(value).trim();
     const ts = marginNowTs();
+    const isFuture = period === "future";
+    const setStore = isFuture ? setPolMFuture : setPolM;
+    const setTsStore = isFuture ? setPolTsFuture : setPolTs;
     if (raw === "") {
-      setPolM(p => {
+      setStore(p => {
         if (p[pol]?.[type] == null) return p;
         const next = { ...p[pol] };
         delete next[type];
@@ -1783,7 +1850,7 @@ export default function App() {
         else n[pol] = next;
         return n;
       });
-      setPolTs(p => {
+      setTsStore(p => {
         if (p[pol]?.[type] == null) return p;
         const next = { ...p[pol] };
         delete next[type];
@@ -1796,8 +1863,8 @@ export default function App() {
     }
     const v = parseInt(raw, 10);
     if (!Number.isFinite(v)) return;
-    setPolM(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: v } }));
-    setPolTs(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: ts } }));
+    setStore(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: v } }));
+    setTsStore(p => ({ ...p, [pol]: { ...(p[pol] || {}), [type]: ts } }));
   };
 
   const applyPolMargins = (pol, m) => {
@@ -2295,11 +2362,13 @@ export default function App() {
     return [
       ["pol_costs", JSON.stringify(s.polCostO)],
       ["pol_margins", JSON.stringify(s.polM)],
+      ["pol_margins_future", JSON.stringify(s.polMFuture)],
       ["global_margins", JSON.stringify(s.margins)],
       ["area_margins", JSON.stringify(s.areaM)],
       ["margin_timestamps", JSON.stringify(s.marginTs)],
       ["area_margin_timestamps", JSON.stringify(s.areaTs)],
       ["pol_margin_timestamps", JSON.stringify(s.polTs)],
+      ["pol_margin_timestamps_future", JSON.stringify(s.polTsFuture)],
       ["carrier_rates_json", JSON.stringify(s.carrierRates)],
       ["carrier_drop_rates_json", JSON.stringify(s.carrierDropRates)],
       ["carrier_drop_margins_json", JSON.stringify(s.carrierDropMargins)],
@@ -2344,9 +2413,11 @@ export default function App() {
       margins: s.margins,
       areaM: s.areaM,
       polM: s.polM,
+      polMFuture: s.polMFuture,
       marginTs: s.marginTs,
       areaTs: s.areaTs,
       polTs: s.polTs,
+      polTsFuture: s.polTsFuture,
       carrierRates: s.carrierRates,
       carrierDropRates: s.carrierDropRates,
       carrierDropMargins: s.carrierDropMargins,
@@ -2378,9 +2449,17 @@ export default function App() {
         return next;
       });
     }
+    if (settingBundleHas(s, "pol_margins_future")) {
+      setPolMFuture(prev => {
+        const next = snap.polMFuture;
+        if (countPolMarginOverrides(next) === 0 && countPolMarginOverrides(prev) > 0) return prev;
+        return next;
+      });
+    }
     if (settingBundleHas(s, "margin_timestamps")) setMarginTs(snap.marginTs);
     if (settingBundleHas(s, "area_margin_timestamps")) setAreaTs(snap.areaTs);
     if (settingBundleHas(s, "pol_margin_timestamps")) setPolTs(snap.polTs);
+    if (settingBundleHas(s, "pol_margin_timestamps_future")) setPolTsFuture(snap.polTsFuture);
     if (settingBundleHas(s, "rental_global_margins")) setRentalMargins(snap.rentalMargins);
     if (settingBundleHas(s, "rental_area_margins")) setRentalAreaM(snap.rentalAreaM);
     if (settingBundleHas(s, "rental_pol_margins")) setRentalPolM(snap.rentalPolM);
@@ -2412,9 +2491,11 @@ export default function App() {
       ["global_margins", "margins"],
       ["area_margins", "areaM"],
       ["pol_margins", "polM"],
+      ["pol_margins_future", "polMFuture"],
       ["margin_timestamps", "marginTs"],
       ["area_margin_timestamps", "areaTs"],
       ["pol_margin_timestamps", "polTs"],
+      ["pol_margin_timestamps_future", "polTsFuture"],
       ["carrier_rates_json", "carrierRates"],
       ["carrier_drop_rates_json", "carrierDropRates"],
       ["carrier_drop_margins_json", "carrierDropMargins"],
@@ -2434,7 +2515,7 @@ export default function App() {
     if (["validity_snk", "validity_dy", "validity_ck", "validity_rental"].some(k => settingBundleHas(s, k))) {
       merged.validityInfo = patch.validityInfo;
     }
-    if (settingBundleHas(s, "pol_costs") || settingBundleHas(s, "pol_margins")) {
+    if (settingBundleHas(s, "pol_costs") || settingBundleHas(s, "pol_margins") || settingBundleHas(s, "pol_margins_future")) {
       merged.pricingSavedAt = merged.pricingSavedAt || Date.now();
     }
     if (settingBundleHas(s, "pol_costs") || settingBundleHas(s, "pol_margins") || settingBundleHas(s, "global_margins")) {
@@ -2466,9 +2547,11 @@ export default function App() {
     ["global_margins", JSON.stringify(margins)],
     ["area_margins", JSON.stringify(areaM)],
     ["pol_margins", JSON.stringify(polM)],
+    ["pol_margins_future", JSON.stringify(polMFuture)],
     ["margin_timestamps", JSON.stringify(marginTs)],
     ["area_margin_timestamps", JSON.stringify(areaTs)],
     ["pol_margin_timestamps", JSON.stringify(polTs)],
+    ["pol_margin_timestamps_future", JSON.stringify(polTsFuture)],
     ["rental_global_margins", JSON.stringify(rentalMargins)],
     ["rental_area_margins", JSON.stringify(rentalAreaM)],
     ["rental_pol_margins", JSON.stringify(rentalPolM)],
@@ -2531,13 +2614,17 @@ export default function App() {
         const serverCosts = serverSnap.polCostO;
         const cacheMargins = cached?.polM;
         const serverMargins = serverSnap.polM;
+        const cacheMarginsFuture = cached?.polMFuture;
+        const serverMarginsFuture = serverSnap.polMFuture;
         const costsDiffer = cacheCosts && JSON.stringify(cacheCosts) !== JSON.stringify(serverCosts);
         const marginsDiffer = cacheMargins && JSON.stringify(cacheMargins) !== JSON.stringify(serverMargins);
+        const marginsFutureDiffer = cacheMarginsFuture && JSON.stringify(cacheMarginsFuture) !== JSON.stringify(serverMarginsFuture);
         const pendingCostResync = costsDiffer && (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
-        const pendingMarginResync = marginsDiffer && (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
+        const pendingMarginResync = (marginsDiffer || marginsFutureDiffer) && (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
 
         if (pendingCostResync) priority.pol_costs = JSON.stringify(cacheCosts);
-        if (pendingMarginResync) priority.pol_margins = JSON.stringify(cacheMargins);
+        if (pendingMarginResync && cacheMargins) priority.pol_margins = JSON.stringify(cacheMargins);
+        if (pendingMarginResync && cacheMarginsFuture) priority.pol_margins_future = JSON.stringify(cacheMarginsFuture);
 
         applySettingsBundle(priority);
 
@@ -2549,8 +2636,10 @@ export default function App() {
             }
             if (pendingMarginResync) {
               await saveSettingsEntries([
-                ["pol_margins", JSON.stringify(cacheMargins)],
+                ...(cacheMargins ? [["pol_margins", JSON.stringify(cacheMargins)]] : []),
                 ...(cached?.polTs ? [["pol_margin_timestamps", JSON.stringify(cached.polTs)]] : []),
+                ...(cacheMarginsFuture ? [["pol_margins_future", JSON.stringify(cacheMarginsFuture)]] : []),
+                ...(cached?.polTsFuture ? [["pol_margin_timestamps_future", JSON.stringify(cached.polTsFuture)]] : []),
               ]);
             }
             writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -2616,9 +2705,11 @@ export default function App() {
     margins,
     areaM,
     polM,
+    polMFuture,
     marginTs,
     areaTs,
     polTs,
+    polTsFuture,
     carrierRates,
     carrierDropRates,
     carrierDropMargins,
@@ -2842,7 +2933,7 @@ export default function App() {
   const getRentSellMargin = (freightPol, rPol, area, si) => {
     const fp = PM[rPol] || freightPol;
     if (!fp || !area) return 0;
-    return getM(fp, area, rentSocType(si)) + getRentalM(fp, area, rentRentalType(si));
+    return getM(fp, area, rentSocType(si), ratePeriod) + getRentalM(fp, area, rentRentalType(si));
   };
 
   const applyRentCityCost = (freightPol, city, si, value) => {
@@ -2915,8 +3006,8 @@ export default function App() {
     return CRS.map(k => {
       const s20 = getCarrierRate(fr, k, "soc20");
       const s40 = getCarrierRate(fr, k, "soc40");
-      const m20 = getM(fp, fr.area, "soc20") + getRentalM(fp, fr.area, "r20");
-      const m40 = getM(fp, fr.area, "soc40") + getRentalM(fp, fr.area, "r40");
+      const m20 = getM(fp, fr.area, "soc20", ratePeriod) + getRentalM(fp, fr.area, "r20");
+      const m40 = getM(fp, fr.area, "soc40", ratePeriod) + getRentalM(fp, fr.area, "r40");
       const cost20 = s20 != null && r20 != null ? s20 + r20 : null;
       const cost40 = s40 != null && r40 != null ? s40 + r40 : null;
       return {
@@ -2947,19 +3038,19 @@ export default function App() {
   };
   const oceanDetail = (row, t) => {
     const b = bNet(row, t);
-    return mkPrice(b.val, getM(row.pol, row.area, t), b.cr);
+    return mkPrice(b.val, getM(row.pol, row.area, t, ratePeriod), b.cr);
   };
   const doDetail = (row, cityKey, si) => {
     const t = si === 0 ? "coc20" : "coc40";
     const b = bDO(row, cityKey, si);
     const cost = getDropCityCost(row, cityKey, si);
     const dropM = b.cr ? getDropM(b.cr, cityKey, si) : 0;
-    return mkPrice(cost, getM(row.pol, row.area, t) + dropM, b.cr);
+    return mkPrice(cost, getM(row.pol, row.area, t, ratePeriod) + dropM, b.cr);
   };
   const dropCarrierDetail = (row, cityKey, cr, si, period = ratePeriod) => {
     const t = si === 0 ? "coc20" : "coc40";
     const cost = getCarrierDropTotalCost(row, cr, cityKey, si, period);
-    return mkPrice(cost, getM(row.pol, row.area, t) + getDropM(cr, cityKey, si), cr);
+    return mkPrice(cost, getM(row.pol, row.area, t, period) + getDropM(cr, cityKey, si), cr);
   };
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
@@ -3654,7 +3745,7 @@ export default function App() {
       if (!Number.isFinite(sell)) return;
       const cost = getCarrierRate(row, caCr, type, caPeriod);
       if (cost == null) return;
-      applyPolMargin(row.pol, type, sell - cost);
+      applyPolMargin(row.pol, type, sell - cost, caPeriod);
     };
     const applyDropAdminSell = (cityKey, si, sellStr) => {
       const sell = parseInt(sellStr, 10);
@@ -3683,7 +3774,7 @@ export default function App() {
       if (base == null && cost == null) {
         return <td className="cg-cell cg-empty">—</td>;
       }
-      const margin = getM(row.pol, row.area, type);
+      const margin = getM(row.pol, row.area, type, caPeriod);
       const sell = cost != null ? cost + margin : null;
       const cellKey = `${row.pol}:${type}`;
       const isOpen = carrierEditCell === cellKey;
@@ -3713,7 +3804,7 @@ export default function App() {
                     <td className="cg-mini-label cg-mini-label-margin">마진</td>
                     <td className="cg-mini-val-margin">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
-                        value={margin} onChange={e => applyPolMargin(row.pol, type, e.target.value)}/>
+                        value={margin} onChange={e => applyPolMargin(row.pol, type, e.target.value, caPeriod)}/>
                     </td>
                   </tr>
                 </tbody>
@@ -3879,6 +3970,7 @@ export default function App() {
             areas={areas} fData={fData} getM={getM}
           />
           <GriAdjustPanel
+            periodLabel={griPeriodLabel(caPeriod)}
             filterHint={`${gridFilterLabel} · COC/SOC 타입별 금액 입력 후 적용`}
             onApplyBuying={deltas => applyBuyingGriBulk(deltas, griTargetRows, caCr, caPeriod)}
             onApplySelling={deltas => applySellingGriBulk(deltas, griTargetRows, caCr, caPeriod)}
@@ -4035,10 +4127,10 @@ export default function App() {
                   const cv20=getCarrierRate(row,k,t20,"current"),cv40=getCarrierRate(row,k,t40,"current");
                   const fv20=getCarrierRate(row,k,t20,"future"),fv40=getCarrierRate(row,k,t40,"future");
                   if(cv20==null&&cv40==null&&fv20==null&&fv40==null)return null;
-                  const cd20=mkPrice(cv20,getM(row.pol,row.area,t20),k);
-                  const cd40=mkPrice(cv40,getM(row.pol,row.area,t40),k);
-                  const fd20=mkPrice(fv20,getM(row.pol,row.area,t20),k);
-                  const fd40=mkPrice(fv40,getM(row.pol,row.area,t40),k);
+                  const cd20=mkPrice(cv20,getM(row.pol,row.area,t20,"current"),k);
+                  const cd40=mkPrice(cv40,getM(row.pol,row.area,t40,"current"),k);
+                  const fd20=mkPrice(fv20,getM(row.pol,row.area,t20,"future"),k);
+                  const fd40=mkPrice(fv40,getM(row.pol,row.area,t40,"future"),k);
                   return (
                     <div key={k} style={{padding:"10px 0",borderBottom:"1px solid #f9fafb"}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
@@ -4072,7 +4164,7 @@ export default function App() {
               <tbody>
                 {CRS.map(k=>{ const v20=getCarrierRate(row,k,t20),v40=getCarrierRate(row,k,t40); if(v20==null&&v40==null)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
                   const priceColor = ratePeriod==="future"?"#b45309":"#1d4ed8";
-                  const m20=getM(row.pol,row.area,t20), m40=getM(row.pol,row.area,t40);
+                  const m20=getM(row.pol,row.area,t20,ratePeriod), m40=getM(row.pol,row.area,t40,ratePeriod);
                   const s20=v20!=null?v20+m20:null, s40=v40!=null?v40+m40:null;
                   const best20=b20.val!=null?b20.val+m20:null, best40=b40.val!=null?b40.val+m40:null;
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
@@ -4268,8 +4360,8 @@ export default function App() {
                           : carriers.map(c=>{
                           const cdC20=mkPrice(c.cost20,c.m20,c.k);
                           const cdC40=mkPrice(c.cost40,c.m40,c.k);
-                          const socC20=mkPrice(c.soc20,getM(fp,fr.area,"soc20"),c.k);
-                          const socC40=mkPrice(c.soc40,getM(fp,fr.area,"soc40"),c.k);
+                          const socC20=mkPrice(c.soc20,getM(fp,fr.area,"soc20",ratePeriod),c.k);
+                          const socC40=mkPrice(c.soc40,getM(fp,fr.area,"soc40",ratePeriod),c.k);
                           const rentC20=mkPrice(c.rent20,getRentalM(fp,fr.area,"r20"),c.k);
                           const rentC40=mkPrice(c.rent40,getRentalM(fp,fr.area,"r40"),c.k);
                           return (
