@@ -342,6 +342,65 @@
   }
 }
 
+.ocean-toolbar-shell {
+  max-width: 640px;
+  margin: 10px auto 0;
+  padding: 0 16px;
+  box-sizing: border-box;
+}
+.ocean-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.ocean-toolbar-left {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.carrier-port-guide {
+  flex: 0 1 240px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 8px 12px;
+  box-sizing: border-box;
+}
+.carrier-port-guide-title {
+  font-size: 9px;
+  font-weight: 700;
+  color: #9ca3af;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+.carrier-port-guide-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+.carrier-port-guide-row:last-child {
+  margin-bottom: 0;
+}
+.carrier-port-guide-ports {
+  font-size: 10px;
+  font-weight: 500;
+  color: #374151;
+  line-height: 1.35;
+  padding-top: 1px;
+}
+@media (max-width: 520px) {
+  .ocean-toolbar {
+    flex-direction: column;
+  }
+  .carrier-port-guide {
+    flex: 1 1 auto;
+    width: 100%;
+  }
+}
+
 .validity-date-inp {
   width: 100%;
   padding: 6px 8px;
