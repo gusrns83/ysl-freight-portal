@@ -301,6 +301,37 @@ const formatValiditySlotLabel = (slot) => {
   return "";
 };
 
+/** 게스트 운임표: 01.06.26 - 15.06.26 */
+const compactValidityDatePart = (str) => {
+  if (!str) return "";
+  const iso = parseValidityToISO(str);
+  if (iso) {
+    const [y, mo, d] = iso.split("-");
+    return `${String(parseInt(d, 10)).padStart(2, "0")}.${mo}.${y.slice(-2)}`;
+  }
+  const m = str.match(/(\d{1,2})\.(\d{1,2})\.(\d{2,4})/);
+  if (m) {
+    const d = String(parseInt(m[1], 10)).padStart(2, "0");
+    const mo = String(parseInt(m[2], 10)).padStart(2, "0");
+    const y = m[3].length === 4 ? m[3].slice(-2) : m[3];
+    return `${d}.${mo}.${y}`;
+  }
+  return "";
+};
+
+const formatValidityCompact = (slot) => {
+  const s = normalizeValiditySlot(slot);
+  if (s.furtherNotice && !s.from && !s.till) return FURTHER_NOTICE_LABEL;
+  const from = compactValidityDatePart(s.from);
+  const till = s.furtherNotice ? FURTHER_NOTICE_LABEL : compactValidityDatePart(s.till);
+  if (from && till && till !== FURTHER_NOTICE_LABEL) return `${from} - ${till}`;
+  if (from && till === FURTHER_NOTICE_LABEL) return `${from} - ${till}`;
+  if (from && !till) return `${from} -`;
+  if (till) return till;
+  if (from) return from;
+  return "";
+};
+
 const defaultValidityInfo = () => Object.fromEntries(VALIDITY_KEYS.map(k => [k, {
   current: {
     from: "",
@@ -2422,6 +2453,11 @@ export default function App() {
 
   const getValidityLabel = (cr) => {
     const period = ratePeriod === "future" ? "future" : "current";
+    return formatValidityCompact(validityInfo[cr]?.[period]);
+  };
+
+  const getValidityLabelFull = (cr) => {
+    const period = ratePeriod === "future" ? "future" : "current";
     return formatValiditySlotLabel(validityInfo[cr]?.[period]);
   };
 
@@ -2429,12 +2465,12 @@ export default function App() {
     const label = getValidityLabel(carrierKey);
     if (!label) return <span style={{fontSize:10,color:"#d1d5db"}}>—</span>;
     const isFuture = ratePeriod === "future";
-    const isFn = label === FURTHER_NOTICE_LABEL || label.endsWith(FURTHER_NOTICE_LABEL);
+    const isFn = label === FURTHER_NOTICE_LABEL || label.includes(FURTHER_NOTICE_LABEL);
     const tone = isFn ? "fn" : (isFuture ? "future" : "current");
     return (
       <span
-        className={`validity-badge validity-badge--${tone}${compact ? " validity-badge--compact" : ""}`}
-        title={label}
+        className={`validity-badge validity-badge--${tone}${compact ? " validity-badge--compact" : ""} validity-compact-text`}
+        title={getValidityLabelFull(carrierKey) || label}
       >
         {label}
       </span>
@@ -2978,7 +3014,7 @@ export default function App() {
             <table className="carrier-validity-table" style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
               <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
                 <th style={{textAlign:"left",padding:"4px 0",fontWeight:500,width:"28%"}}>Carrier</th>
-                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500,width:"36%"}}>Validity</th>
+                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500,width:"36%"}}>Validity (From - Till)</th>
                 <th style={{textAlign:"right",padding:"4px 0",fontWeight:500,width:"18%"}}>20'</th>
                 <th style={{textAlign:"right",padding:"4px 0",fontWeight:500,width:"18%"}}>40'</th>
               </tr></thead>
@@ -3066,7 +3102,7 @@ export default function App() {
                     <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
                       {!isAdmin && carrierRows.length > 0 && (
                         <div style={{display:"grid",gridTemplateColumns:"28% 32% 20% 20%",padding:"6px 12px 0 20px",fontSize:10,color:"#9ca3af",fontWeight:500}}>
-                          <span>Carrier</span><span>Validity</span><span style={{textAlign:"right"}}>20'</span><span style={{textAlign:"right"}}>40'</span>
+                          <span>Carrier</span><span>Validity (From - Till)</span><span style={{textAlign:"right"}}>20'</span><span style={{textAlign:"right"}}>40'</span>
                         </div>
                       )}
                       {carrierRows.length===0
