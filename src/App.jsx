@@ -292,11 +292,13 @@ const normalizeValidityCarrier = (raw) => ({
 
 const formatValiditySlotLabel = (slot) => {
   const s = normalizeValiditySlot(slot);
-  const parts = [];
-  if (s.from) parts.push(s.from);
-  if (s.furtherNotice) parts.push(FURTHER_NOTICE_LABEL);
-  else if (s.till) parts.push(s.till);
-  return parts.join(" · ");
+  if (s.furtherNotice && !s.from && !s.till) return FURTHER_NOTICE_LABEL;
+  const fromPart = s.from || "";
+  const tillPart = s.furtherNotice ? FURTHER_NOTICE_LABEL : (s.till || "");
+  if (fromPart && tillPart) return `${fromPart} - ${tillPart}`;
+  if (fromPart) return fromPart;
+  if (tillPart) return tillPart;
+  return "";
 };
 
 const defaultValidityInfo = () => Object.fromEntries(VALIDITY_KEYS.map(k => [k, {
@@ -2427,19 +2429,15 @@ export default function App() {
     const label = getValidityLabel(carrierKey);
     if (!label) return <span style={{fontSize:10,color:"#d1d5db"}}>—</span>;
     const isFuture = ratePeriod === "future";
-    const isFn = label === FURTHER_NOTICE_LABEL;
+    const isFn = label === FURTHER_NOTICE_LABEL || label.endsWith(FURTHER_NOTICE_LABEL);
+    const tone = isFn ? "fn" : (isFuture ? "future" : "current");
     return (
-      <span style={{
-        fontSize: compact ? 9 : 10,
-        fontWeight: 600,
-        color: isFn ? "#6b7280" : (isFuture ? "#b45309" : "#166534"),
-        background: isFn ? "#f3f4f6" : (isFuture ? "#fffbeb" : "#f0fdf4"),
-        border: `1px solid ${isFn ? "#e5e7eb" : (isFuture ? "#fde68a" : "#bbf7d0")}`,
-        padding: compact ? "1px 6px" : "2px 8px",
-        borderRadius: 4,
-        whiteSpace: "nowrap",
-        display: "inline-block",
-      }}>{label}</span>
+      <span
+        className={`validity-badge validity-badge--${tone}${compact ? " validity-badge--compact" : ""}`}
+        title={label}
+      >
+        {label}
+      </span>
     );
   };
 
@@ -2964,7 +2962,6 @@ export default function App() {
                     <div key={k} style={{padding:"10px 0",borderBottom:"1px solid #f9fafb"}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
                         <Bg k={k}/><span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[k]}</span>
-                        <ValidityCell carrierKey={k} compact/>
                       </div>
                       <div style={{fontSize:9,fontWeight:700,color:"#166534",marginBottom:4}}>현재 운임 · {formatValiditySlotLabel(validityInfo[k]?.current) || "—"}</div>
                       <AdminPriceCols d20={cd20} d40={cd40} editable
@@ -2978,12 +2975,12 @@ export default function App() {
                   ); })}
               </div>
             ) : (
-            <table style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
+            <table className="carrier-validity-table" style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
               <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
-                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Carrier</th>
-                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Validity</th>
-                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>20'</th>
-                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500}}>40'</th>
+                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500,width:"28%"}}>Carrier</th>
+                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500,width:"36%"}}>Validity</th>
+                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500,width:"18%"}}>20'</th>
+                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500,width:"18%"}}>40'</th>
               </tr></thead>
               <tbody>
                 {CRS.map(k=>{ const v20=getCarrierRate(row,k,t20),v40=getCarrierRate(row,k,t40); if(v20==null&&v40==null)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
@@ -2992,13 +2989,13 @@ export default function App() {
                   const s20=v20!=null?v20+m20:null, s40=v40!=null?v40+m40:null;
                   const best20=b20.val!=null?b20.val+m20:null, best40=b40.val!=null?b40.val+m40:null;
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
-                    <td style={{padding:"8px 0"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                    <td style={{padding:"8px 0",verticalAlign:"middle"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:6}}>
                         <Bg k={k}/>
                         <span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
                       </div>
                     </td>
-                    <td style={{padding:"8px 4px 8px 0"}}><ValidityCell carrierKey={k}/></td>
+                    <td style={{padding:"8px 8px 8px 0",verticalAlign:"middle"}}><ValidityCell carrierKey={k}/></td>
                     <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,t20,row.pol+" > VVO")}>{s20!=null?n(s20):"—"}</td>
                     <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&openSC(k,t40,row.pol+" > VVO")}>{s40!=null?n(s40):"—"}</td>
                   </tr>; })}
@@ -3092,13 +3089,13 @@ export default function App() {
                           </div>
                           ) : (
                           <div key={cr} style={{padding:"0 12px 0 20px",borderBottom:"1px solid #e0f2fe"}}>
-                            <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+                            <table className="carrier-validity-table" style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
                               <tbody>
                                 <tr>
-                                  <td style={{padding:"8px 0",width:"28%"}}>
+                                  <td style={{padding:"8px 0",width:"28%",verticalAlign:"middle"}}>
                                     <div style={{display:"flex",alignItems:"center",gap:6}}><Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span></div>
                                   </td>
-                                  <td style={{padding:"8px 4px 8px 0",width:"32%"}}><ValidityCell carrierKey={cr}/></td>
+                                  <td style={{padding:"8px 8px 8px 0",width:"36%",verticalAlign:"middle"}}><ValidityCell carrierKey={cr}/></td>
                                   <td style={{textAlign:"right",padding:"8px 0",cursor:cdC20.sell?"pointer":"default",width:"20%"}} onClick={()=>cdC20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
                                     <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
                                     <div style={{fontSize:13,fontWeight:700,color:cdC20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:cdC20.sell?"underline":"none"}}>{cdC20.sell?`$${n(cdC20.sell)}`:"—"}</div>
