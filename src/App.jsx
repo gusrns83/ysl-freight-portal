@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v9"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v10"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -1489,18 +1489,23 @@ export default function App() {
     });
     cancelPendingPricingSave();
     resetSaveQueue();
+    skipAutoSaveRef.current = true;
+    setPolCostO(nextCosts);
+    writePricingCache({
+      ...(readStoredPricingCache() || { v: 1 }),
+      v: 1,
+      polCostO: nextCosts,
+      pricingSavedAt: Date.now(),
+    });
     enqueueSave(async () => {
-      setPolCostO(nextCosts);
-      writePricingCache({
-        ...(readStoredPricingCache() || { v: 1 }),
-        v: 1,
-        polCostO: nextCosts,
-        pricingSavedAt: Date.now(),
-      });
       await saveOneSettingWithRetry("pol_costs", JSON.stringify(nextCosts));
     })
-      .then(() => flashSaveFeedback("success", "✅ 매입 GRI 적용 · 저장 완료"))
-      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
+      .then(() => {
+        writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        flashSaveFeedback("success", "✅ 매입 GRI 적용 · 저장 완료");
+      })
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+      .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
   };
 
   const undoBuyingGriBulk = () => {
@@ -1509,18 +1514,23 @@ export default function App() {
     setGriBuyUndo(null);
     cancelPendingPricingSave();
     resetSaveQueue();
+    skipAutoSaveRef.current = true;
+    setPolCostO(restored);
+    writePricingCache({
+      ...(readStoredPricingCache() || { v: 1 }),
+      v: 1,
+      polCostO: restored,
+      pricingSavedAt: Date.now(),
+    });
     enqueueSave(async () => {
-      setPolCostO(restored);
-      writePricingCache({
-        ...(readStoredPricingCache() || { v: 1 }),
-        v: 1,
-        polCostO: restored,
-        pricingSavedAt: Date.now(),
-      });
       await saveOneSettingWithRetry("pol_costs", JSON.stringify(restored));
     })
-      .then(() => flashSaveFeedback("success", "✅ 매입 GRI 되돌리기 · 저장 완료"))
-      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
+      .then(() => {
+        writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        flashSaveFeedback("success", "✅ 매입 GRI 되돌리기 · 저장 완료");
+      })
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+      .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
   };
 
   const applySellingGriBulk = (deltas, rows, carrier, period) => {
@@ -1548,23 +1558,28 @@ export default function App() {
     });
     cancelPendingPricingSave();
     resetSaveQueue();
+    skipAutoSaveRef.current = true;
+    setPolM(nextPolM);
+    setPolTs(nextPolTs);
+    writePricingCache({
+      ...(readStoredPricingCache() || { v: 1 }),
+      v: 1,
+      polM: nextPolM,
+      polTs: nextPolTs,
+      pricingSavedAt: Date.now(),
+    });
     enqueueSave(async () => {
-      setPolM(nextPolM);
-      setPolTs(nextPolTs);
-      writePricingCache({
-        ...(readStoredPricingCache() || { v: 1 }),
-        v: 1,
-        polM: nextPolM,
-        polTs: nextPolTs,
-        pricingSavedAt: Date.now(),
-      });
       await saveSettingsEntries([
         ["pol_margins", JSON.stringify(nextPolM)],
         ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
       ]);
     })
-      .then(() => flashSaveFeedback("success", "✅ 매출 GRI 적용 · 저장 완료"))
-      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
+      .then(() => {
+        writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        flashSaveFeedback("success", "✅ 매출 GRI 적용 · 저장 완료");
+      })
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+      .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
   };
 
   const undoSellingGriBulk = () => {
@@ -1573,23 +1588,28 @@ export default function App() {
     setGriSellUndo(null);
     cancelPendingPricingSave();
     resetSaveQueue();
+    skipAutoSaveRef.current = true;
+    setPolM(restoredPolM);
+    setPolTs(restoredPolTs);
+    writePricingCache({
+      ...(readStoredPricingCache() || { v: 1 }),
+      v: 1,
+      polM: restoredPolM,
+      polTs: restoredPolTs,
+      pricingSavedAt: Date.now(),
+    });
     enqueueSave(async () => {
-      setPolM(restoredPolM);
-      setPolTs(restoredPolTs);
-      writePricingCache({
-        ...(readStoredPricingCache() || { v: 1 }),
-        v: 1,
-        polM: restoredPolM,
-        polTs: restoredPolTs,
-        pricingSavedAt: Date.now(),
-      });
       await saveSettingsEntries([
         ["pol_margins", JSON.stringify(restoredPolM)],
         ["pol_margin_timestamps", JSON.stringify(restoredPolTs)],
       ]);
     })
-      .then(() => flashSaveFeedback("success", "✅ 매출 GRI 되돌리기 · 저장 완료"))
-      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
+      .then(() => {
+        writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        flashSaveFeedback("success", "✅ 매출 GRI 되돌리기 · 저장 완료");
+      })
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+      .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
   };
 
   const applyPolMargin = (pol, type, value) => {
@@ -1977,6 +1997,43 @@ export default function App() {
 
   const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json", "carrier_rates_json"]);
 
+  const saveSettingValue = async (key, value) => {
+    const strVal = String(value);
+    const isHeavy = HEAVY_SETTING_KEYS.has(key);
+    const attempts = isHeavy ? 5 : 3;
+    const timeoutMs = isHeavy ? 120000 : 60000;
+    let lastErr;
+
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+      try {
+        const res = await fetch(`${SB_URL}/rest/v1/settings`, {
+          method: "POST",
+          signal: ctrl.signal,
+          headers: {
+            apikey: SB_KEY,
+            Authorization: `Bearer ${SB_KEY}`,
+            "Content-Type": "application/json",
+            Prefer: "resolution=merge-duplicates,return=minimal",
+          },
+          body: JSON.stringify({ key, value: strVal }),
+        });
+        clearTimeout(timer);
+        if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+        return;
+      } catch (e) {
+        clearTimeout(timer);
+        lastErr = e;
+        const msg = String(e.message || e);
+        const retryable = /fetch|Failed|abort|network/i.test(msg);
+        if (!retryable) throw new Error(`${key}: ${msg}`);
+      }
+    }
+    throw new Error(`Supabase 연결 실패 (${key}) — ${lastErr?.message || "Failed to fetch"}`);
+  };
+
   const postSettingsRows = async (rows, label) => {
     if (!rows.length) return;
     let lastErr;
@@ -2012,7 +2069,7 @@ export default function App() {
   };
 
   const saveOneSettingWithRetry = async (key, value) => {
-    await postSettingsRows([{ key, value: String(value) }], key);
+    await saveSettingValue(key, value);
   };
 
   const saveSettingsBatchPost = async (entries) => {
@@ -2032,8 +2089,8 @@ export default function App() {
     for (const entry of entries) {
       if (HEAVY_SETTING_KEYS.has(entry[0])) {
         await flushLight();
-        await saveOneSettingWithRetry(entry[0], entry[1]);
-        await new Promise(r => setTimeout(r, 120));
+        await saveSettingValue(entry[0], entry[1]);
+        await new Promise(r => setTimeout(r, 150));
       } else {
         light.push(entry);
       }
@@ -2222,6 +2279,9 @@ export default function App() {
     if (settingBundleHas(s, "pol_costs") || settingBundleHas(s, "pol_margins")) {
       merged.pricingSavedAt = merged.pricingSavedAt || Date.now();
     }
+    if (settingBundleHas(s, "pol_costs") || settingBundleHas(s, "pol_margins") || settingBundleHas(s, "global_margins")) {
+      merged.serverSyncedAt = Date.now();
+    }
     writePricingCache(merged);
   };
 
@@ -2313,29 +2373,29 @@ export default function App() {
         const serverCosts = serverSnap.polCostO;
         const cacheMargins = cached?.polM;
         const serverMargins = serverSnap.polM;
-        const cacheIsNewer = (cached?.pricingSavedAt || 0) > 0;
-        const cacheHasMoreCosts = countPolCostOverrides(cacheCosts) > countPolCostOverrides(serverCosts);
-        const cacheHasMoreMargins = countPolMarginOverrides(cacheMargins) > countPolMarginOverrides(serverMargins);
+        const costsDiffer = cacheCosts && JSON.stringify(cacheCosts) !== JSON.stringify(serverCosts);
+        const marginsDiffer = cacheMargins && JSON.stringify(cacheMargins) !== JSON.stringify(serverMargins);
+        const pendingCostResync = costsDiffer && (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
+        const pendingMarginResync = marginsDiffer && (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
 
-        if (cacheIsNewer && (cacheHasMoreCosts || cacheHasMoreMargins)) {
-          if (cacheHasMoreCosts) priority.pol_costs = JSON.stringify(cacheCosts);
-          if (cacheHasMoreMargins) priority.pol_margins = JSON.stringify(cacheMargins);
-        }
+        if (pendingCostResync) priority.pol_costs = JSON.stringify(cacheCosts);
+        if (pendingMarginResync) priority.pol_margins = JSON.stringify(cacheMargins);
 
         applySettingsBundle(priority);
 
-        if (cacheIsNewer && (cacheHasMoreCosts || cacheHasMoreMargins)) {
+        if (pendingCostResync || pendingMarginResync) {
           skipAutoSaveRef.current = true;
           try {
-            if (cacheHasMoreCosts) {
+            if (pendingCostResync) {
               await saveOneSettingWithRetry("pol_costs", JSON.stringify(cacheCosts));
             }
-            if (cacheHasMoreMargins) {
+            if (pendingMarginResync) {
               await saveSettingsEntries([
                 ["pol_margins", JSON.stringify(cacheMargins)],
                 ...(cached?.polTs ? [["pol_margin_timestamps", JSON.stringify(cached.polTs)]] : []),
               ]);
             }
+            writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
           } catch (e) {
             console.warn("cache re-sync failed", e);
           }
