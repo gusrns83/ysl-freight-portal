@@ -625,16 +625,22 @@ const syncFromAfterTill = (currentTill, futureFrom) => {
   return futureFrom;
 };
 
-function AdminSaveToast({ busy, feedback }) {
+function AdminSaveToast({ busy, feedback, onDismiss }) {
   if (!busy && !feedback?.type) return null;
   const ok = feedback?.type === "success";
+  const canDismiss = !busy && !!feedback?.type;
   return (
     <div
       role="status"
       aria-live="polite"
-      className={`admin-save-toast${ok ? " admin-save-toast--ok" : busy ? " admin-save-toast--busy" : " admin-save-toast--err"}`}
+      className={`admin-save-toast${ok ? " admin-save-toast--ok" : busy ? " admin-save-toast--busy" : " admin-save-toast--err"}${canDismiss ? " admin-save-toast--dismissible" : ""}`}
     >
-      {busy ? "저장 중…" : feedback.message}
+      <span className="admin-save-toast-msg">{busy ? "저장 중…" : feedback.message}</span>
+      {canDismiss && (
+        <button type="button" className="admin-save-toast-close" onClick={onDismiss} aria-label="닫기">
+          ×
+        </button>
+      )}
     </div>
   );
 }
@@ -2394,6 +2400,11 @@ export default function App() {
     return job;
   };
 
+  const dismissSaveFeedback = () => {
+    if (saveFeedbackTimerRef.current) clearTimeout(saveFeedbackTimerRef.current);
+    setSaveFeedback({ type: null, message: "" });
+  };
+
   const flashSaveFeedback = (type, message) => {
     if (saveFeedbackTimerRef.current) clearTimeout(saveFeedbackTimerRef.current);
     setSaveFeedback({ type, message });
@@ -2419,7 +2430,7 @@ export default function App() {
   };
 
   const adminSaveToastEl = isAdmin && (saveBusy || saveFeedback.type)
-    ? createPortal(<AdminSaveToast busy={saveBusy} feedback={saveFeedback} />, document.body)
+    ? createPortal(<AdminSaveToast busy={saveBusy} feedback={saveFeedback} onDismiss={dismissSaveFeedback} />, document.body)
     : null;
 
   const getCarrierSaveEntries = () => {
