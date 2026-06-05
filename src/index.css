@@ -1130,30 +1130,19 @@
   margin-bottom: 12px;
 }
 
-.drop-admin-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
+.drop-admin-table-wrap {
+  margin-bottom: 0;
 }
 
-.drop-admin-cell {
-  position: relative;
-  min-height: 88px;
+.drop-admin-table .drop-admin-city-col {
+  min-width: 88px;
+  font-weight: 600;
+  white-space: nowrap;
 }
 
-.drop-admin-cell-future .drop-admin-box {
-  background: #fffbeb;
-}
-
-.drop-admin-cell-active {
-  z-index: 5;
-}
-
-.drop-admin-size {
-  font-size: 11px;
-  font-weight: 700;
-  color: #047857;
-  margin-bottom: 6px;
+.drop-admin-td {
+  min-width: 108px;
+  vertical-align: top;
 }
 
 .drop-admin-box {
