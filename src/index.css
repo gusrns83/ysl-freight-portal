@@ -219,46 +219,126 @@
 .carrier-validity-grid-head .cvt-validity-col {
   padding-left: 16px;
 }
+.carrier-table-shell {
+  padding: 0 16px 0 20px;
+}
 @media (max-width: 480px) {
+  .carrier-table-shell {
+    padding: 0 10px 0 12px;
+  }
+  .carrier-validity-table {
+    display: block;
+    table-layout: auto;
+  }
+  .carrier-validity-table colgroup {
+    display: none;
+  }
+  .carrier-validity-table thead,
+  .carrier-validity-table tbody {
+    display: block;
+    width: 100%;
+  }
   .carrier-validity-table col.cvt-col-carrier {
-    width: 10%;
+    width: 44px;
   }
   .carrier-validity-table col.cvt-col-validity {
-    width: 42%;
+    width: auto;
   }
   .carrier-validity-table col.cvt-col-price {
-    width: 24%;
+    width: 23%;
   }
   .carrier-rent-table col.cvt-col-carrier {
-    width: 9%;
+    width: 44px;
   }
   .carrier-rent-table col.cvt-col-validity {
-    width: 52%;
+    width: auto;
   }
   .carrier-rent-table col.cvt-col-price {
-    width: 19.5%;
+    width: 22%;
+  }
+  .carrier-validity-table thead tr,
+  .carrier-validity-table tbody tr {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr) minmax(68px, 23%) minmax(68px, 23%);
+    column-gap: 8px;
+    align-items: center;
+  }
+  .carrier-rent-table thead tr,
+  .carrier-rent-table tbody tr {
+    grid-template-columns: 44px minmax(0, 1fr) minmax(64px, 22%) minmax(64px, 22%);
+    column-gap: 6px;
+  }
+  .carrier-validity-table thead th,
+  .carrier-validity-table tbody td {
+    display: block;
+    width: auto !important;
+    min-width: 0;
+    padding: 0 !important;
+    box-sizing: border-box;
+  }
+  .carrier-validity-table tbody tr {
+    padding: 8px 0;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .carrier-rent-table tbody tr {
+    border-bottom: 1px solid #ede9fe;
+  }
+  .carrier-validity-table thead tr {
+    padding: 6px 0;
+    border-bottom: 1px solid #f3f4f6;
+  }
+  .carrier-validity-table .cvt-carrier {
+    width: 44px;
+    max-width: 44px;
+    min-width: 44px;
+    padding-right: 0;
+    overflow: hidden;
   }
   .carrier-validity-table .cvt-validity {
-    padding-left: 10px;
-    padding-right: 6px;
+    padding-left: 0;
+    padding-right: 0;
+    min-width: 0;
+    overflow: hidden;
   }
-  .carrier-validity-table th.cvt-validity,
-  .carrier-validity-grid-head .cvt-validity-col {
-    padding-left: 10px;
+  .carrier-validity-table th.cvt-carrier {
+    font-size: 0;
+    color: transparent;
+    overflow: hidden;
+  }
+  .carrier-validity-table th.cvt-validity {
+    font-size: 9px;
+    padding-left: 0;
+    white-space: nowrap;
+    overflow: hidden;
   }
   .carrier-validity-table .cvt-price {
     font-size: 11px;
-    padding-left: 4px;
-    padding-right: 2px;
+    padding: 0;
+    min-width: 0;
+    text-align: right !important;
   }
   .carrier-validity-table .validity-badge {
     font-size: 8px;
-    padding: 2px 5px;
-    letter-spacing: -0.02em;
+    padding: 2px 4px;
+    letter-spacing: -0.03em;
+    max-width: 100% !important;
+    overflow: hidden !important;
+    white-space: normal;
+    line-height: 1.2;
+    word-break: break-word;
+    box-sizing: border-box;
+    display: block;
+    width: 100%;
   }
   .carrier-rent-table .validity-badge {
-    white-space: nowrap;
-    max-width: none !important;
+    font-size: 7px;
+    padding: 2px 3px;
+  }
+  .carrier-rent-table .cvt-price-main {
+    font-size: 11px;
+  }
+  .carrier-rent-table .cvt-price-sub {
+    font-size: 8px;
   }
 }
 
