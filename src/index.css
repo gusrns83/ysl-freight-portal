@@ -743,6 +743,15 @@
   overflow: hidden;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
+.carrier-grid .cg-edit-margin-readonly {
+  padding: 5px 8px;
+  font-size: 9px;
+  font-weight: 600;
+  color: #92400e;
+  background: #fffbeb;
+  border-top: 1px solid #fde68a;
+  text-align: center;
+}
 .carrier-grid .cg-mini {
   border-collapse: collapse;
   width: 100%;
