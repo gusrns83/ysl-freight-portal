@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v16"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v17"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -1773,6 +1773,14 @@ export default function App() {
     pickLatestMargin(resolveMarginCandidates(pol, area, type, period, {
       margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture,
     }));
+
+  /** 선사 Admin 단가표: POL에 직접 저장된 마진만 (전역 150/200 자동 가산 없음) */
+  const getPolOnlyM = (pol, type, period = "current") => {
+    const store = period === "future" ? polMFuture : polM;
+    const val = store[pol]?.[type];
+    if (val == null || val === "") return 0;
+    return marginNum(val);
+  };
 
   const applyBuyingGriBulk = (deltas, rows, carrier, period) => {
     if (!rows?.length || !Object.keys(deltas).length) return;
@@ -3892,7 +3900,7 @@ export default function App() {
       if (base == null && cost == null) {
         return <td className="cg-cell cg-empty">—</td>;
       }
-      const sell = cost != null ? cost + getM(row.pol, row.area, type, caPeriod) : null;
+      const sell = cost != null ? cost + getPolOnlyM(row.pol, type, caPeriod) : null;
       const margin = displayMarginFromPrices(cost, sell);
       const cellKey = `${row.pol}:${type}`;
       const isOpen = carrierEditCell === cellKey;
@@ -3921,7 +3929,7 @@ export default function App() {
                 </tbody>
               </table>
               {margin != null && (
-                <div className="cg-edit-margin-readonly">마진 {n(margin)} (매출 − 매입)</div>
+                <div className="cg-edit-margin-readonly">마진 {n(margin)}</div>
               )}
               <button type="button" className="cg-close" onClick={() => setCarrierEditCell(null)}>닫기</button>
             </div>
@@ -3972,7 +3980,7 @@ export default function App() {
                 </tbody>
               </table>
               {margin != null && (
-                <div className="cg-edit-margin-readonly">마진 {n(margin)} (매출 − 매입)</div>
+                <div className="cg-edit-margin-readonly">마진 {n(margin)}</div>
               )}
               <button type="button" className="cg-close" onClick={() => setCarrierEditCell(null)}>닫기</button>
             </div>
@@ -4094,7 +4102,7 @@ export default function App() {
               futureFromMin={getFutureFromMinDate(caCr)} />
           </div>
           <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
-            셀 클릭 → 매입·매출 조정 · 마진 = 매출 − 매입 · {gridFilterLabel}
+            셀 클릭 → 매입·매출 조정 · {gridFilterLabel}
           </div>
           <div className="carrier-grid-wrap">
             <table className="carrier-grid">
