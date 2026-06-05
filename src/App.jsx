@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v18"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v19"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -824,6 +824,59 @@ const settingBundleHas = (s, key) =>
 
 const countPolCostOverrides = (polCostO) =>
   Object.values(polCostO || {}).filter(p => p?.carrier && Object.keys(p.carrier).length > 0).length;
+
+/** pol_costs 병합 — overlay의 매입·매출(sell)을 base에 덮어씀 (캐시↔서버 동기화용) */
+const mergePolCostODeep = (base, overlay) => {
+  if (!overlay || !Object.keys(overlay).length) return base ? { ...base } : {};
+  const out = { ...(base || {}) };
+  Object.entries(overlay).forEach(([pol, polData]) => {
+    if (!polData || typeof polData !== "object") return;
+    const prevPol = out[pol] || {};
+    const nextPol = { ...prevPol };
+    if (polData.carrier) {
+      nextPol.carrier = { ...(prevPol.carrier || {}) };
+      Object.entries(polData.carrier).forEach(([cr, crData]) => {
+        if (!crData || typeof crData !== "object") return;
+        const prevCr = nextPol.carrier[cr] || {};
+        const nextCr = { ...prevCr };
+        ["current", "future"].forEach(period => {
+          if (!crData[period]) return;
+          const prevBucket = { ...(nextCr[period] || {}) };
+          const oBucket = crData[period];
+          RATE_TYPES.forEach(t => {
+            if (oBucket[t] != null && oBucket[t] !== "") prevBucket[t] = oBucket[t];
+          });
+          if (oBucket.sell && typeof oBucket.sell === "object") {
+            prevBucket.sell = { ...(prevBucket.sell || {}), ...oBucket.sell };
+          }
+          nextCr[period] = prevBucket;
+        });
+        RATE_TYPES.forEach(t => {
+          if (crData[t] != null && crData[t] !== "") nextCr[t] = crData[t];
+        });
+        nextPol.carrier[cr] = nextCr;
+      });
+    }
+    if (polData.rent) nextPol.rent = { ...(prevPol.rent || {}), ...polData.rent };
+    if (polData.drop) nextPol.drop = { ...(prevPol.drop || {}), ...polData.drop };
+    out[pol] = nextPol;
+  });
+  return out;
+};
+
+const polCostOHasSellOverrides = (polCostO) => {
+  if (!polCostO) return false;
+  return Object.values(polCostO).some(polData => {
+    const carriers = polData?.carrier;
+    if (!carriers) return false;
+    return Object.values(carriers).some(crData =>
+      ["current", "future"].some(period => {
+        const sell = crData?.[period]?.sell;
+        return sell && Object.keys(sell).length > 0;
+      }),
+    );
+  });
+};
 
 const countPolMarginOverrides = (polM) =>
   Object.keys(polM || {}).filter(pol => polM[pol] && Object.keys(polM[pol]).length > 0).length;
@@ -1862,7 +1915,12 @@ export default function App() {
       await saveOneSettingWithRetry("pol_costs", JSON.stringify(nextCosts));
     })
       .then(() => {
-        writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        writePricingCache({
+          ...(readStoredPricingCache() || {}),
+          polCostO: nextCosts,
+          pricingSavedAt: Date.now(),
+          serverSyncedAt: Date.now(),
+        });
         flashSaveFeedback("success", `✅ 매출 GRI (${griPeriodLabel(period)}) · 저장 완료`);
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -2544,9 +2602,12 @@ export default function App() {
     if (settingBundleHas(s, "rental_pol_margin_timestamps")) setRentalPolTs(snap.rentalPolTs);
     if (settingBundleHas(s, "pol_costs")) {
       setPolCostO(prev => {
-        const next = snap.polCostO;
-        if (countPolCostOverrides(next) === 0 && countPolCostOverrides(prev) > 0) return prev;
-        return next;
+        const server = snap.polCostO;
+        const cached = readStoredPricingCache()?.polCostO;
+        const merged = mergePolCostODeep(mergePolCostODeep(server, prev), cached);
+        if (countPolCostOverrides(server) === 0 && countPolCostOverrides(merged) > 0) return merged;
+        if (!polCostOHasSellOverrides(server) && polCostOHasSellOverrides(merged)) return merged;
+        return merged;
       });
     }
     if (settingBundleHas(s, "carrier_drop_rates_json")) {
@@ -2557,7 +2618,7 @@ export default function App() {
     }
   };
 
-  const applyPricingFromSettings = (s) => {
+  const applyPricingFromSettings = (s, opts = {}) => {
     const snap = parsePricingFromSettings(s);
     applyPricingSnapshot(snap, s);
     const prev = readStoredPricingCache();
@@ -2594,7 +2655,8 @@ export default function App() {
     if (settingBundleHas(s, "pol_costs") || settingBundleHas(s, "pol_margins") || settingBundleHas(s, "pol_margins_future")) {
       merged.pricingSavedAt = merged.pricingSavedAt || Date.now();
     }
-    if (settingBundleHas(s, "pol_costs") || settingBundleHas(s, "pol_margins") || settingBundleHas(s, "global_margins")) {
+    const markSynced = opts.markServerSynced !== false;
+    if (markSynced && (settingBundleHas(s, "pol_costs") || settingBundleHas(s, "pol_margins") || settingBundleHas(s, "global_margins"))) {
       merged.serverSyncedAt = Date.now();
     }
     writePricingCache(merged);
@@ -2663,8 +2725,8 @@ export default function App() {
     }
   };
 
-  const applySettingsBundle = (s) => {
-    applyPricingFromSettings(s);
+  const applySettingsBundle = (s, opts = {}) => {
+    applyPricingFromSettings(s, opts);
     applyNoticesAndAdsFromSettings(s);
   };
 
@@ -2687,29 +2749,32 @@ export default function App() {
         const cached = readStoredPricingCache();
         const serverSnap = parsePricingFromSettings(priority);
         const cacheCosts = cached?.polCostO;
-        const serverCosts = serverSnap.polCostO;
+        const serverCosts = serverSnap.polCostO || {};
+        const mergedCosts = mergePolCostODeep(serverCosts, cacheCosts || {});
         const cacheMargins = cached?.polM;
         const serverMargins = serverSnap.polM;
         const cacheMarginsFuture = cached?.polMFuture;
         const serverMarginsFuture = serverSnap.polMFuture;
         const costsDiffer = cacheCosts && JSON.stringify(cacheCosts) !== JSON.stringify(serverCosts);
+        const mergedDiffersFromServer = JSON.stringify(mergedCosts) !== JSON.stringify(serverCosts);
         const marginsDiffer = cacheMargins && JSON.stringify(cacheMargins) !== JSON.stringify(serverMargins);
         const marginsFutureDiffer = cacheMarginsFuture && JSON.stringify(cacheMarginsFuture) !== JSON.stringify(serverMarginsFuture);
-        const pendingCostResync = costsDiffer && (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
-        const pendingMarginResync = (marginsDiffer || marginsFutureDiffer) && (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
+        const cacheNewer = (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
+        const pendingCostResync = cacheNewer && (costsDiffer || mergedDiffersFromServer);
+        const pendingMarginResync = (marginsDiffer || marginsFutureDiffer) && cacheNewer;
 
-        if (pendingCostResync) priority.pol_costs = JSON.stringify(cacheCosts);
+        priority.pol_costs = JSON.stringify(mergedCosts);
         if (pendingMarginResync && cacheMargins) priority.pol_margins = JSON.stringify(cacheMargins);
         if (pendingMarginResync && cacheMarginsFuture) priority.pol_margins_future = JSON.stringify(cacheMarginsFuture);
 
-        applySettingsBundle(priority);
+        applySettingsBundle(priority, { markServerSynced: !pendingCostResync && !pendingMarginResync });
 
         if (pendingCostResync || pendingMarginResync) {
           skipAutoSaveRef.current = true;
           enqueueNetworkWrite(async () => {
             try {
               if (pendingCostResync) {
-                await saveOneSettingWithRetry("pol_costs", JSON.stringify(cacheCosts));
+                await saveOneSettingWithRetry("pol_costs", JSON.stringify(mergedCosts));
               }
               if (pendingMarginResync) {
                 await saveSettingsEntries([
@@ -2719,7 +2784,12 @@ export default function App() {
                   ...(cached?.polTsFuture ? [["pol_margin_timestamps_future", JSON.stringify(cached.polTsFuture)]] : []),
                 ]);
               }
-              writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+              writePricingCache({
+                ...(readStoredPricingCache() || {}),
+                polCostO: mergedCosts,
+                serverSyncedAt: Date.now(),
+                pricingSavedAt: Date.now(),
+              });
             } catch (e) {
               console.warn("cache re-sync failed", e);
             }
@@ -2771,7 +2841,18 @@ export default function App() {
                 console.warn("rental auto-save deferred", e);
               }
             };
-      enqueueSave(task).catch(err => console.error("auto-save failed", err));
+      enqueueSave(task)
+        .then(() => {
+          writePricingCache({
+            ...buildPricingCache(),
+            pricingSavedAt: Date.now(),
+            serverSyncedAt: Date.now(),
+          });
+        })
+        .catch(err => {
+          console.error("auto-save failed", err);
+          writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now() });
+        });
     }, 2500);
     return () => clearTimeout(autoSaveTimerRef.current);
   }, [
