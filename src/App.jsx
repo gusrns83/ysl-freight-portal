@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v17"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v18"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -833,6 +833,16 @@ const resolveCarrierCostFromStore = (costs, pol, cr, t, period, carrierRates, fD
   return base != null ? Number(base) : null;
 };
 
+/** 선사 Admin: pol_costs에 저장된 매출가 (없으면 매입가 = 마진 0) */
+const resolveCarrierSellFromStore = (costs, pol, cr, t, period, cost) => {
+  if (cost == null) return null;
+  const c = costs[pol]?.carrier?.[cr];
+  const p = period === "future" ? "future" : "current";
+  const sellVal = c?.[p]?.sell?.[t];
+  if (sellVal != null && sellVal !== "") return Number(sellVal);
+  return cost;
+};
+
 const buildBuyingGriCosts = (prevCosts, { deltas, rows, carrier, period, carrierRates, fData }) => {
   let next = { ...prevCosts };
   rows.forEach(row => {
@@ -858,39 +868,31 @@ const buildBuyingGriCosts = (prevCosts, { deltas, rows, carrier, period, carrier
   return next;
 };
 
-const buildSellingGriMargins = (
-  prevPolM,
-  prevPolTs,
-  prevPolMFuture,
-  prevPolTsFuture,
-  { deltas, rows, costs, carrier, period, carrierRates, fData, margins, areaM, polM, polMFuture, marginTs, areaTs, polTs, polTsFuture },
-) => {
-  const isFuture = period === "future";
-  const marginCtx = { margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture };
-  const resolveM = (pol, area, type) =>
-    pickLatestMargin(resolveMarginCandidates(pol, area, type, period, marginCtx));
-  let nextPolM = { ...prevPolM };
-  let nextPolTs = { ...prevPolTs };
-  let nextPolMFuture = { ...prevPolMFuture };
-  let nextPolTsFuture = { ...prevPolTsFuture };
-  const ts = marginNowTs();
+const buildSellingGriSells = (prevCosts, { deltas, rows, carrier, period, carrierRates, fData }) => {
+  let next = { ...prevCosts };
   rows.forEach(row => {
     RATE_TYPES.forEach(t => {
       const delta = deltas[t];
       if (!Number.isFinite(delta)) return;
-      const cost = resolveCarrierCostFromStore(costs, row.pol, carrier, t, period, carrierRates, fData);
+      const cost = resolveCarrierCostFromStore(next, row.pol, carrier, t, period, carrierRates, fData);
       if (cost == null) return;
-      const curM = resolveM(row.pol, row.area, t);
-      if (isFuture) {
-        nextPolMFuture[row.pol] = { ...(nextPolMFuture[row.pol] || {}), [t]: curM + delta };
-        nextPolTsFuture[row.pol] = { ...(nextPolTsFuture[row.pol] || {}), [t]: ts };
-      } else {
-        nextPolM[row.pol] = { ...(nextPolM[row.pol] || {}), [t]: curM + delta };
-        nextPolTs[row.pol] = { ...(nextPolTs[row.pol] || {}), [t]: ts };
-      }
+      const currentSell = resolveCarrierSellFromStore(next, row.pol, carrier, t, period, cost);
+      const prevCr = { ...(next[row.pol]?.carrier?.[carrier] || {}) };
+      const bucket = { ...(prevCr[period] || {}) };
+      const sellBucket = { ...(bucket.sell || {}), [t]: currentSell + delta };
+      bucket.sell = sellBucket;
+      const nextCr = { ...prevCr, [period]: bucket };
+      delete nextCr[t];
+      next = {
+        ...next,
+        [row.pol]: {
+          ...(next[row.pol] || {}),
+          carrier: { ...(next[row.pol]?.carrier || {}), [carrier]: nextCr },
+        },
+      };
     });
   });
-  return { polM: nextPolM, polTs: nextPolTs, polMFuture: nextPolMFuture, polTsFuture: nextPolTsFuture };
+  return next;
 };
 
 const resolveMarginCandidates = (pol, area, type, period, ctx) => {
@@ -914,20 +916,6 @@ const resolveMarginCandidates = (pol, area, type, period, ctx) => {
   return candidates;
 };
 
-const buildCopyCurrentToFutureMargins = (rows, marginCtx) => {
-  const nextPolMFuture = {};
-  const nextPolTsFuture = {};
-  const ts = marginNowTs();
-  rows.forEach(row => {
-    RATE_TYPES.forEach(t => {
-      const m = pickLatestMargin(resolveMarginCandidates(row.pol, row.area, t, "current", marginCtx));
-      nextPolMFuture[row.pol] = { ...(nextPolMFuture[row.pol] || {}), [t]: m };
-      nextPolTsFuture[row.pol] = { ...(nextPolTsFuture[row.pol] || {}), [t]: ts };
-    });
-  });
-  return { polMFuture: nextPolMFuture, polTsFuture: nextPolTsFuture };
-};
-
 const griPeriodLabel = (period) => (period === "future" ? "향후 운임" : "현재 운임");
 
 const displayMarginFromPrices = (cost, sell) =>
@@ -937,22 +925,31 @@ const displayMarginFromPrices = (cost, sell) =>
 const buildCopyCurrentToFutureCosts = (prevCosts, { rows, carrier, carrierRates, fData }) => {
   let next = { ...prevCosts };
   rows.forEach(row => {
+    const prevCr = { ...(next[row.pol]?.carrier?.[carrier] || {}) };
+    const curBucket = prevCr.current || {};
+    const futureBucket = { ...(prevCr.future || {}) };
+    let hasCost = false;
     RATE_TYPES.forEach(t => {
       const cost = resolveCarrierCostFromStore(next, row.pol, carrier, t, "current", carrierRates, fData);
       if (cost == null) return;
-      const prevCr = { ...(next[row.pol]?.carrier?.[carrier] || {}) };
-      const bucket = { ...(prevCr.future || {}) };
-      bucket[t] = cost;
-      const nextCr = { ...prevCr, future: bucket };
-      delete nextCr[t];
-      next = {
-        ...next,
-        [row.pol]: {
-          ...(next[row.pol] || {}),
-          carrier: { ...(next[row.pol]?.carrier || {}), [carrier]: nextCr },
-        },
-      };
+      futureBucket[t] = cost;
+      hasCost = true;
     });
+    if (!hasCost) return;
+    if (curBucket.sell && Object.keys(curBucket.sell).length > 0) {
+      futureBucket.sell = { ...curBucket.sell };
+    } else {
+      delete futureBucket.sell;
+    }
+    const nextCr = { ...prevCr, future: futureBucket };
+    RATE_TYPES.forEach(t => delete nextCr[t]);
+    next = {
+      ...next,
+      [row.pol]: {
+        ...(next[row.pol] || {}),
+        carrier: { ...(next[row.pol]?.carrier || {}), [carrier]: nextCr },
+      },
+    };
   });
   return next;
 };
@@ -1774,13 +1771,9 @@ export default function App() {
       margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture,
     }));
 
-  /** 선사 Admin 단가표: POL에 직접 저장된 마진만 (전역 150/200 자동 가산 없음) */
-  const getPolOnlyM = (pol, type, period = "current") => {
-    const store = period === "future" ? polMFuture : polM;
-    const val = store[pol]?.[type];
-    if (val == null || val === "") return 0;
-    return marginNum(val);
-  };
+  /** 선사 Admin 단가표: pol_costs에 저장된 매출가 (전역 150/200·polM 미사용) */
+  const getCarrierAdminSell = (pol, cr, type, period, cost) =>
+    resolveCarrierSellFromStore(polCostO, pol, cr, type, period, cost);
 
   const applyBuyingGriBulk = (deltas, rows, carrier, period) => {
     if (!rows?.length || !Object.keys(deltas).length) return;
@@ -1839,57 +1832,28 @@ export default function App() {
     setGriSellUndo({
       carrier,
       period,
-      polM: JSON.parse(JSON.stringify(polM)),
-      polTs: JSON.parse(JSON.stringify(polTs)),
-      polMFuture: JSON.parse(JSON.stringify(polMFuture)),
-      polTsFuture: JSON.parse(JSON.stringify(polTsFuture)),
+      polCostO: JSON.parse(JSON.stringify(polCostO)),
     });
-    const { polM: nextPolM, polTs: nextPolTs, polMFuture: nextPolMFuture, polTsFuture: nextPolTsFuture } = buildSellingGriMargins(
-      polM, polTs, polMFuture, polTsFuture,
-      {
+    const nextCosts = buildSellingGriSells(polCostO, {
       deltas,
       rows,
-      costs: polCostO,
       carrier,
       period,
       carrierRates,
       fData,
-      margins,
-      areaM,
-      polM,
-      polMFuture,
-      marginTs,
-      areaTs,
-      polTs,
-      polTsFuture,
     });
     cancelPendingPricingSave();
     resetSaveQueue();
     skipAutoSaveRef.current = true;
-    setPolM(nextPolM);
-    setPolTs(nextPolTs);
-    setPolMFuture(nextPolMFuture);
-    setPolTsFuture(nextPolTsFuture);
+    setPolCostO(nextCosts);
     writePricingCache({
       ...(readStoredPricingCache() || { v: 1 }),
       v: 1,
-      polM: nextPolM,
-      polTs: nextPolTs,
-      polMFuture: nextPolMFuture,
-      polTsFuture: nextPolTsFuture,
+      polCostO: nextCosts,
       pricingSavedAt: Date.now(),
     });
-    const sellSaveEntries = period === "future"
-      ? [
-          ["pol_margins_future", JSON.stringify(nextPolMFuture)],
-          ["pol_margin_timestamps_future", JSON.stringify(nextPolTsFuture)],
-        ]
-      : [
-          ["pol_margins", JSON.stringify(nextPolM)],
-          ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
-        ];
     enqueueSave(async () => {
-      await saveSettingsEntries(sellSaveEntries);
+      await saveOneSettingWithRetry("pol_costs", JSON.stringify(nextCosts));
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -1901,31 +1865,20 @@ export default function App() {
 
   const undoSellingGriBulk = () => {
     if (!griSellUndo) return;
-    const { polM: restoredPolM, polTs: restoredPolTs, polMFuture: restoredPolMFuture, polTsFuture: restoredPolTsFuture } = griSellUndo;
+    const { polCostO: restoredCosts } = griSellUndo;
     setGriSellUndo(null);
     cancelPendingPricingSave();
     resetSaveQueue();
     skipAutoSaveRef.current = true;
-    setPolM(restoredPolM);
-    setPolTs(restoredPolTs);
-    setPolMFuture(restoredPolMFuture ?? {});
-    setPolTsFuture(restoredPolTsFuture ?? {});
+    setPolCostO(restoredCosts);
     writePricingCache({
       ...(readStoredPricingCache() || { v: 1 }),
       v: 1,
-      polM: restoredPolM,
-      polTs: restoredPolTs,
-      polMFuture: restoredPolMFuture,
-      polTsFuture: restoredPolTsFuture,
+      polCostO: restoredCosts,
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveSettingsEntries([
-        ["pol_margins", JSON.stringify(restoredPolM)],
-        ["pol_margin_timestamps", JSON.stringify(restoredPolTs)],
-        ["pol_margins_future", JSON.stringify(restoredPolMFuture)],
-        ["pol_margin_timestamps_future", JSON.stringify(restoredPolTsFuture)],
-      ]);
+      await saveOneSettingWithRetry("pol_costs", JSON.stringify(restoredCosts));
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -1943,8 +1896,6 @@ export default function App() {
       polCostO: JSON.parse(JSON.stringify(polCostO)),
       carrierRates: JSON.parse(JSON.stringify(carrierRates)),
       carrierDropRates: JSON.parse(JSON.stringify(carrierDropRates)),
-      polMFuture: JSON.parse(JSON.stringify(polMFuture)),
-      polTsFuture: JSON.parse(JSON.stringify(polTsFuture)),
     });
     cancelPendingPricingSave();
     resetSaveQueue();
@@ -1976,27 +1927,19 @@ export default function App() {
       rows: fData, carrier, carrierRates, fData,
     });
     const nextRates = copyCarrierRatesPeriod(carrierRates, carrier);
-    const marginCtx = { margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture };
-    const { polMFuture: nextPolMFuture, polTsFuture: nextPolTsFuture } = buildCopyCurrentToFutureMargins(fData, marginCtx);
     setPolCostO(nextCosts);
     setCarrierRates(nextRates);
-    setPolMFuture(nextPolMFuture);
-    setPolTsFuture(nextPolTsFuture);
     writePricingCache({
       ...(readStoredPricingCache() || { v: 1 }),
       v: 1,
       polCostO: nextCosts,
       carrierRates: nextRates,
-      polMFuture: nextPolMFuture,
-      polTsFuture: nextPolTsFuture,
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
       await saveSettingsEntries([
         ["pol_costs", JSON.stringify(nextCosts)],
         ["carrier_rates_json", JSON.stringify(nextRates)],
-        ["pol_margins_future", JSON.stringify(nextPolMFuture)],
-        ["pol_margin_timestamps_future", JSON.stringify(nextPolTsFuture)],
       ]);
     })
       .then(() => {
@@ -2012,7 +1955,6 @@ export default function App() {
     const {
       carrier, dropoffMode,
       polCostO: restoredCosts, carrierRates: restoredRates, carrierDropRates: restoredDrop,
-      polMFuture: restoredPolMFuture, polTsFuture: restoredPolTsFuture,
     } = importFreightUndo;
     setImportFreightUndo(null);
     cancelPendingPricingSave();
@@ -2039,23 +1981,17 @@ export default function App() {
     }
     setPolCostO(restoredCosts);
     setCarrierRates(restoredRates);
-    setPolMFuture(restoredPolMFuture ?? {});
-    setPolTsFuture(restoredPolTsFuture ?? {});
     writePricingCache({
       ...(readStoredPricingCache() || { v: 1 }),
       v: 1,
       polCostO: restoredCosts,
       carrierRates: restoredRates,
-      polMFuture: restoredPolMFuture,
-      polTsFuture: restoredPolTsFuture,
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
       await saveSettingsEntries([
         ["pol_costs", JSON.stringify(restoredCosts)],
         ["carrier_rates_json", JSON.stringify(restoredRates)],
-        ["pol_margins_future", JSON.stringify(restoredPolMFuture ?? {})],
-        ["pol_margin_timestamps_future", JSON.stringify(restoredPolTsFuture ?? {})],
       ]);
     })
       .then(() => {
@@ -2939,6 +2875,32 @@ export default function App() {
         if (!Number.isFinite(v)) return p;
         bucket[t] = v;
       }
+      const nextCr = { ...prev, [period]: bucket };
+      delete nextCr[t];
+      return {
+        ...p,
+        [pol]: {
+          ...(p[pol] || {}),
+          carrier: { ...(p[pol]?.carrier || {}), [cr]: nextCr },
+        },
+      };
+    });
+  };
+
+  const applyCarrierSell = (pol, cr, t, value, period = "current") => {
+    const raw = String(value).trim();
+    setPolCostO(p => {
+      const prev = { ...(p[pol]?.carrier?.[cr] || {}) };
+      const bucket = { ...(prev[period] || {}) };
+      const sellBucket = { ...(bucket.sell || {}) };
+      if (raw === "") delete sellBucket[t];
+      else {
+        const v = parseInt(raw, 10);
+        if (!Number.isFinite(v)) return p;
+        sellBucket[t] = v;
+      }
+      if (Object.keys(sellBucket).length === 0) delete bucket.sell;
+      else bucket.sell = sellBucket;
       const nextCr = { ...prev, [period]: bucket };
       delete nextCr[t];
       return {
@@ -3872,11 +3834,7 @@ export default function App() {
     const isDropAdmin = carrierAdminMode === "dropoff";
     const isFuture = caPeriod === "future";
     const applyCellSell = (row, type, sellStr) => {
-      const sell = parseInt(sellStr, 10);
-      if (!Number.isFinite(sell)) return;
-      const cost = getCarrierRate(row, caCr, type, caPeriod);
-      if (cost == null) return;
-      applyPolMargin(row.pol, type, sell - cost, caPeriod);
+      applyCarrierSell(row.pol, caCr, type, sellStr, caPeriod);
     };
     const applyDropAdminSell = (cityKey, si, sellStr) => {
       const sell = parseInt(sellStr, 10);
@@ -3900,7 +3858,7 @@ export default function App() {
       if (base == null && cost == null) {
         return <td className="cg-cell cg-empty">—</td>;
       }
-      const sell = cost != null ? cost + getPolOnlyM(row.pol, type, caPeriod) : null;
+      const sell = cost != null ? getCarrierAdminSell(row.pol, caCr, type, caPeriod, cost) : null;
       const margin = displayMarginFromPrices(cost, sell);
       const cellKey = `${row.pol}:${type}`;
       const isOpen = carrierEditCell === cellKey;
