@@ -1143,7 +1143,6 @@ export default function App() {
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
   const [carrierAdminMode, setCarrierAdminMode] = useState("ocean");
-  const [carrierAdminDropCity, setCarrierAdminDropCity] = useState("mow");
   const [carrierEditCell, setCarrierEditCell] = useState(null);
   const [rentalAdminPeriod, setRentalAdminPeriod] = useState("current");
   const [selReturnCity, setSelReturnCity] = useState("");
@@ -3008,10 +3007,8 @@ export default function App() {
     }
     const caPeriod = carrierAdminPeriod;
     const caCr = carrierAdminCr;
-    const caDropCity = carrierAdminDropCity;
     const isDropAdmin = carrierAdminMode === "dropoff";
     const isFuture = caPeriod === "future";
-    const dropCityLabel = DOC.find(d => d.k === caDropCity)?.l || caDropCity;
     const applyCellSell = (row, type, sellStr) => {
       const sell = parseInt(sellStr, 10);
       if (!Number.isFinite(sell)) return;
@@ -3019,12 +3016,12 @@ export default function App() {
       if (cost == null) return;
       applyPolMargin(row.pol, type, sell - cost);
     };
-    const applyDropAdminSell = (si, sellStr) => {
+    const applyDropAdminSell = (cityKey, si, sellStr) => {
       const sell = parseInt(sellStr, 10);
       if (!Number.isFinite(sell)) return;
-      const cost = getCarrierDropAddon(caCr, caDropCity, si, caPeriod);
+      const cost = getCarrierDropAddon(caCr, cityKey, si, caPeriod);
       if (cost == null) return;
-      applyCarrierDropMargin(caCr, caDropCity, si, sell - cost);
+      applyCarrierDropMargin(caCr, cityKey, si, sell - cost);
     };
     const filteredCarrierAreaGroups = carrierAreaGroups
       .filter(({ area }) => !(marginTab === "area" && selArea) || area === selArea)
@@ -3098,15 +3095,14 @@ export default function App() {
         </td>
       );
     };
-    const renderDropAdminCell = (si, label) => {
-      const cost = getCarrierDropAddon(caCr, caDropCity, si, caPeriod);
-      const margin = getDropM(caCr, caDropCity, si);
+    const renderDropAdminCell = (cityKey, si) => {
+      const cost = getCarrierDropAddon(caCr, cityKey, si, caPeriod);
+      const margin = getDropM(caCr, cityKey, si);
       const sell = cost != null ? cost + margin : null;
-      const cellKey = `drop:${caCr}:${caDropCity}:${caPeriod}:${si}`;
+      const cellKey = `drop:${caCr}:${cityKey}:${caPeriod}:${si}`;
       const isOpen = carrierEditCell === cellKey;
       return (
-        <div className={`drop-admin-cell${isFuture ? " drop-admin-cell-future" : ""}${isOpen ? " drop-admin-cell-active" : ""}`}>
-          <div className="drop-admin-size">{label}</div>
+        <td className={`cg-cell drop-admin-td${isFuture ? " cg-future" : ""}${isOpen ? " cg-active" : ""}`}>
           {isOpen ? (
             <div className="cg-edit-panel" onClick={e => e.stopPropagation()}>
               <table className="cg-mini">
@@ -3116,7 +3112,7 @@ export default function App() {
                     <td className="cg-mini-val-cost">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-cost"
                         value={cost ?? ""} placeholder="—"
-                        onChange={e => applyCarrierDropRate(caCr, caDropCity, si, e.target.value, caPeriod)}/>
+                        onChange={e => applyCarrierDropRate(caCr, cityKey, si, e.target.value, caPeriod)}/>
                     </td>
                   </tr>
                   <tr>
@@ -3124,14 +3120,14 @@ export default function App() {
                     <td className="cg-mini-val-sell">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-sell"
                         value={sell ?? ""} placeholder="—"
-                        onChange={e => applyDropAdminSell(si, e.target.value)}/>
+                        onChange={e => applyDropAdminSell(cityKey, si, e.target.value)}/>
                     </td>
                   </tr>
                   <tr className="cg-mini-margin-tr">
                     <td className="cg-mini-label cg-mini-label-margin">마진</td>
                     <td className="cg-mini-val-margin">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
-                        value={margin} onChange={e => applyCarrierDropMargin(caCr, caDropCity, si, e.target.value)}/>
+                        value={margin} onChange={e => applyCarrierDropMargin(caCr, cityKey, si, e.target.value)}/>
                     </td>
                   </tr>
                 </tbody>
@@ -3151,7 +3147,7 @@ export default function App() {
               <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {n(margin)}</div>
             </button>
           )}
-        </div>
+        </td>
       );
     };
     return (
@@ -3200,19 +3196,6 @@ export default function App() {
               </button>
             ))}
           </div>
-          {isDropAdmin && (
-            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
-              {DOC.map(({ k, l }) => (
-                <button key={k} type="button" onClick={()=>{setCarrierAdminDropCity(k);setCarrierEditCell(null);}}
-                  style={{fontSize:10,fontWeight:600,padding:"6px 12px",borderRadius:16,cursor:"pointer",whiteSpace:"nowrap",
-                    border:`1px solid ${carrierAdminDropCity===k?"#059669":"#a7f3d0"}`,
-                    background:carrierAdminDropCity===k?"#059669":"#fff",
-                    color:carrierAdminDropCity===k?"#fff":"#047857"}}>
-                  {l}
-                </button>
-              ))}
-            </div>
-          )}
           {!isDropAdmin && (
           <>
           <MarginPanel
@@ -3289,16 +3272,35 @@ export default function App() {
                 <Bg k={caCr}/>
                 <div>
                   <div style={{fontSize:13,fontWeight:700,color:"#047857"}}>
-                    {CN_KR[caCr]} · Drop off · {dropCityLabel}
+                    {CN_KR[caCr]} · Drop off · 전체 반납지
                   </div>
                   <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>
-                    {isFuture ? "향후" : "현재"} · 반납지별 Drop off 단가 (출발지·해상 운임 제외) · 마진 기본 0
+                    {isFuture ? "향후" : "현재"} · 반납지별 Drop off 단가 · 마진 기본 0 · 셀 클릭하여 수정
                   </div>
                 </div>
               </div>
-              <div className="drop-admin-grid">
-                {renderDropAdminCell(0, "20' COC")}
-                {renderDropAdminCell(1, "40' COC")}
+              <div className="carrier-grid-wrap drop-admin-table-wrap">
+                <table className="carrier-grid drop-admin-table">
+                  <thead>
+                    <tr className="cg-carrier-row">
+                      <th colSpan={3}>{caCr} {CN_KR[caCr]} · Drop off (USD)</th>
+                    </tr>
+                    <tr className="cg-head-row">
+                      <th className="cg-th-pol drop-admin-city-col">반납지</th>
+                      <th>20&apos;</th>
+                      <th>40&apos;</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {DOC.map(({ k, l }, ri) => (
+                      <tr key={k} className={ri % 2 === 1 ? "cg-stripe" : ""}>
+                        <td className="cg-pol drop-admin-city-col">{l}</td>
+                        {renderDropAdminCell(k, 0)}
+                        {renderDropAdminCell(k, 1)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}
