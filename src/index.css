@@ -1049,6 +1049,93 @@
   padding-bottom: 12px;
 }
 
+.import-current-freight-box {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.import-current-freight-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  text-align: left;
+  background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+  border: 2px dashed #f59e0b;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
+}
+
+.import-current-freight-btn:hover {
+  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
+  border-color: #d97706;
+  box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+}
+
+.import-current-freight-btn--drop {
+  background: linear-gradient(135deg, #ecfdf5 0%, #d1fae5 100%);
+  border-color: #34d399;
+}
+
+.import-current-freight-btn--drop:hover {
+  background: linear-gradient(135deg, #d1fae5 0%, #a7f3d0 100%);
+  border-color: #059669;
+  box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+}
+
+.import-current-freight-icon {
+  font-size: 22px;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.import-current-freight-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.import-current-freight-text strong {
+  font-size: 12px;
+  font-weight: 700;
+  color: #92400e;
+}
+
+.import-current-freight-btn--drop .import-current-freight-text strong {
+  color: #047857;
+}
+
+.import-current-freight-text span:last-child {
+  font-size: 10px;
+  font-weight: 500;
+  color: #b45309;
+  line-height: 1.35;
+}
+
+.import-current-freight-btn--drop .import-current-freight-text span:last-child {
+  color: #059669;
+}
+
+.import-current-freight-undo {
+  align-self: center;
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 600;
+  color: #6b7280;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.import-current-freight-undo:hover {
+  background: #e5e7eb;
+}
+
 .app-ad-slot {
   position: fixed;
   bottom: 0;
