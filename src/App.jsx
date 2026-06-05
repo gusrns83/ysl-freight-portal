@@ -3433,7 +3433,6 @@ export default function App() {
       {tab==="rental" && (
         <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
           <RatePeriodToggle/>
-          <div style={{marginTop:8}}><ValidityCell carrierKey="RENTAL"/></div>
         </div>
       )}
 
