@@ -708,6 +708,79 @@ const marginNum = (v) => {
 
 const marginInpVal = (v) => (v === "" || v == null || v === undefined ? "" : v);
 
+const settingBundleHas = (s, key) =>
+  Object.prototype.hasOwnProperty.call(s, key) && s[key] != null && s[key] !== "";
+
+const resolveCarrierCostFromStore = (costs, pol, cr, t, period, carrierRates, fData) => {
+  const c = costs[pol]?.carrier?.[cr];
+  if (c?.[period]?.[t] != null && c[period][t] !== "") return Number(c[period][t]);
+  if (period === "current" && c?.[t] != null && c[t] !== "") return Number(c[t]);
+  const g = carrierRates[cr]?.[period]?.[t];
+  if (g != null && g !== "") return Number(g);
+  const row = fData.find(d => d.pol === pol);
+  const base = row?.rates[cr]?.[t];
+  return base != null ? Number(base) : null;
+};
+
+const buildBuyingGriCosts = (prevCosts, { deltas, rows, carrier, period, carrierRates, fData }) => {
+  let next = { ...prevCosts };
+  rows.forEach(row => {
+    RATE_TYPES.forEach(t => {
+      const delta = deltas[t];
+      if (!Number.isFinite(delta)) return;
+      const cost = resolveCarrierCostFromStore(next, row.pol, carrier, t, period, carrierRates, fData);
+      if (cost == null) return;
+      const prevCr = { ...(next[row.pol]?.carrier?.[carrier] || {}) };
+      const bucket = { ...(prevCr[period] || {}) };
+      bucket[t] = cost + delta;
+      const nextCr = { ...prevCr, [period]: bucket };
+      delete nextCr[t];
+      next = {
+        ...next,
+        [row.pol]: {
+          ...(next[row.pol] || {}),
+          carrier: { ...(next[row.pol]?.carrier || {}), [carrier]: nextCr },
+        },
+      };
+    });
+  });
+  return next;
+};
+
+const buildSellingGriMargins = (
+  prevPolM,
+  prevPolTs,
+  { deltas, rows, costs, carrier, period, carrierRates, fData, margins, areaM, polM, marginTs, areaTs, polTs },
+) => {
+  const getMLocal = (pol, area, type) => {
+    const candidates = [{ value: marginNum(margins[type]), ts: marginTs[type] ?? 0 }];
+    const areaVal = areaM[area]?.[type];
+    if (areaVal != null && areaVal !== "") {
+      candidates.push({ value: marginNum(areaVal), ts: areaTs[area]?.[type] ?? 0 });
+    }
+    const polVal = polM[pol]?.[type];
+    if (polVal != null && polVal !== "") {
+      candidates.push({ value: marginNum(polVal), ts: polTs[pol]?.[type] ?? 0 });
+    }
+    return pickLatestMargin(candidates);
+  };
+  const nextPolM = { ...prevPolM };
+  const nextPolTs = { ...prevPolTs };
+  const ts = marginNowTs();
+  rows.forEach(row => {
+    RATE_TYPES.forEach(t => {
+      const delta = deltas[t];
+      if (!Number.isFinite(delta)) return;
+      const cost = resolveCarrierCostFromStore(costs, row.pol, carrier, t, period, carrierRates, fData);
+      if (cost == null) return;
+      const curM = getMLocal(row.pol, row.area, t);
+      nextPolM[row.pol] = { ...(nextPolM[row.pol] || {}), [t]: curM + delta };
+      nextPolTs[row.pol] = { ...(nextPolTs[row.pol] || {}), [t]: ts };
+    });
+  });
+  return { polM: nextPolM, polTs: nextPolTs };
+};
+
 const pickLatestMargin = (candidates) =>
   candidates.reduce((best, c) => (c.ts > best.ts ? c : best)).value;
 
@@ -1344,6 +1417,51 @@ export default function App() {
     return pickLatestMargin(candidates);
   };
 
+  const applyBuyingGriBulk = (deltas, rows, carrier, period) => {
+    if (!rows?.length || !Object.keys(deltas).length) return;
+    const nextCosts = buildBuyingGriCosts(polCostO, {
+      deltas, rows, carrier, period, carrierRates, fData,
+    });
+    setPolCostO(nextCosts);
+    writePricingCache({ ...(readStoredPricingCache() || { v: 1 }), v: 1, polCostO: nextCosts });
+    enqueueSave(async () => {
+      await saveOneSettingWithRetry("pol_costs", JSON.stringify(nextCosts));
+    })
+      .then(() => flashSaveFeedback("success", "✅ 매입 GRI 적용 · 저장 완료"))
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
+  };
+
+  const applySellingGriBulk = (deltas, rows, carrier, period) => {
+    if (!rows?.length || !Object.keys(deltas).length) return;
+    const { polM: nextPolM, polTs: nextPolTs } = buildSellingGriMargins(polM, polTs, {
+      deltas,
+      rows,
+      costs: polCostO,
+      carrier,
+      period,
+      carrierRates,
+      fData,
+      margins,
+      areaM,
+      polM,
+      marginTs,
+      areaTs,
+      polTs,
+    });
+    setPolM(nextPolM);
+    setPolTs(nextPolTs);
+    const cache = readStoredPricingCache() || { v: 1 };
+    writePricingCache({ ...cache, v: 1, polM: nextPolM, polTs: nextPolTs });
+    enqueueSave(async () => {
+      await saveSettingsEntries([
+        ["pol_margins", JSON.stringify(nextPolM)],
+        ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
+      ]);
+    })
+      .then(() => flashSaveFeedback("success", "✅ 매출 GRI 적용 · 저장 완료"))
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
+  };
+
   const applyPolMargin = (pol, type, value) => {
     const raw = String(value).trim();
     const ts = marginNowTs();
@@ -1889,32 +2007,68 @@ export default function App() {
     rentalPolTs,
   });
 
-  const applyPricingSnapshot = (snap) => {
+  const applyPricingSnapshot = (snap, s = {}) => {
     if (!snap) return;
-    setValidityInfo(snap.validityInfo);
-    setCarrierRates(snap.carrierRates);
-    setCarrierDropRates(snap.carrierDropRates ?? defaultCarrierDropRates());
-    setCarrierDropMargins(snap.carrierDropMargins ?? defaultCarrierDropMargins());
-    setRentalRates(snap.rentalRates);
-    setMargins(snap.margins);
-    setAreaM(snap.areaM);
-    setPolM(snap.polM);
-    setMarginTs(snap.marginTs);
-    setAreaTs(snap.areaTs);
-    setPolTs(snap.polTs);
-    setRentalMargins(snap.rentalMargins);
-    setRentalAreaM(snap.rentalAreaM);
-    setRentalPolM(snap.rentalPolM);
-    setRentalMarginTs(snap.rentalMarginTs);
-    setRentalAreaTs(snap.rentalAreaTs);
-    setRentalPolTs(snap.rentalPolTs);
-    setPolCostO(snap.polCostO);
+    if (settingBundleHas(s, "validity_info_json")
+      || ["validity_snk", "validity_dy", "validity_ck", "validity_rental"].some(k => settingBundleHas(s, k))) {
+      setValidityInfo(snap.validityInfo);
+    }
+    if (settingBundleHas(s, "carrier_rates_json")) setCarrierRates(snap.carrierRates);
+    if (settingBundleHas(s, "rental_rates_json")) setRentalRates(snap.rentalRates);
+    if (settingBundleHas(s, "global_margins")) setMargins(snap.margins);
+    if (settingBundleHas(s, "area_margins")) setAreaM(snap.areaM);
+    if (settingBundleHas(s, "pol_margins")) setPolM(snap.polM);
+    if (settingBundleHas(s, "margin_timestamps")) setMarginTs(snap.marginTs);
+    if (settingBundleHas(s, "area_margin_timestamps")) setAreaTs(snap.areaTs);
+    if (settingBundleHas(s, "pol_margin_timestamps")) setPolTs(snap.polTs);
+    if (settingBundleHas(s, "rental_global_margins")) setRentalMargins(snap.rentalMargins);
+    if (settingBundleHas(s, "rental_area_margins")) setRentalAreaM(snap.rentalAreaM);
+    if (settingBundleHas(s, "rental_pol_margins")) setRentalPolM(snap.rentalPolM);
+    if (settingBundleHas(s, "rental_margin_timestamps")) setRentalMarginTs(snap.rentalMarginTs);
+    if (settingBundleHas(s, "rental_area_margin_timestamps")) setRentalAreaTs(snap.rentalAreaTs);
+    if (settingBundleHas(s, "rental_pol_margin_timestamps")) setRentalPolTs(snap.rentalPolTs);
+    if (settingBundleHas(s, "pol_costs")) setPolCostO(snap.polCostO);
+    if (settingBundleHas(s, "carrier_drop_rates_json")) {
+      setCarrierDropRates(snap.carrierDropRates ?? defaultCarrierDropRates());
+    }
+    if (settingBundleHas(s, "carrier_drop_margins_json")) {
+      setCarrierDropMargins(snap.carrierDropMargins ?? defaultCarrierDropMargins());
+    }
   };
 
   const applyPricingFromSettings = (s) => {
     const snap = parsePricingFromSettings(s);
-    applyPricingSnapshot(snap);
-    writePricingCache(pricingCacheFromSnapshot(snap));
+    applyPricingSnapshot(snap, s);
+    const prev = readStoredPricingCache();
+    const patch = pricingCacheFromSnapshot(snap);
+    const cacheKeys = [
+      ["pol_costs", "polCostO"],
+      ["global_margins", "margins"],
+      ["area_margins", "areaM"],
+      ["pol_margins", "polM"],
+      ["margin_timestamps", "marginTs"],
+      ["area_margin_timestamps", "areaTs"],
+      ["pol_margin_timestamps", "polTs"],
+      ["carrier_rates_json", "carrierRates"],
+      ["carrier_drop_rates_json", "carrierDropRates"],
+      ["carrier_drop_margins_json", "carrierDropMargins"],
+      ["rental_rates_json", "rentalRates"],
+      ["rental_global_margins", "rentalMargins"],
+      ["rental_area_margins", "rentalAreaM"],
+      ["rental_pol_margins", "rentalPolM"],
+      ["rental_margin_timestamps", "rentalMarginTs"],
+      ["rental_area_margin_timestamps", "rentalAreaTs"],
+      ["rental_pol_margin_timestamps", "rentalPolTs"],
+      ["validity_info_json", "validityInfo"],
+    ];
+    const merged = { v: 1, ...(prev || {}) };
+    cacheKeys.forEach(([settingKey, cacheKey]) => {
+      if (settingBundleHas(s, settingKey)) merged[cacheKey] = patch[cacheKey];
+    });
+    if (["validity_snk", "validity_dy", "validity_ck", "validity_rental"].some(k => settingBundleHas(s, k))) {
+      merged.validityInfo = patch.validityInfo;
+    }
+    writePricingCache(merged);
   };
 
   const writePricingCache = (payload) => {
@@ -2011,7 +2165,6 @@ export default function App() {
         if (cancelled) return;
 
         applySettingsBundle({
-          ...priority,
           ...settingsMapFromRows(rentalRows),
           ...settingsMapFromRows(carrierRows),
           ...settingsMapFromRows(miscRows),
@@ -3117,73 +3270,6 @@ export default function App() {
         ? `${selPol} · ${gridPolCount}개 POL`
         : `${gridPolCount}개 POL (전체)`;
     const griTargetRows = filteredCarrierAreaGroups.flatMap(g => g.rows);
-    const resolveCarrierCost = (prevCosts, pol, cr, t, period) => {
-      const c = prevCosts[pol]?.carrier?.[cr];
-      if (c?.[period]?.[t] != null && c[period][t] !== "") return Number(c[period][t]);
-      if (period === "current" && c?.[t] != null && c[t] !== "") return Number(c[t]);
-      const g = carrierRates[cr]?.[period]?.[t];
-      if (g != null && g !== "") return Number(g);
-      const row = fData.find(d => d.pol === pol);
-      const base = row?.rates[cr]?.[t];
-      return base != null ? Number(base) : null;
-    };
-    const applyBuyingGriBulk = (deltas) => {
-      if (!griTargetRows.length) return;
-      setPolCostO(prev => {
-        let next = { ...prev };
-        griTargetRows.forEach(row => {
-          RATE_TYPES.forEach(t => {
-            const delta = deltas[t];
-            if (!Number.isFinite(delta)) return;
-            const cost = resolveCarrierCost(next, row.pol, caCr, t, caPeriod);
-            if (cost == null) return;
-            const prevCr = { ...(next[row.pol]?.carrier?.[caCr] || {}) };
-            const bucket = { ...(prevCr[caPeriod] || {}) };
-            bucket[t] = cost + delta;
-            const nextCr = { ...prevCr, [caPeriod]: bucket };
-            delete nextCr[t];
-            next = {
-              ...next,
-              [row.pol]: {
-                ...(next[row.pol] || {}),
-                carrier: { ...(next[row.pol]?.carrier || {}), [caCr]: nextCr },
-              },
-            };
-          });
-        });
-        return next;
-      });
-    };
-    const applySellingGriBulk = (deltas) => {
-      if (!griTargetRows.length) return;
-      const ts = marginNowTs();
-      setPolM(prev => {
-        const next = { ...prev };
-        griTargetRows.forEach(row => {
-          RATE_TYPES.forEach(t => {
-            const delta = deltas[t];
-            if (!Number.isFinite(delta)) return;
-            const cost = resolveCarrierCost(polCostO, row.pol, caCr, t, caPeriod);
-            if (cost == null) return;
-            const curM = getM(row.pol, row.area, t);
-            next[row.pol] = { ...(next[row.pol] || {}), [t]: curM + delta };
-          });
-        });
-        return next;
-      });
-      setPolTs(prev => {
-        const next = { ...prev };
-        griTargetRows.forEach(row => {
-          RATE_TYPES.forEach(t => {
-            if (!Number.isFinite(deltas[t])) return;
-            const cost = resolveCarrierCost(polCostO, row.pol, caCr, t, caPeriod);
-            if (cost == null) return;
-            next[row.pol] = { ...(next[row.pol] || {}), [t]: ts };
-          });
-        });
-        return next;
-      });
-    };
     const renderGridCell = (row, type) => {
       const base = row.rates[caCr]?.[type];
       const cost = getCarrierRate(row, caCr, type, caPeriod);
@@ -3367,8 +3453,8 @@ export default function App() {
           />
           <GriAdjustPanel
             filterHint={`${gridFilterLabel} · COC/SOC 타입별 금액 입력 후 적용`}
-            onApplyBuying={applyBuyingGriBulk}
-            onApplySelling={applySellingGriBulk}
+            onApplyBuying={deltas => applyBuyingGriBulk(deltas, griTargetRows, caCr, caPeriod)}
+            onApplySelling={deltas => applySellingGriBulk(deltas, griTargetRows, caCr, caPeriod)}
           />
           <div style={{marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:10}}>
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
