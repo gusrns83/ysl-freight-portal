@@ -3102,15 +3102,10 @@ export default function App() {
                   </button>
                   {cOpen && (
                     <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
-                      {!isAdmin && carrierRows.length > 0 && (
-                        <div className="carrier-validity-grid-head">
-                          <span>Carrier</span><span className="cvt-validity-col">Validity</span><span style={{textAlign:"right"}}>20'</span><span style={{textAlign:"right"}}>40'</span>
-                        </div>
-                      )}
-                      {carrierRows.length===0
-                        ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
-                        : carrierRows.map(({cr,cdC20,cdC40,fdC20,fdC40})=>(
-                          isAdmin ? (
+                      {isAdmin ? (
+                        carrierRows.length===0
+                          ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
+                          : carrierRows.map(({cr,cdC20,cdC40,fdC20,fdC40})=>(
                           <div key={cr} style={{padding:"10px 12px 10px 20px",borderBottom:"1px solid #e0f2fe"}}>
                             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
                               <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[cr]}</span>
@@ -3125,17 +3120,27 @@ export default function App() {
                               onCost20={v=>applyCarrierRate(row.pol,cr,"coc20",v,"future")}
                               onCost40={v=>applyCarrierRate(row.pol,cr,"coc40",v,"future")}/>
                           </div>
-                          ) : (
-                          <div key={cr} style={{padding:"0 12px 0 20px",borderBottom:"1px solid #e0f2fe"}}>
-                            <table className="carrier-validity-table" style={{fontSize:12}}>
-                              <colgroup>
-                                <col className="cvt-col-carrier"/>
-                                <col className="cvt-col-validity"/>
-                                <col className="cvt-col-price"/>
-                                <col className="cvt-col-price"/>
-                              </colgroup>
-                              <tbody>
-                                <tr>
+                          ))
+                      ) : carrierRows.length===0 ? (
+                        <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
+                      ) : (
+                        <div style={{padding:"0 16px 0 20px"}}>
+                          <table className="carrier-validity-table" style={{fontSize:12}}>
+                            <colgroup>
+                              <col className="cvt-col-carrier"/>
+                              <col className="cvt-col-validity"/>
+                              <col className="cvt-col-price"/>
+                              <col className="cvt-col-price"/>
+                            </colgroup>
+                            <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #e0f2fe"}}>
+                              <th className="cvt-carrier" style={{textAlign:"left",padding:"6px 0",fontWeight:500}}>Carrier</th>
+                              <th className="cvt-validity" style={{padding:"6px 0",fontWeight:500}}>Validity</th>
+                              <th className="cvt-price" style={{padding:"6px 0",fontWeight:500}}>20'</th>
+                              <th className="cvt-price" style={{padding:"6px 0",fontWeight:500}}>40'</th>
+                            </tr></thead>
+                            <tbody>
+                              {carrierRows.map(({cr,cdC20,cdC40})=>(
+                                <tr key={cr} style={{borderBottom:"1px solid #e0f2fe"}}>
                                   <td className="cvt-carrier" style={{padding:"8px 0"}}>
                                     <Bg k={cr}/>
                                   </td>
@@ -3147,11 +3152,11 @@ export default function App() {
                                     {cdC40.sell?`$${n(cdC40.sell)}`:"—"}
                                   </td>
                                 </tr>
-                              </tbody>
-                            </table>
-                          </div>
-                          )
-                        ))}
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3217,50 +3222,57 @@ export default function App() {
                   </button>
                   {cOpen && (
                     <div style={{background:"#faf5ff",borderBottom:"1px solid #ede9fe"}}>
-                      {!isAdmin && carriers.length > 0 && (
-                        <div className="carrier-validity-grid-head">
-                          <span>Carrier</span><span className="cvt-validity-col">Validity</span><span style={{textAlign:"right"}}>20'</span><span style={{textAlign:"right"}}>40'</span>
-                        </div>
-                      )}
-                      {carriers.length===0?<div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
-                        :carriers.map(c=>{
-                        const cdC20=mkPrice(c.cost20,c.m20,c.k);
-                        const cdC40=mkPrice(c.cost40,c.m40,c.k);
-                        const socC20=mkPrice(c.soc20,getM(fp,fr.area,"soc20"),c.k);
-                        const socC40=mkPrice(c.soc40,getM(fp,fr.area,"soc40"),c.k);
-                        const rentC20=mkPrice(c.rent20,getRentalM(fp,fr.area,"r20"),c.k);
-                        const rentC40=mkPrice(c.rent40,getRentalM(fp,fr.area,"r40"),c.k);
-                        const rentPriceColor = ratePeriod==="future"?"#b45309":"#7c3aed";
-                        return (
-                        <div key={c.k} style={{padding:isAdmin?"8px 12px 8px 20px":"0 12px 0 20px",borderBottom:"1px solid #ede9fe"}}>
-                          {isAdmin ? (
-                            <>
-                          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
-                            <Bg k={c.k}/>
-                            <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[c.k]}</span>
-                            <ValidityCell carrierKey={c.k} compact/>
+                      {isAdmin ? (
+                        carriers.length===0
+                          ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
+                          : carriers.map(c=>{
+                          const cdC20=mkPrice(c.cost20,c.m20,c.k);
+                          const cdC40=mkPrice(c.cost40,c.m40,c.k);
+                          const socC20=mkPrice(c.soc20,getM(fp,fr.area,"soc20"),c.k);
+                          const socC40=mkPrice(c.soc40,getM(fp,fr.area,"soc40"),c.k);
+                          const rentC20=mkPrice(c.rent20,getRentalM(fp,fr.area,"r20"),c.k);
+                          const rentC40=mkPrice(c.rent40,getRentalM(fp,fr.area,"r40"),c.k);
+                          return (
+                          <div key={c.k} style={{padding:"8px 12px 8px 20px",borderBottom:"1px solid #ede9fe"}}>
+                            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
+                              <Bg k={c.k}/>
+                              <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[c.k]}</span>
+                              <ValidityCell carrierKey={c.k} compact/>
+                            </div>
+                            <div style={{fontSize:9,fontWeight:700,color:"#1e40af",marginBottom:4}}>SOC 해상 매입</div>
+                            <AdminPriceCols d20={socC20} d40={socC40} editable
+                              onCost20={v=>fp&&applyCarrierRate(fp,c.k,"soc20",v)}
+                              onCost40={v=>fp&&applyCarrierRate(fp,c.k,"soc40",v)}/>
+                            <div style={{fontSize:9,fontWeight:700,color:"#7c3aed",margin:"8px 0 4px"}}>렌탈 매입</div>
+                            <AdminPriceCols d20={rentC20} d40={rentC40} editable
+                              onCost20={v=>applyRentalRate(row.pol,city,0,v)}
+                              onCost40={v=>applyRentalRate(row.pol,city,1,v)}/>
+                            <div style={{fontSize:9,color:"#6b7280",marginTop:6}}>합계 매출 (SOC+렌탈+마진)</div>
+                            <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable={false}/>
                           </div>
-                              <div style={{fontSize:9,fontWeight:700,color:"#1e40af",marginBottom:4}}>SOC 해상 매입</div>
-                              <AdminPriceCols d20={socC20} d40={socC40} editable
-                                onCost20={v=>fp&&applyCarrierRate(fp,c.k,"soc20",v)}
-                                onCost40={v=>fp&&applyCarrierRate(fp,c.k,"soc40",v)}/>
-                              <div style={{fontSize:9,fontWeight:700,color:"#7c3aed",margin:"8px 0 4px"}}>렌탈 매입</div>
-                              <AdminPriceCols d20={rentC20} d40={rentC40} editable
-                                onCost20={v=>applyRentalRate(row.pol,city,0,v)}
-                                onCost40={v=>applyRentalRate(row.pol,city,1,v)}/>
-                              <div style={{fontSize:9,color:"#6b7280",marginTop:6}}>합계 매출 (SOC+렌탈+마진)</div>
-                              <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable={false}/>
-                            </>
-                          ) : (
-                            <table className="carrier-validity-table carrier-rent-table" style={{fontSize:12}}>
-                              <colgroup>
-                                <col className="cvt-col-carrier"/>
-                                <col className="cvt-col-validity"/>
-                                <col className="cvt-col-price"/>
-                                <col className="cvt-col-price"/>
-                              </colgroup>
-                              <tbody>
-                                <tr>
+                          );})
+                      ) : carriers.length===0 ? (
+                        <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
+                      ) : (
+                        <div style={{padding:"0 16px 0 20px",overflow:"visible"}}>
+                          <table className="carrier-validity-table carrier-rent-table" style={{fontSize:12}}>
+                            <colgroup>
+                              <col className="cvt-col-carrier"/>
+                              <col className="cvt-col-validity"/>
+                              <col className="cvt-col-price"/>
+                              <col className="cvt-col-price"/>
+                            </colgroup>
+                            <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #ede9fe"}}>
+                              <th className="cvt-carrier" style={{textAlign:"left",padding:"6px 0",fontWeight:500}}>Carrier</th>
+                              <th className="cvt-validity" style={{padding:"6px 0",fontWeight:500}}>Validity</th>
+                              <th className="cvt-price" style={{padding:"6px 0",fontWeight:500}}>20'</th>
+                              <th className="cvt-price" style={{padding:"6px 0",fontWeight:500}}>40'</th>
+                            </tr></thead>
+                            <tbody>
+                              {carriers.map(c=>{
+                                const rentPriceColor = ratePeriod==="future"?"#b45309":"#7c3aed";
+                                return (
+                                <tr key={c.k} style={{borderBottom:"1px solid #ede9fe"}}>
                                   <td className="cvt-carrier" style={{padding:"8px 0"}}>
                                     <Bg k={c.k}/>
                                   </td>
@@ -3274,11 +3286,11 @@ export default function App() {
                                     {c.t40&&<div className="cvt-price-sub">Rental {n(row.r40[city])}</div>}
                                   </td>
                                 </tr>
-                              </tbody>
-                            </table>
-                          )}
+                              );})}
+                            </tbody>
+                          </table>
                         </div>
-                      );})}
+                      )}
                     </div>
                   )}
                 </div>
