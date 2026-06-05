@@ -119,41 +119,111 @@
   font-variant-numeric: tabular-nums;
   letter-spacing: 0.01em;
 }
+.carrier-validity-table {
+  table-layout: fixed;
+  width: 100%;
+  border-collapse: collapse;
+}
+.carrier-validity-table col.cvt-col-carrier {
+  width: 12%;
+}
+.carrier-validity-table col.cvt-col-validity {
+  width: 40%;
+}
+.carrier-validity-table col.cvt-col-price {
+  width: 24%;
+}
 .carrier-validity-table .validity-badge {
-  max-width: 240px;
+  max-width: none;
+  overflow: visible;
+  text-overflow: clip;
+  display: inline-block;
+  vertical-align: middle;
 }
 .carrier-validity-table .cvt-carrier {
-  width: 10%;
-  padding-right: 16px;
+  width: 12%;
+  min-width: 38px;
+  padding-right: 10px;
   vertical-align: middle;
 }
 .carrier-validity-table .cvt-validity {
-  padding-left: 14px;
-  padding-right: 20px;
+  padding-left: 22px;
+  padding-right: 10px;
   vertical-align: middle;
 }
 .carrier-validity-table .cvt-price {
-  text-align: right;
+  text-align: right !important;
   vertical-align: middle;
   font-size: 13px;
   font-weight: 700;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  padding-left: 4px;
 }
 .carrier-validity-table th.cvt-validity {
-  padding-left: 14px;
+  text-align: left;
+  padding-left: 22px;
+}
+.carrier-validity-table th.cvt-price {
+  text-align: right !important;
+}
+.carrier-validity-table .cvt-price-main {
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.carrier-validity-table .cvt-price-sub {
+  font-size: 9px;
+  color: #9ca3af;
+  font-weight: 500;
+  line-height: 1.2;
+  margin-top: 2px;
 }
 .carrier-validity-grid-head {
   display: grid;
-  grid-template-columns: 10% 1fr 22% 22%;
-  column-gap: 12px;
+  grid-template-columns: 12% 1fr 22% 22%;
+  column-gap: 8px;
   padding: 6px 12px 0 20px;
   font-size: 10px;
   color: #9ca3af;
   font-weight: 500;
 }
+.carrier-rent-table .cvt-price {
+  white-space: normal;
+}
+.carrier-rent-table .cvt-price-main {
+  white-space: nowrap;
+}
+.carrier-rent-table .cvt-price-sub {
+  text-align: right;
+}
 .carrier-validity-grid-head .cvt-validity-col {
-  padding-left: 14px;
+  padding-left: 22px;
+}
+@media (max-width: 480px) {
+  .carrier-validity-table col.cvt-col-carrier {
+    width: 14%;
+  }
+  .carrier-validity-table col.cvt-col-validity {
+    width: 38%;
+  }
+  .carrier-validity-table col.cvt-col-price {
+    width: 24%;
+  }
+  .carrier-validity-table .cvt-validity {
+    padding-left: 18px;
+  }
+  .carrier-validity-table th.cvt-validity,
+  .carrier-validity-grid-head .cvt-validity-col {
+    padding-left: 18px;
+  }
+  .carrier-validity-table .cvt-price {
+    font-size: 12px;
+  }
+  .carrier-validity-table .validity-badge {
+    font-size: 9px;
+    padding: 2px 7px;
+  }
 }
 
 .validity-date-inp {
