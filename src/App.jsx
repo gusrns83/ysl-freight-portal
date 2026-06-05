@@ -3124,7 +3124,7 @@ export default function App() {
                       ) : carrierRows.length===0 ? (
                         <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
                       ) : (
-                        <div style={{padding:"0 16px 0 20px"}}>
+                        <div className="carrier-table-shell">
                           <table className="carrier-validity-table" style={{fontSize:12}}>
                             <colgroup>
                               <col className="cvt-col-carrier"/>
@@ -3254,7 +3254,7 @@ export default function App() {
                       ) : carriers.length===0 ? (
                         <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
                       ) : (
-                        <div style={{padding:"0 16px 0 20px",overflow:"visible"}}>
+                        <div className="carrier-table-shell">
                           <table className="carrier-validity-table carrier-rent-table" style={{fontSize:12}}>
                             <colgroup>
                               <col className="cvt-col-carrier"/>
