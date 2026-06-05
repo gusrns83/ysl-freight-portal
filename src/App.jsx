@@ -5,7 +5,11 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v19"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v21"; // Admin 저장 로직 버전 (배포 확인용)
+const SAVE_UI_MAX_MS = 90000;
+const SAVE_HEAVY_ATTEMPTS = 3;
+const SAVE_HEAVY_TIMEOUT_MS = 45000;
+const SAVE_LIGHT_TIMEOUT_MS = 30000;
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -197,6 +201,55 @@ const fetchSettingsInKeys = (keys) =>
 const fetchSettingsExceptKeys = (excludeKeys) =>
   api(`settings?select=key,value&key=not.in.(${excludeKeys.join(",")})`);
 
+const withTimeout = (promise, ms, message) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => { setTimeout(() => reject(new Error(message)), ms); }),
+  ]);
+
+const compactPolCostO = (polCostO) => {
+  if (!polCostO || !Object.keys(polCostO).length) return {};
+  const out = {};
+  Object.entries(polCostO).forEach(([pol, data]) => {
+    if (!data || typeof data !== "object") return;
+    const next = {};
+    if (data.carrier) {
+      const carrier = {};
+      Object.entries(data.carrier).forEach(([cr, crData]) => {
+        if (!crData || typeof crData !== "object") return;
+        const nextCr = {};
+        ["current", "future"].forEach(period => {
+          if (!crData[period]) return;
+          const bucket = {};
+          RATE_TYPES.forEach(t => {
+            if (crData[period][t] != null && crData[period][t] !== "") bucket[t] = crData[period][t];
+          });
+          if (crData[period].sell) {
+            const sell = {};
+            RATE_TYPES.forEach(t => {
+              const v = crData[period].sell[t];
+              if (v != null && v !== "") sell[t] = v;
+            });
+            if (Object.keys(sell).length) bucket.sell = sell;
+          }
+          if (Object.keys(bucket).length) nextCr[period] = bucket;
+        });
+        RATE_TYPES.forEach(t => {
+          if (crData[t] != null && crData[t] !== "") nextCr[t] = crData[t];
+        });
+        if (Object.keys(nextCr).length) carrier[cr] = nextCr;
+      });
+      if (Object.keys(carrier).length) next.carrier = carrier;
+    }
+    if (data.rent && Object.keys(data.rent).length) next.rent = data.rent;
+    if (data.drop && Object.keys(data.drop).length) next.drop = data.drop;
+    if (Object.keys(next).length) out[pol] = next;
+  });
+  return out;
+};
+
+const serializePolCosts = (polCostO) => JSON.stringify(compactPolCostO(polCostO));
+
 const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json", "carrier_rates_json"]);
 
 /** Supabase settings 쓰기 — 동시 요청 방지 (Failed to fetch 원인) */
@@ -210,8 +263,8 @@ const enqueueNetworkWrite = (task) => {
 const saveSettingValue = async (key, value) => enqueueNetworkWrite(async () => {
   const strVal = String(value);
   const isHeavy = HEAVY_SETTING_KEYS.has(key);
-  const attempts = isHeavy ? 6 : 3;
-  const timeoutMs = isHeavy ? 120000 : 60000;
+  const attempts = isHeavy ? SAVE_HEAVY_ATTEMPTS : 3;
+  const timeoutMs = isHeavy ? SAVE_HEAVY_TIMEOUT_MS : SAVE_LIGHT_TIMEOUT_MS;
   let lastErr;
 
   for (let attempt = 0; attempt < attempts; attempt++) {
@@ -628,19 +681,18 @@ const syncFromAfterTill = (currentTill, futureFrom) => {
 function AdminSaveToast({ busy, feedback, onDismiss }) {
   if (!busy && !feedback?.type) return null;
   const ok = feedback?.type === "success";
-  const canDismiss = !busy && !!feedback?.type;
   return (
     <div
       role="status"
       aria-live="polite"
-      className={`admin-save-toast${ok ? " admin-save-toast--ok" : busy ? " admin-save-toast--busy" : " admin-save-toast--err"}${canDismiss ? " admin-save-toast--dismissible" : ""}`}
+      className={`admin-save-toast${ok ? " admin-save-toast--ok" : busy ? " admin-save-toast--busy" : " admin-save-toast--err"} admin-save-toast--dismissible`}
     >
-      <span className="admin-save-toast-msg">{busy ? "저장 중…" : feedback.message}</span>
-      {canDismiss && (
-        <button type="button" className="admin-save-toast-close" onClick={onDismiss} aria-label="닫기">
-          ×
-        </button>
-      )}
+      <span className="admin-save-toast-msg">
+        {busy ? "저장 중… (오래 걸리면 × 로 닫기 · 💾 저장 재시도)" : feedback.message}
+      </span>
+      <button type="button" className="admin-save-toast-close" onClick={onDismiss} aria-label="닫기">
+        ×
+      </button>
     </div>
   );
 }
@@ -892,13 +944,33 @@ const resolveCarrierCostFromStore = (costs, pol, cr, t, period, carrierRates, fD
   return base != null ? Number(base) : null;
 };
 
-/** 선사 Admin: pol_costs에 저장된 매출가 (없으면 매입가 = 마진 0) */
-const resolveCarrierSellFromStore = (costs, pol, cr, t, period, cost) => {
-  if (cost == null) return null;
+/** pol_costs에 직접 저장된 매출가 (없으면 null) */
+const resolveCarrierExplicitSell = (costs, pol, cr, t, period) => {
   const c = costs[pol]?.carrier?.[cr];
   const p = period === "future" ? "future" : "current";
   const sellVal = c?.[p]?.sell?.[t];
   if (sellVal != null && sellVal !== "") return Number(sellVal);
+  return null;
+};
+
+const getPolStoredMargin = (pol, type, period, polM, polMFuture) => {
+  const store = period === "future" ? polMFuture : polM;
+  const val = store?.[pol]?.[type];
+  if (val == null || val === "") return null;
+  return marginNum(val);
+};
+
+/** 매출가: 저장된 sell → cost+POL마진 → cost+fullMargin(게스트) → cost */
+const resolveCarrierEffectiveSell = (
+  costs, pol, cr, t, period, cost,
+  { polM, polMFuture, fullMargin = null } = {},
+) => {
+  if (cost == null) return null;
+  const explicit = resolveCarrierExplicitSell(costs, pol, cr, t, period);
+  if (explicit != null) return explicit;
+  const polMargin = getPolStoredMargin(pol, t, period, polM, polMFuture);
+  if (polMargin != null) return cost + polMargin;
+  if (fullMargin != null) return cost + fullMargin;
   return cost;
 };
 
@@ -927,7 +999,7 @@ const buildBuyingGriCosts = (prevCosts, { deltas, rows, carrier, period, carrier
   return next;
 };
 
-const buildSellingGriSells = (prevCosts, { deltas, rows, carrier, period, carrierRates, fData }) => {
+const buildSellingGriSells = (prevCosts, { deltas, rows, carrier, period, carrierRates, fData, polM, polMFuture }) => {
   let next = { ...prevCosts };
   rows.forEach(row => {
     RATE_TYPES.forEach(t => {
@@ -935,7 +1007,7 @@ const buildSellingGriSells = (prevCosts, { deltas, rows, carrier, period, carrie
       if (!Number.isFinite(delta)) return;
       const cost = resolveCarrierCostFromStore(next, row.pol, carrier, t, period, carrierRates, fData);
       if (cost == null) return;
-      const currentSell = resolveCarrierSellFromStore(next, row.pol, carrier, t, period, cost);
+      const currentSell = resolveCarrierEffectiveSell(next, row.pol, carrier, t, period, cost, { polM, polMFuture });
       const prevCr = { ...(next[row.pol]?.carrier?.[carrier] || {}) };
       const bucket = { ...(prevCr[period] || {}) };
       const sellBucket = { ...(bucket.sell || {}), [t]: currentSell + delta };
@@ -1830,9 +1902,17 @@ export default function App() {
       margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture,
     }));
 
-  /** 선사 Admin 단가표: pol_costs에 저장된 매출가 (전역 150/200·polM 미사용) */
+  /** 선사 Admin 단가표: sell 저장값 → POL 마진 → 매입 (전역 150/200 자동 가산 없음) */
   const getCarrierAdminSell = (pol, cr, type, period, cost) =>
-    resolveCarrierSellFromStore(polCostO, pol, cr, type, period, cost);
+    resolveCarrierEffectiveSell(polCostO, pol, cr, type, period, cost, { polM, polMFuture });
+
+  /** 게스트·포털: sell 저장값 → POL 마진 → getM() 전체 마진 */
+  const getGuestCarrierSell = (pol, cr, type, period, cost, area) =>
+    resolveCarrierEffectiveSell(polCostO, pol, cr, type, period, cost, {
+      polM,
+      polMFuture,
+      fullMargin: getM(pol, area, type, period),
+    });
 
   const applyBuyingGriBulk = (deltas, rows, carrier, period) => {
     if (!rows?.length || !Object.keys(deltas).length) return;
@@ -1851,7 +1931,7 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveOneSettingWithRetry("pol_costs", JSON.stringify(nextCosts));
+      await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -1876,7 +1956,7 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveOneSettingWithRetry("pol_costs", JSON.stringify(restored));
+      await saveOneSettingWithRetry("pol_costs", serializePolCosts(restored));
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -1900,6 +1980,8 @@ export default function App() {
       period,
       carrierRates,
       fData,
+      polM,
+      polMFuture,
     });
     cancelPendingPricingSave();
     resetSaveQueue();
@@ -1912,7 +1994,7 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveOneSettingWithRetry("pol_costs", JSON.stringify(nextCosts));
+      await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
     })
       .then(() => {
         writePricingCache({
@@ -1942,7 +2024,7 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveOneSettingWithRetry("pol_costs", JSON.stringify(restoredCosts));
+      await saveOneSettingWithRetry("pol_costs", serializePolCosts(restoredCosts));
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -2002,7 +2084,7 @@ export default function App() {
     });
     enqueueSave(async () => {
       await saveSettingsEntries([
-        ["pol_costs", JSON.stringify(nextCosts)],
+        ["pol_costs", serializePolCosts(nextCosts)],
         ["carrier_rates_json", JSON.stringify(nextRates)],
       ]);
     })
@@ -2054,7 +2136,7 @@ export default function App() {
     });
     enqueueSave(async () => {
       await saveSettingsEntries([
-        ["pol_costs", JSON.stringify(restoredCosts)],
+        ["pol_costs", serializePolCosts(restoredCosts)],
         ["carrier_rates_json", JSON.stringify(restoredRates)],
       ]);
     })
@@ -2461,6 +2543,7 @@ export default function App() {
   const dismissSaveFeedback = () => {
     if (saveFeedbackTimerRef.current) clearTimeout(saveFeedbackTimerRef.current);
     setSaveFeedback({ type: null, message: "" });
+    setSaveBusy(false);
   };
 
   const flashSaveFeedback = (type, message) => {
@@ -2478,9 +2561,19 @@ export default function App() {
     setSaveBusy(true);
     setSaveFeedback({ type: null, message: "" });
     try {
-      await enqueueSave(fn);
+      await withTimeout(
+        enqueueSave(fn),
+        SAVE_UI_MAX_MS,
+        "저장 시간 초과 (90초) · 네트워크 확인 후 💾 저장 재시도",
+      );
+      writePricingCache({
+        ...buildPricingCache(),
+        pricingSavedAt: Date.now(),
+        serverSyncedAt: Date.now(),
+      });
       flashSaveFeedback("success", `✅ ${successLabel} 저장 완료`);
     } catch (e) {
+      resetSaveQueue();
       flashSaveFeedback("error", `저장 실패: ${e.message}`);
     } finally {
       setSaveBusy(false);
@@ -2494,7 +2587,7 @@ export default function App() {
   const getCarrierSaveEntries = () => {
     const s = pricingSaveRef.current;
     return [
-      ["pol_costs", JSON.stringify(s.polCostO)],
+      ["pol_costs", serializePolCosts(s.polCostO)],
       ["pol_margins", JSON.stringify(s.polM)],
       ["pol_margins_future", JSON.stringify(s.polMFuture)],
       ["global_margins", JSON.stringify(s.margins)],
@@ -2696,7 +2789,7 @@ export default function App() {
     ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
     ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
     ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
-    ["pol_costs", JSON.stringify(polCostO)],
+    ["pol_costs", serializePolCosts(polCostO)],
     ["ad_banners_json", JSON.stringify(adBanners)],
   ]));
 
@@ -2763,7 +2856,7 @@ export default function App() {
         const pendingCostResync = cacheNewer && (costsDiffer || mergedDiffersFromServer);
         const pendingMarginResync = (marginsDiffer || marginsFutureDiffer) && cacheNewer;
 
-        priority.pol_costs = JSON.stringify(mergedCosts);
+        priority.pol_costs = serializePolCosts(mergedCosts);
         if (pendingMarginResync && cacheMargins) priority.pol_margins = JSON.stringify(cacheMargins);
         if (pendingMarginResync && cacheMarginsFuture) priority.pol_margins_future = JSON.stringify(cacheMarginsFuture);
 
@@ -2774,7 +2867,7 @@ export default function App() {
           enqueueNetworkWrite(async () => {
             try {
               if (pendingCostResync) {
-                await saveOneSettingWithRetry("pol_costs", JSON.stringify(mergedCosts));
+                await saveOneSettingWithRetry("pol_costs", serializePolCosts(mergedCosts));
               }
               if (pendingMarginResync) {
                 await saveSettingsEntries([
@@ -3223,7 +3316,13 @@ export default function App() {
   };
   const oceanDetail = (row, t) => {
     const b = bNet(row, t);
-    return mkPrice(b.val, getM(row.pol, row.area, t, ratePeriod), b.cr);
+    const cost = b.val;
+    const cr = b.cr;
+    if (cost != null && cr) {
+      const sell = getGuestCarrierSell(row.pol, cr, t, ratePeriod, cost, row.area);
+      return mkPrice(cost, sell - cost, cr);
+    }
+    return mkPrice(cost, getM(row.pol, row.area, t, ratePeriod), cr);
   };
   const doDetail = (row, cityKey, si) => {
     const t = si === 0 ? "coc20" : "coc40";
@@ -3235,7 +3334,14 @@ export default function App() {
   const dropCarrierDetail = (row, cityKey, cr, si, period = ratePeriod) => {
     const t = si === 0 ? "coc20" : "coc40";
     const cost = getCarrierDropTotalCost(row, cr, cityKey, si, period);
-    return mkPrice(cost, getM(row.pol, row.area, t, period) + getDropM(cr, cityKey, si), cr);
+    if (cost == null) return mkPrice(null, 0, cr);
+    const oceanCost = getCarrierRate(row, cr, t, period);
+    const dropM = getDropM(cr, cityKey, si);
+    if (oceanCost != null) {
+      const oceanSell = getGuestCarrierSell(row.pol, cr, t, period, oceanCost, row.area);
+      return mkPrice(cost, (oceanSell - oceanCost) + dropM, cr);
+    }
+    return mkPrice(cost, getM(row.pol, row.area, t, period) + dropM, cr);
   };
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
@@ -3282,8 +3388,15 @@ export default function App() {
 
   const saveCarrierPricing = () => runSave("선사 운임", async () => {
     clearTimeout(autoSaveTimerRef.current);
-    await saveSettingsEntries(getCarrierSaveEntries());
-    writePricingCache();
+    const entries = getCarrierSaveEntries();
+    const light = entries.filter(([k]) => !HEAVY_SETTING_KEYS.has(k));
+    const heavy = entries.filter(([k]) => HEAVY_SETTING_KEYS.has(k));
+    if (light.length) {
+      await postSettingsRows(light.map(([key, value]) => ({ key, value: String(value) })), "carrier settings");
+    }
+    for (const [key, value] of heavy) {
+      await saveOneSettingWithRetry(key, value);
+    }
   });
 
   const saveRentalPricing = () => runSave("렌탈 운임", async () => {
@@ -4289,10 +4402,14 @@ export default function App() {
                   const cv20=getCarrierRate(row,k,t20,"current"),cv40=getCarrierRate(row,k,t40,"current");
                   const fv20=getCarrierRate(row,k,t20,"future"),fv40=getCarrierRate(row,k,t40,"future");
                   if(cv20==null&&cv40==null&&fv20==null&&fv40==null)return null;
-                  const cd20=mkPrice(cv20,getM(row.pol,row.area,t20,"current"),k);
-                  const cd40=mkPrice(cv40,getM(row.pol,row.area,t40,"current"),k);
-                  const fd20=mkPrice(fv20,getM(row.pol,row.area,t20,"future"),k);
-                  const fd40=mkPrice(fv40,getM(row.pol,row.area,t40,"future"),k);
+                  const cs20=cv20!=null?getGuestCarrierSell(row.pol,k,t20,"current",cv20,row.area):null;
+                  const cs40=cv40!=null?getGuestCarrierSell(row.pol,k,t40,"current",cv40,row.area):null;
+                  const fs20=fv20!=null?getGuestCarrierSell(row.pol,k,t20,"future",fv20,row.area):null;
+                  const fs40=fv40!=null?getGuestCarrierSell(row.pol,k,t40,"future",fv40,row.area):null;
+                  const cd20=mkPrice(cv20,cs20!=null?cs20-cv20:0,k);
+                  const cd40=mkPrice(cv40,cs40!=null?cs40-cv40:0,k);
+                  const fd20=mkPrice(fv20,fs20!=null?fs20-fv20:0,k);
+                  const fd40=mkPrice(fv40,fs40!=null?fs40-fv40:0,k);
                   return (
                     <div key={k} style={{padding:"10px 0",borderBottom:"1px solid #f9fafb"}}>
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
@@ -4326,9 +4443,10 @@ export default function App() {
               <tbody>
                 {CRS.map(k=>{ const v20=getCarrierRate(row,k,t20),v40=getCarrierRate(row,k,t40); if(v20==null&&v40==null)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
                   const priceColor = ratePeriod==="future"?"#b45309":"#1d4ed8";
-                  const m20=getM(row.pol,row.area,t20,ratePeriod), m40=getM(row.pol,row.area,t40,ratePeriod);
-                  const s20=v20!=null?v20+m20:null, s40=v40!=null?v40+m40:null;
-                  const best20=b20.val!=null?b20.val+m20:null, best40=b40.val!=null?b40.val+m40:null;
+                  const s20=v20!=null?getGuestCarrierSell(row.pol,k,t20,ratePeriod,v20,row.area):null;
+                  const s40=v40!=null?getGuestCarrierSell(row.pol,k,t40,ratePeriod,v40,row.area):null;
+                  const best20=b20.val!=null?getGuestCarrierSell(row.pol,b20.cr,t20,ratePeriod,b20.val,row.area):null;
+                  const best40=b40.val!=null?getGuestCarrierSell(row.pol,b40.cr,t40,ratePeriod,b40.val,row.area):null;
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
                     <td className="cvt-carrier" style={{padding:"8px 0"}}>
                       <Bg k={k}/>
