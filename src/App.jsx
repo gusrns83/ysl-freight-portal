@@ -537,12 +537,14 @@ const Bg = ({k, title}) => {
 
 const CarrierPortGuide = () => (
   <div className="carrier-port-guide" aria-label="Carrier calling ports">
-    <div className="carrier-port-guide-title">Calling Port</div>
-    {CRS.map(k => (
-      <div key={k} className="carrier-port-guide-row">
-        <Bg k={k} title={CN[k]}/>
-        <span className="carrier-port-guide-ports">{CARRIER_CALL_PORTS[k].join(", ")}</span>
-      </div>
+    <span className="carrier-port-guide-label">Calling port</span>
+    {CRS.map((k, i) => (
+      <span key={k} className="carrier-port-guide-item">
+        {i > 0 && <span className="carrier-port-guide-sep">/</span>}
+        <span className="carrier-port-guide-carrier">{k}</span>
+        <span className="carrier-port-guide-colon">:</span>
+        <span>{CARRIER_CALL_PORTS[k].join(", ")}</span>
+      </span>
     ))}
   </div>
 );
@@ -3410,23 +3412,22 @@ export default function App() {
         </div>
       </div>
 
+      {tab==="ocean" && (
+        <div className="carrier-port-guide-shell">
+          <CarrierPortGuide/>
+        </div>
+      )}
+
       {/* COC/SOC TOGGLE */}
       {tab==="ocean" && (
-        <div className="ocean-toolbar-shell">
-          <div className="ocean-toolbar">
-            <div className="ocean-toolbar-left">
-              <div style={{display:"flex",alignItems:"center",flexWrap:"wrap",gap:8}}>
-                <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
-                  {["coc","soc"].map(t=>(
-                    <button key={t} onClick={()=>setCtype(t)} style={{padding:"6px 16px",fontSize:11,fontWeight:600,borderRadius:6,background:ctype===t?"#fff":"transparent",border:"none",cursor:"pointer",color:ctype===t?"#111":"#9ca3af"}}>{t.toUpperCase()}</button>
-                  ))}
-                </div>
-                <span style={{fontSize:10,color:"#9ca3af"}}>{ctype==="coc"?"Carrier Owned":"Shipper Owned"}</span>
-              </div>
-              <RatePeriodToggle/>
-            </div>
-            <CarrierPortGuide/>
+        <div style={{maxWidth:640,margin:"10px auto 0",padding:"0 16px"}}>
+          <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
+            {["coc","soc"].map(t=>(
+              <button key={t} onClick={()=>setCtype(t)} style={{padding:"6px 16px",fontSize:11,fontWeight:600,borderRadius:6,background:ctype===t?"#fff":"transparent",border:"none",cursor:"pointer",color:ctype===t?"#111":"#9ca3af"}}>{t.toUpperCase()}</button>
+            ))}
           </div>
+          <span style={{fontSize:10,color:"#9ca3af",marginLeft:8}}>{ctype==="coc"?"Carrier Owned":"Shipper Owned"}</span>
+          <RatePeriodToggle/>
         </div>
       )}
       {tab==="dropoff" && (
