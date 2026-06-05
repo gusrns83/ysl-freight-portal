@@ -1582,14 +1582,6 @@ export default function App() {
     ? createPortal(<AdminSaveToast busy={saveBusy} feedback={saveFeedback} />, document.body)
     : null;
 
-  const saveValidityOnly = () => runSave("Validity", () => saveSettingsEntries([
-    ["validity_info_json", JSON.stringify(validityInfo)],
-    ["validity_snk", legacyValidityCurrent("SNK")],
-    ["validity_dy", legacyValidityCurrent("DY")],
-    ["validity_ck", legacyValidityCurrent("CK")],
-    ["validity_rental", legacyValidityCurrent("RENTAL")],
-  ]));
-
   const getCarrierSaveEntries = () => [
     ["pol_costs", JSON.stringify(polCostO)],
     ["pol_margins", JSON.stringify(polM)],
@@ -3202,37 +3194,7 @@ export default function App() {
             컨테이너 Rental 운임 관리 (매입 · 매출 · 마진)
           </button>
           <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:8,fontSize:11,color:"#92400e",lineHeight:1.5}}>
-            MARGIN 설정은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴에서 관리합니다. 지역/POL 선택 시 운임표가 함께 필터됩니다.
-          </div>
-          <div style={{background:"#f0fdf4",border:"1px solid #bbf7d0",borderRadius:10,padding:12,marginBottom:8}}>
-            <div style={{fontSize:10,fontWeight:700,color:"#166534",marginBottom:4}}>VALIDITY (선사 · Rental)</div>
-            <div style={{fontSize:9,color:"#6b7280",marginBottom:10}}>현재·향후 각각 From/Till · Further notice · 매입·마진은 <b>선사운임</b> · <b>렌탈운임</b></div>
-            {CRS.map(k=>(
-              <div key={k} style={{marginBottom:8,padding:10,background:"#fff",border:"1px solid #bbf7d0",borderRadius:8}}>
-                <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                  <Bg k={k}/><span style={{fontSize:12,fontWeight:700,color:"#374151"}}>{CN[k]}</span>
-                </div>
-                <ValidityPeriodFields carrierKey={k} period="current" periodLabel="현재 운임"
-                  validityInfo={validityInfo} onUpdate={updateValiditySlot} />
-                <ValidityPeriodFields carrierKey={k} period="future" periodLabel="향후 운임"
-                  validityInfo={validityInfo} onUpdate={updateValiditySlot}
-                  futureFromMin={getFutureFromMinDate(k)} />
-              </div>
-            ))}
-            <div style={{marginBottom:8,padding:10,background:"#faf5ff",border:"1px solid #ddd6fe",borderRadius:8}}>
-              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-                <Bg k="RENTAL"/><span style={{fontSize:12,fontWeight:700,color:"#5b21b6"}}>{CN.RENTAL}</span>
-              </div>
-              <ValidityPeriodFields carrierKey="RENTAL" period="current" periodLabel="현재 운임"
-                validityInfo={validityInfo} onUpdate={updateValiditySlot} />
-              <ValidityPeriodFields carrierKey="RENTAL" period="future" periodLabel="향후 운임"
-                validityInfo={validityInfo} onUpdate={updateValiditySlot}
-                futureFromMin={getFutureFromMinDate("RENTAL")} />
-            </div>
-            <button type="button" onClick={saveValidityOnly} disabled={saveBusy}
-              style={{width:"100%",marginTop:4,padding:"7px",fontSize:11,fontWeight:700,color:"#fff",background:saveBusy?"#86efac":"#16a34a",border:"none",borderRadius:6,cursor:saveBusy?"not-allowed":"pointer"}}>
-              {saveBusy ? "저장 중…" : "💾 Validity 저장"}
-            </button>
+            MARGIN · Validity(현재/향후) 설정은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴에서 관리합니다.
           </div>
           <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:12,marginBottom:8}}>
             <div style={{marginBottom:10}}>
