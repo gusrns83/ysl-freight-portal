@@ -2133,6 +2133,11 @@ export default function App() {
   };
   const dropCarrierDetail = (row, cityKey, cr, si, period = ratePeriod) => {
     const t = si === 0 ? "coc20" : "coc40";
+    const p = period === "future" ? "future" : "current";
+    const polDrop = polCostO[row.pol]?.drop?.[cityKey]?.[sz(si)];
+    if (p === "current" && polDrop != null && cr === "DY") {
+      return mkPrice(polDrop, getM(row.pol, row.area, t), cr);
+    }
     const o = getCarrierRate(row, cr, t, period);
     const d = DO[cityKey]?.[cr];
     const cost = o != null && d ? o + d[si] : null;
