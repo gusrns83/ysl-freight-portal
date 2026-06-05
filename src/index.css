@@ -1136,6 +1136,35 @@
   background: #e5e7eb;
 }
 
+.gri-area-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.gri-area-chip {
+  padding: 5px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 999px;
+  border: 1px solid #bfdbfe;
+  background: #f8fafc;
+  color: #3b82f6;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.gri-area-chip:hover {
+  background: #eff6ff;
+  border-color: #93c5fd;
+}
+
+.gri-area-chip--on {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
 .app-ad-slot {
   position: fixed;
   bottom: 0;
