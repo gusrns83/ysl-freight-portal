@@ -122,6 +122,39 @@
 .carrier-validity-table .validity-badge {
   max-width: 240px;
 }
+.carrier-validity-table .cvt-carrier {
+  width: 10%;
+  padding-right: 16px;
+  vertical-align: middle;
+}
+.carrier-validity-table .cvt-validity {
+  padding-left: 14px;
+  padding-right: 20px;
+  vertical-align: middle;
+}
+.carrier-validity-table .cvt-price {
+  text-align: right;
+  vertical-align: middle;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.carrier-validity-table th.cvt-validity {
+  padding-left: 14px;
+}
+.carrier-validity-grid-head {
+  display: grid;
+  grid-template-columns: 10% 1fr 22% 22%;
+  column-gap: 12px;
+  padding: 6px 12px 0 20px;
+  font-size: 10px;
+  color: #9ca3af;
+  font-weight: 500;
+}
+.carrier-validity-grid-head .cvt-validity-col {
+  padding-left: 14px;
+}
 
 .validity-date-inp {
   width: 100%;
