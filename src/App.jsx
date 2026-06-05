@@ -1080,6 +1080,8 @@ export default function App() {
   const [showRentalAdmin, setShowRentalAdmin] = useState(false);
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
+  const [carrierAdminMode, setCarrierAdminMode] = useState("ocean");
+  const [carrierAdminDropCity, setCarrierAdminDropCity] = useState("mow");
   const [carrierEditCell, setCarrierEditCell] = useState(null);
   const [rentalAdminPeriod, setRentalAdminPeriod] = useState("current");
   const [selReturnCity, setSelReturnCity] = useState("");
@@ -2020,6 +2022,63 @@ export default function App() {
     });
   };
 
+  const getCarrierDropAddon = (pol, cr, cityKey, si, period = "current") => {
+    const p = period === "future" ? "future" : "current";
+    const sk = sz(si);
+    const stored = polCostO[pol]?.carrier?.[cr]?.drop?.[cityKey]?.[p]?.[sk];
+    if (stored != null && stored !== "") return Number(stored);
+    const legacyTotal = polCostO[pol]?.drop?.[cityKey]?.[sk];
+    if (legacyTotal != null && legacyTotal !== "" && cr === "DY") {
+      const row = fMap[pol];
+      const t = si === 0 ? "coc20" : "coc40";
+      const ocean = row ? getCarrierRate(row, cr, t, period) : null;
+      if (ocean != null) return Number(legacyTotal) - ocean;
+    }
+    const d = DO[cityKey]?.[cr];
+    return d ? d[si] : null;
+  };
+
+  const getCarrierDropTotalCost = (row, cr, cityKey, si, period = "current") => {
+    const t = si === 0 ? "coc20" : "coc40";
+    const ocean = getCarrierRate(row, cr, t, period);
+    const addon = getCarrierDropAddon(row.pol, cr, cityKey, si, period);
+    if (ocean == null || addon == null) return null;
+    return ocean + addon;
+  };
+
+  const applyCarrierDropRate = (pol, cr, cityKey, si, value, period = "current") => {
+    const raw = String(value).trim();
+    const sk = sz(si);
+    const p = period === "future" ? "future" : "current";
+    setPolCostO(prev => {
+      const polEntry = { ...(prev[pol] || {}) };
+      const carrierEntry = { ...(polEntry.carrier || {}) };
+      const crEntry = { ...(carrierEntry[cr] || {}) };
+      const dropEntry = { ...(crEntry.drop || {}) };
+      const cityEntry = { ...(dropEntry[cityKey] || {}) };
+      const periodEntry = { ...(cityEntry[p] || {}) };
+      if (raw === "") delete periodEntry[sk];
+      else {
+        const v = parseInt(raw, 10);
+        if (!Number.isFinite(v)) return prev;
+        periodEntry[sk] = v;
+      }
+      if (Object.keys(periodEntry).length === 0) delete cityEntry[p];
+      else cityEntry[p] = periodEntry;
+      if (Object.keys(cityEntry).length === 0) delete dropEntry[cityKey];
+      else dropEntry[cityKey] = cityEntry;
+      if (Object.keys(dropEntry).length === 0) delete crEntry.drop;
+      else crEntry.drop = dropEntry;
+      return {
+        ...prev,
+        [pol]: {
+          ...polEntry,
+          carrier: { ...carrierEntry, [cr]: crEntry },
+        },
+      };
+    });
+  };
+
   const setGlobalCarrierRate = (cr, period, t, value) => {
     setCarrierRates(p => ({
       ...p,
@@ -2134,12 +2193,8 @@ export default function App() {
     const t = si === 0 ? "coc20" : "coc40";
     let b = null, cr = null;
     CRS.forEach(k => {
-      const o = getCarrierRate(row, k, t);
-      const d = DO[city]?.[k];
-      if (o != null && d) {
-        const tot = o + d[si];
-        if (b === null || tot < b) { b = tot; cr = k; }
-      }
+      const tot = getCarrierDropTotalCost(row, k, city, si);
+      if (tot != null && (b === null || tot < b)) { b = tot; cr = k; }
     });
     return { val: b, cr };
   };
@@ -2193,14 +2248,7 @@ export default function App() {
   };
   const dropCarrierDetail = (row, cityKey, cr, si, period = ratePeriod) => {
     const t = si === 0 ? "coc20" : "coc40";
-    const p = period === "future" ? "future" : "current";
-    const polDrop = polCostO[row.pol]?.drop?.[cityKey]?.[sz(si)];
-    if (p === "current" && polDrop != null && cr === "DY") {
-      return mkPrice(polDrop, getM(row.pol, row.area, t), cr);
-    }
-    const o = getCarrierRate(row, cr, t, period);
-    const d = DO[cityKey]?.[cr];
-    const cost = o != null && d ? o + d[si] : null;
+    const cost = getCarrierDropTotalCost(row, cr, cityKey, si, period);
     return mkPrice(cost, getM(row.pol, row.area, t), cr);
   };
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
@@ -2885,13 +2933,25 @@ export default function App() {
     }
     const caPeriod = carrierAdminPeriod;
     const caCr = carrierAdminCr;
+    const caDropCity = carrierAdminDropCity;
+    const isDropAdmin = carrierAdminMode === "dropoff";
     const isFuture = caPeriod === "future";
+    const dropCityLabel = DOC.find(d => d.k === caDropCity)?.l || caDropCity;
     const applyCellSell = (row, type, sellStr) => {
       const sell = parseInt(sellStr, 10);
       if (!Number.isFinite(sell)) return;
       const cost = getCarrierRate(row, caCr, type, caPeriod);
       if (cost == null) return;
       applyPolMargin(row.pol, type, sell - cost);
+    };
+    const applyDropCellSell = (row, type, sellStr) => {
+      const sell = parseInt(sellStr, 10);
+      if (!Number.isFinite(sell)) return;
+      const si = type === "coc20" ? 0 : 1;
+      const ocean = getCarrierRate(row, caCr, type, caPeriod);
+      const margin = getM(row.pol, row.area, type);
+      if (ocean == null) return;
+      applyCarrierDropRate(row.pol, caCr, caDropCity, si, sell - margin - ocean, caPeriod);
     };
     const filteredCarrierAreaGroups = carrierAreaGroups
       .filter(({ area }) => !(marginTab === "area" && selArea) || area === selArea)
@@ -2965,6 +3025,73 @@ export default function App() {
         </td>
       );
     };
+    const renderDropGridCell = (row, type) => {
+      const si = type === "coc20" ? 0 : 1;
+      const addon = getCarrierDropAddon(row.pol, caCr, caDropCity, si, caPeriod);
+      const total = getCarrierDropTotalCost(row, caCr, caDropCity, si, caPeriod);
+      const ocean = getCarrierRate(row, caCr, type, caPeriod);
+      if (ocean == null && addon == null) {
+        return <td className="cg-cell cg-empty">—</td>;
+      }
+      const margin = getM(row.pol, row.area, type);
+      const sell = total != null ? total + margin : null;
+      const cellKey = `${row.pol}:drop:${caDropCity}:${type}`;
+      const isOpen = carrierEditCell === cellKey;
+      return (
+        <td className={`cg-cell${isFuture ? " cg-future" : ""}${isOpen ? " cg-active" : ""}`}>
+          {isOpen ? (
+            <div className="cg-edit-panel" onClick={e => e.stopPropagation()}>
+              <table className="cg-mini">
+                <tbody>
+                  <tr>
+                    <td className="cg-mini-label cg-mini-label-cost">Drop 매입</td>
+                    <td className="cg-mini-val-cost">
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-cost"
+                        value={addon ?? ""} placeholder="—"
+                        onChange={e => applyCarrierDropRate(row.pol, caCr, caDropCity, si, e.target.value, caPeriod)}/>
+                    </td>
+                  </tr>
+                  <tr>
+                    <td className="cg-mini-label cg-mini-label-sell">매출</td>
+                    <td className="cg-mini-val-sell">
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-sell"
+                        value={sell ?? ""} placeholder="—"
+                        onChange={e => applyDropCellSell(row, type, e.target.value)}/>
+                    </td>
+                  </tr>
+                  <tr className="cg-mini-margin-tr">
+                    <td className="cg-mini-label cg-mini-label-margin">마진</td>
+                    <td className="cg-mini-val-margin">
+                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
+                        value={margin} onChange={e => applyPolMargin(row.pol, type, e.target.value)}/>
+                    </td>
+                  </tr>
+                  {total != null && (
+                    <tr>
+                      <td className="cg-mini-label" style={{ color: "#6b7280" }}>합계 매입</td>
+                      <td className="cg-mini-val" style={{ fontSize: 11, color: "#6b7280", fontWeight: 600 }}>{n(total)}</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+              <button type="button" className="cg-close" onClick={() => setCarrierEditCell(null)}>닫기</button>
+            </div>
+          ) : (
+            <button type="button" className="cg-box" onClick={() => setCarrierEditCell(cellKey)}>
+              <div className="cg-pair-row cg-row-cost">
+                <span className="cg-lbl cg-lbl-cost">Drop</span>
+                <span className="cg-val cg-val-cost">{addon != null ? n(addon) : "—"}</span>
+              </div>
+              <div className="cg-pair-row cg-row-sell">
+                <span className="cg-lbl cg-lbl-sell">매출</span>
+                <span className="cg-val cg-val-sell">{sell != null ? n(sell) : "—"}</span>
+              </div>
+              <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {n(margin)}</div>
+            </button>
+          )}
+        </td>
+      );
+    };
     return (
       <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}} onClick={() => setCarrierEditCell(null)}>
         {adminSaveToastEl}
@@ -3000,6 +3127,30 @@ export default function App() {
               </button>
             ))}
           </div>
+          <div style={{display:"flex",background:"#ecfdf5",borderRadius:10,padding:3,marginBottom:10}}>
+            {[["ocean","해상 운임"],["dropoff","Drop off"]].map(([k,l])=>(
+              <button key={k} type="button" onClick={()=>{setCarrierAdminMode(k);setCarrierEditCell(null);}}
+                style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                  background:carrierAdminMode===k?"#fff":"transparent",
+                  color:carrierAdminMode===k?"#047857":"#6ee7b7",
+                  boxShadow:carrierAdminMode===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+                {l}
+              </button>
+            ))}
+          </div>
+          {isDropAdmin && (
+            <div style={{display:"flex",flexWrap:"wrap",gap:6,marginBottom:10}}>
+              {DOC.map(({ k, l }) => (
+                <button key={k} type="button" onClick={()=>{setCarrierAdminDropCity(k);setCarrierEditCell(null);}}
+                  style={{fontSize:10,fontWeight:600,padding:"6px 12px",borderRadius:16,cursor:"pointer",whiteSpace:"nowrap",
+                    border:`1px solid ${carrierAdminDropCity===k?"#059669":"#a7f3d0"}`,
+                    background:carrierAdminDropCity===k?"#059669":"#fff",
+                    color:carrierAdminDropCity===k?"#fff":"#047857"}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          )}
           <MarginPanel
             filterHint={
               marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
@@ -3026,41 +3177,66 @@ export default function App() {
               futureFromMin={getFutureFromMinDate(caCr)} />
           </div>
           <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
-            셀 클릭 → 매입·매출 조정 · {gridFilterLabel}
+            {isDropAdmin
+              ? `Drop off · ${dropCityLabel} · COC · Drop 매입 = (해상+Drop 합계) − 해상 · 매출 = 합계 + 마진 · ${gridFilterLabel}`
+              : `셀 클릭 → 매입·매출 조정 · ${gridFilterLabel}`}
           </div>
           <div className="carrier-grid-wrap">
             <table className="carrier-grid">
               <thead>
                 <tr className="cg-carrier-row">
                   <th colSpan={2}></th>
-                  <th colSpan={4}>{caCr} {CN_KR[caCr]} · {isFuture ? "향후" : "현재"} 운임 (USD)</th>
+                  <th colSpan={isDropAdmin ? 2 : 4}>
+                    {caCr} {CN_KR[caCr]} · {isDropAdmin ? `Drop off · ${dropCityLabel}` : `${isFuture ? "향후" : "현재"} 운임`} (USD)
+                  </th>
                 </tr>
                 <tr className="cg-head-row">
                   <th rowSpan={2} className="cg-th-area">AREA</th>
                   <th rowSpan={2} className="cg-th-pol">POL</th>
-                  <th colSpan={2}>COC</th>
-                  <th colSpan={2}>SOC</th>
+                  {isDropAdmin ? (
+                    <>
+                      <th colSpan={2}>COC Drop off</th>
+                    </>
+                  ) : (
+                    <>
+                      <th colSpan={2}>COC</th>
+                      <th colSpan={2}>SOC</th>
+                    </>
+                  )}
                 </tr>
                 <tr className="cg-head-row">
                   <th>20&apos;</th>
                   <th>40&apos;</th>
-                  <th>20&apos;</th>
-                  <th>40&apos;</th>
+                  {!isDropAdmin && (
+                    <>
+                      <th>20&apos;</th>
+                      <th>40&apos;</th>
+                    </>
+                  )}
                 </tr>
               </thead>
               <tbody>
                 {filteredCarrierAreaGroups.length === 0 ? (
-                  <tr><td colSpan={6} style={{padding:20,color:"#9ca3af",fontSize:12}}>표시할 POL 없음 · 지역/POL 선택 확인</td></tr>
+                  <tr><td colSpan={isDropAdmin ? 4 : 6} style={{padding:20,color:"#9ca3af",fontSize:12}}>표시할 POL 없음 · 지역/POL 선택 확인</td></tr>
                 ) : filteredCarrierAreaGroups.map(({ area, rows }) => rows.map((row, ri) => (
                   <tr key={row.pol} className={ri % 2 === 1 ? "cg-stripe" : ""}>
                     {ri === 0 && (
                       <td rowSpan={rows.length} className="cg-area">{area}</td>
                     )}
                     <td className="cg-pol">{row.pol}</td>
-                    {renderGridCell(row, "coc20")}
-                    {renderGridCell(row, "coc40")}
-                    {renderGridCell(row, "soc20")}
-                    {renderGridCell(row, "soc40")}
+                    {isDropAdmin ? (
+                      <>
+                        {renderDropGridCell(row, "coc20")}
+                        {renderDropGridCell(row, "coc40")}
+                      </>
+                    ) : (
+                      <>
+                        {renderGridCell(row, "coc20")}
+                        {renderGridCell(row, "coc40")}
+                        {renderGridCell(row, "soc20")}
+                        {renderGridCell(row, "soc40")}
+                      </>
+                    )}
                   </tr>
                 )))}
               </tbody>
