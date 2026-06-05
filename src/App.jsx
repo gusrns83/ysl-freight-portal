@@ -180,6 +180,7 @@ const PRICING_LIGHT_KEYS = [
   "rental_global_margins", "rental_area_margins", "rental_pol_margins",
   "rental_margin_timestamps", "rental_area_margin_timestamps", "rental_pol_margin_timestamps",
   "validity_info_json", "validity_snk", "validity_dy", "validity_ck", "validity_rental",
+  "carrier_drop_rates_json", "carrier_drop_margins_json",
 ];
 
 const settingsMapFromRows = (rows) => {
@@ -433,6 +434,41 @@ const CARRIER_CALL_PORTS = {
   CK: ["VMTP", "Fishery"],
 };
 const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
+
+const defaultCarrierDropRates = () => Object.fromEntries(CRS.map(cr => [cr, {
+  current: Object.fromEntries(
+    DOC.filter(({ k }) => DO[k]?.[cr]).map(({ k }) => [k, { c20: DO[k][cr][0], c40: DO[k][cr][1] }])
+  ),
+  future: {},
+}]));
+
+const defaultCarrierDropMargins = () => Object.fromEntries(
+  CRS.map(cr => [cr, Object.fromEntries(DOC.map(({ k }) => [k, { c20: 0, c40: 0 }]))])
+);
+
+const mergeCarrierDropRates = (saved) => {
+  const next = defaultCarrierDropRates();
+  Object.entries(saved || {}).forEach(([cr, periods]) => {
+    if (!next[cr]) next[cr] = { current: {}, future: {} };
+    ["current", "future"].forEach(p => {
+      Object.entries(periods?.[p] || {}).forEach(([city, vals]) => {
+        next[cr][p][city] = { ...(next[cr][p][city] || {}), ...vals };
+      });
+    });
+  });
+  return next;
+};
+
+const mergeCarrierDropMargins = (saved) => {
+  const next = defaultCarrierDropMargins();
+  Object.entries(saved || {}).forEach(([cr, cities]) => {
+    if (!next[cr]) next[cr] = {};
+    Object.entries(cities || {}).forEach(([city, vals]) => {
+      next[cr][city] = { ...(next[cr][city] || { c20: 0, c40: 0 }), ...vals };
+    });
+  });
+  return next;
+};
 const F_TO_R = Object.fromEntries(Object.entries(PM).map(([rental, freight]) => [freight, rental]));
 const DOC_RC = {mow:"Moscow",spb:"St.Petersburg",nsb:"Novosibirsk",ekb:"Ekaterinburg"};
 const RC_LABEL = Object.fromEntries(DOC.map(d => [DOC_RC[d.k], d.l]));
@@ -708,6 +744,8 @@ const parsePricingFromSettings = (s) => {
     rentalAreaTs: {},
     rentalPolTs: {},
     polCostO: {},
+    carrierDropRates: defaultCarrierDropRates(),
+    carrierDropMargins: defaultCarrierDropMargins(),
   };
 
   if (s.validity_info_json) {
@@ -791,6 +829,16 @@ const parsePricingFromSettings = (s) => {
   if (s.pol_costs != null && s.pol_costs !== "") {
     try { snap.polCostO = JSON.parse(s.pol_costs); } catch (e) {}
   }
+  if (s.carrier_drop_rates_json) {
+    try {
+      snap.carrierDropRates = mergeCarrierDropRates(JSON.parse(s.carrier_drop_rates_json));
+    } catch (e) {}
+  }
+  if (s.carrier_drop_margins_json) {
+    try {
+      snap.carrierDropMargins = mergeCarrierDropMargins(JSON.parse(s.carrier_drop_margins_json));
+    } catch (e) {}
+  }
   return snap;
 };
 
@@ -804,6 +852,8 @@ const pricingCacheFromSnapshot = (snap) => ({
   areaTs: snap.areaTs,
   polTs: snap.polTs,
   carrierRates: snap.carrierRates,
+  carrierDropRates: snap.carrierDropRates,
+  carrierDropMargins: snap.carrierDropMargins,
   validityInfo: snap.validityInfo,
   rentalRates: snap.rentalRates,
   rentalMargins: snap.rentalMargins,
@@ -826,6 +876,12 @@ const bootPricingFromCache = () => {
     areaTs: cache.areaTs ?? {},
     polTs: cache.polTs ?? {},
     carrierRates: cache.carrierRates ?? defaultCarrierRates(),
+    carrierDropRates: cache.carrierDropRates
+      ? mergeCarrierDropRates(cache.carrierDropRates)
+      : defaultCarrierDropRates(),
+    carrierDropMargins: cache.carrierDropMargins
+      ? mergeCarrierDropMargins(cache.carrierDropMargins)
+      : defaultCarrierDropMargins(),
     validityInfo: cache.validityInfo ?? defaultValidityInfo(),
     rentalRates: cache.rentalRates
       ? mergeRentalRates(buildDefaultRentalRates(), cache.rentalRates)
@@ -1041,6 +1097,12 @@ export default function App() {
   const [rentalPolEdit, setRentalPolEdit] = useState({r20:"",r40:""});
   const [validityInfo, setValidityInfo] = useState(() => pricingBoot?.validityInfo ?? defaultValidityInfo());
   const [carrierRates, setCarrierRates] = useState(() => pricingBoot?.carrierRates ?? defaultCarrierRates());
+  const [carrierDropRates, setCarrierDropRates] = useState(
+    () => pricingBoot?.carrierDropRates ?? defaultCarrierDropRates()
+  );
+  const [carrierDropMargins, setCarrierDropMargins] = useState(
+    () => pricingBoot?.carrierDropMargins ?? defaultCarrierDropMargins()
+  );
   const [rentalRates, setRentalRates] = useState(() => pricingBoot?.rentalRates ?? buildDefaultRentalRates());
   const [ratePeriod, setRatePeriod] = useState("current"); // current | future
   const [notices, setNotices] = useState(mkNotices);
@@ -1699,6 +1761,8 @@ export default function App() {
     ["area_margin_timestamps", JSON.stringify(areaTs)],
     ["pol_margin_timestamps", JSON.stringify(polTs)],
     ["carrier_rates_json", JSON.stringify(carrierRates)],
+    ["carrier_drop_rates_json", JSON.stringify(carrierDropRates)],
+    ["carrier_drop_margins_json", JSON.stringify(carrierDropMargins)],
     ["validity_info_json", JSON.stringify(validityInfo)],
   ];
 
@@ -1738,6 +1802,8 @@ export default function App() {
     areaTs,
     polTs,
     carrierRates,
+    carrierDropRates,
+    carrierDropMargins,
     validityInfo,
     rentalRates,
     rentalMargins,
@@ -1752,6 +1818,8 @@ export default function App() {
     if (!snap) return;
     setValidityInfo(snap.validityInfo);
     setCarrierRates(snap.carrierRates);
+    setCarrierDropRates(snap.carrierDropRates ?? defaultCarrierDropRates());
+    setCarrierDropMargins(snap.carrierDropMargins ?? defaultCarrierDropMargins());
     setRentalRates(snap.rentalRates);
     setMargins(snap.margins);
     setAreaM(snap.areaM);
@@ -1787,6 +1855,8 @@ export default function App() {
     ["notice_file_url", notices[0].fileUrl],
     ["validity_info_json", JSON.stringify(validityInfo)],
     ["carrier_rates_json", JSON.stringify(carrierRates)],
+    ["carrier_drop_rates_json", JSON.stringify(carrierDropRates)],
+    ["carrier_drop_margins_json", JSON.stringify(carrierDropMargins)],
     ["rental_rates_json", JSON.stringify(rentalRates)],
     ["validity_snk", legacyValidityCurrent("SNK")],
     ["validity_dy", legacyValidityCurrent("DY")],
@@ -1915,6 +1985,8 @@ export default function App() {
     areaTs,
     polTs,
     carrierRates,
+    carrierDropRates,
+    carrierDropMargins,
     validityInfo,
     rentalRates,
     rentalMargins,
@@ -2022,60 +2094,62 @@ export default function App() {
     });
   };
 
-  const getCarrierDropAddon = (pol, cr, cityKey, si, period = "current") => {
+  const getCarrierDropAddon = (cr, cityKey, si, period = "current") => {
     const p = period === "future" ? "future" : "current";
     const sk = sz(si);
-    const stored = polCostO[pol]?.carrier?.[cr]?.drop?.[cityKey]?.[p]?.[sk];
+    const stored = carrierDropRates[cr]?.[p]?.[cityKey]?.[sk];
     if (stored != null && stored !== "") return Number(stored);
-    const legacyTotal = polCostO[pol]?.drop?.[cityKey]?.[sk];
-    if (legacyTotal != null && legacyTotal !== "" && cr === "DY") {
-      const row = fMap[pol];
-      const t = si === 0 ? "coc20" : "coc40";
-      const ocean = row ? getCarrierRate(row, cr, t, period) : null;
-      if (ocean != null) return Number(legacyTotal) - ocean;
-    }
     const d = DO[cityKey]?.[cr];
     return d ? d[si] : null;
+  };
+
+  const getDropM = (cr, cityKey, si) => {
+    const sk = sz(si);
+    const v = carrierDropMargins[cr]?.[cityKey]?.[sk];
+    return v != null && v !== "" ? Number(v) : 0;
   };
 
   const getCarrierDropTotalCost = (row, cr, cityKey, si, period = "current") => {
     const t = si === 0 ? "coc20" : "coc40";
     const ocean = getCarrierRate(row, cr, t, period);
-    const addon = getCarrierDropAddon(row.pol, cr, cityKey, si, period);
+    const addon = getCarrierDropAddon(cr, cityKey, si, period);
     if (ocean == null || addon == null) return null;
     return ocean + addon;
   };
 
-  const applyCarrierDropRate = (pol, cr, cityKey, si, value, period = "current") => {
+  const applyCarrierDropRate = (cr, cityKey, si, value, period = "current") => {
     const raw = String(value).trim();
     const sk = sz(si);
     const p = period === "future" ? "future" : "current";
-    setPolCostO(prev => {
-      const polEntry = { ...(prev[pol] || {}) };
-      const carrierEntry = { ...(polEntry.carrier || {}) };
-      const crEntry = { ...(carrierEntry[cr] || {}) };
-      const dropEntry = { ...(crEntry.drop || {}) };
-      const cityEntry = { ...(dropEntry[cityKey] || {}) };
-      const periodEntry = { ...(cityEntry[p] || {}) };
-      if (raw === "") delete periodEntry[sk];
+    setCarrierDropRates(prev => {
+      const crBucket = { current: { ...(prev[cr]?.current || {}) }, future: { ...(prev[cr]?.future || {}) } };
+      const periodBucket = { ...crBucket[p] };
+      const cityBucket = { ...(periodBucket[cityKey] || {}) };
+      if (raw === "") delete cityBucket[sk];
       else {
         const v = parseInt(raw, 10);
         if (!Number.isFinite(v)) return prev;
-        periodEntry[sk] = v;
+        cityBucket[sk] = v;
       }
-      if (Object.keys(periodEntry).length === 0) delete cityEntry[p];
-      else cityEntry[p] = periodEntry;
-      if (Object.keys(cityEntry).length === 0) delete dropEntry[cityKey];
-      else dropEntry[cityKey] = cityEntry;
-      if (Object.keys(dropEntry).length === 0) delete crEntry.drop;
-      else crEntry.drop = dropEntry;
-      return {
-        ...prev,
-        [pol]: {
-          ...polEntry,
-          carrier: { ...carrierEntry, [cr]: crEntry },
-        },
-      };
+      if (Object.keys(cityBucket).length === 0) delete periodBucket[cityKey];
+      else periodBucket[cityKey] = cityBucket;
+      return { ...prev, [cr]: { ...crBucket, [p]: periodBucket } };
+    });
+  };
+
+  const applyCarrierDropMargin = (cr, cityKey, si, value) => {
+    const raw = String(value).trim();
+    const sk = sz(si);
+    setCarrierDropMargins(prev => {
+      const crBucket = { ...(prev[cr] || {}) };
+      const cityBucket = { ...(crBucket[cityKey] || { c20: 0, c40: 0 }) };
+      if (raw === "") cityBucket[sk] = 0;
+      else {
+        const v = parseInt(raw, 10);
+        if (!Number.isFinite(v)) return prev;
+        cityBucket[sk] = v;
+      }
+      return { ...prev, [cr]: { ...crBucket, [cityKey]: cityBucket } };
     });
   };
 
@@ -2244,12 +2318,13 @@ export default function App() {
     const t = si === 0 ? "coc20" : "coc40";
     const b = bDO(row, cityKey, si);
     const cost = getDropCityCost(row, cityKey, si);
-    return mkPrice(cost, getM(row.pol, row.area, t), b.cr);
+    const dropM = b.cr ? getDropM(b.cr, cityKey, si) : 0;
+    return mkPrice(cost, getM(row.pol, row.area, t) + dropM, b.cr);
   };
   const dropCarrierDetail = (row, cityKey, cr, si, period = ratePeriod) => {
     const t = si === 0 ? "coc20" : "coc40";
     const cost = getCarrierDropTotalCost(row, cr, cityKey, si, period);
-    return mkPrice(cost, getM(row.pol, row.area, t), cr);
+    return mkPrice(cost, getM(row.pol, row.area, t) + getDropM(cr, cityKey, si), cr);
   };
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
@@ -2944,14 +3019,12 @@ export default function App() {
       if (cost == null) return;
       applyPolMargin(row.pol, type, sell - cost);
     };
-    const applyDropCellSell = (row, type, sellStr) => {
+    const applyDropAdminSell = (si, sellStr) => {
       const sell = parseInt(sellStr, 10);
       if (!Number.isFinite(sell)) return;
-      const si = type === "coc20" ? 0 : 1;
-      const ocean = getCarrierRate(row, caCr, type, caPeriod);
-      const margin = getM(row.pol, row.area, type);
-      if (ocean == null) return;
-      applyCarrierDropRate(row.pol, caCr, caDropCity, si, sell - margin - ocean, caPeriod);
+      const cost = getCarrierDropAddon(caCr, caDropCity, si, caPeriod);
+      if (cost == null) return;
+      applyCarrierDropMargin(caCr, caDropCity, si, sell - cost);
     };
     const filteredCarrierAreaGroups = carrierAreaGroups
       .filter(({ area }) => !(marginTab === "area" && selArea) || area === selArea)
@@ -3025,30 +3098,25 @@ export default function App() {
         </td>
       );
     };
-    const renderDropGridCell = (row, type) => {
-      const si = type === "coc20" ? 0 : 1;
-      const addon = getCarrierDropAddon(row.pol, caCr, caDropCity, si, caPeriod);
-      const total = getCarrierDropTotalCost(row, caCr, caDropCity, si, caPeriod);
-      const ocean = getCarrierRate(row, caCr, type, caPeriod);
-      if (ocean == null && addon == null) {
-        return <td className="cg-cell cg-empty">—</td>;
-      }
-      const margin = getM(row.pol, row.area, type);
-      const sell = total != null ? total + margin : null;
-      const cellKey = `${row.pol}:drop:${caDropCity}:${type}`;
+    const renderDropAdminCell = (si, label) => {
+      const cost = getCarrierDropAddon(caCr, caDropCity, si, caPeriod);
+      const margin = getDropM(caCr, caDropCity, si);
+      const sell = cost != null ? cost + margin : null;
+      const cellKey = `drop:${caCr}:${caDropCity}:${caPeriod}:${si}`;
       const isOpen = carrierEditCell === cellKey;
       return (
-        <td className={`cg-cell${isFuture ? " cg-future" : ""}${isOpen ? " cg-active" : ""}`}>
+        <div className={`drop-admin-cell${isFuture ? " drop-admin-cell-future" : ""}${isOpen ? " drop-admin-cell-active" : ""}`}>
+          <div className="drop-admin-size">{label}</div>
           {isOpen ? (
             <div className="cg-edit-panel" onClick={e => e.stopPropagation()}>
               <table className="cg-mini">
                 <tbody>
                   <tr>
-                    <td className="cg-mini-label cg-mini-label-cost">Drop 매입</td>
+                    <td className="cg-mini-label cg-mini-label-cost">매입</td>
                     <td className="cg-mini-val-cost">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-cost"
-                        value={addon ?? ""} placeholder="—"
-                        onChange={e => applyCarrierDropRate(row.pol, caCr, caDropCity, si, e.target.value, caPeriod)}/>
+                        value={cost ?? ""} placeholder="—"
+                        onChange={e => applyCarrierDropRate(caCr, caDropCity, si, e.target.value, caPeriod)}/>
                     </td>
                   </tr>
                   <tr>
@@ -3056,31 +3124,25 @@ export default function App() {
                     <td className="cg-mini-val-sell">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-sell"
                         value={sell ?? ""} placeholder="—"
-                        onChange={e => applyDropCellSell(row, type, e.target.value)}/>
+                        onChange={e => applyDropAdminSell(si, e.target.value)}/>
                     </td>
                   </tr>
                   <tr className="cg-mini-margin-tr">
                     <td className="cg-mini-label cg-mini-label-margin">마진</td>
                     <td className="cg-mini-val-margin">
                       <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
-                        value={margin} onChange={e => applyPolMargin(row.pol, type, e.target.value)}/>
+                        value={margin} onChange={e => applyCarrierDropMargin(caCr, caDropCity, si, e.target.value)}/>
                     </td>
                   </tr>
-                  {total != null && (
-                    <tr>
-                      <td className="cg-mini-label" style={{ color: "#6b7280" }}>합계 매입</td>
-                      <td className="cg-mini-val" style={{ fontSize: 11, color: "#6b7280", fontWeight: 600 }}>{n(total)}</td>
-                    </tr>
-                  )}
                 </tbody>
               </table>
               <button type="button" className="cg-close" onClick={() => setCarrierEditCell(null)}>닫기</button>
             </div>
           ) : (
-            <button type="button" className="cg-box" onClick={() => setCarrierEditCell(cellKey)}>
+            <button type="button" className="cg-box drop-admin-box" onClick={() => setCarrierEditCell(cellKey)}>
               <div className="cg-pair-row cg-row-cost">
-                <span className="cg-lbl cg-lbl-cost">Drop</span>
-                <span className="cg-val cg-val-cost">{addon != null ? n(addon) : "—"}</span>
+                <span className="cg-lbl cg-lbl-cost">매입</span>
+                <span className="cg-val cg-val-cost">{cost != null ? n(cost) : "—"}</span>
               </div>
               <div className="cg-pair-row cg-row-sell">
                 <span className="cg-lbl cg-lbl-sell">매출</span>
@@ -3089,7 +3151,7 @@ export default function App() {
               <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {n(margin)}</div>
             </button>
           )}
-        </td>
+        </div>
       );
     };
     return (
@@ -3151,6 +3213,8 @@ export default function App() {
               ))}
             </div>
           )}
+          {!isDropAdmin && (
+          <>
           <MarginPanel
             filterHint={
               marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
@@ -3177,71 +3241,67 @@ export default function App() {
               futureFromMin={getFutureFromMinDate(caCr)} />
           </div>
           <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
-            {isDropAdmin
-              ? `Drop off · ${dropCityLabel} · COC · Drop 매입 = (해상+Drop 합계) − 해상 · 매출 = 합계 + 마진 · ${gridFilterLabel}`
-              : `셀 클릭 → 매입·매출 조정 · ${gridFilterLabel}`}
+            셀 클릭 → 매입·매출 조정 · {gridFilterLabel}
           </div>
           <div className="carrier-grid-wrap">
             <table className="carrier-grid">
               <thead>
                 <tr className="cg-carrier-row">
                   <th colSpan={2}></th>
-                  <th colSpan={isDropAdmin ? 2 : 4}>
-                    {caCr} {CN_KR[caCr]} · {isDropAdmin ? `Drop off · ${dropCityLabel}` : `${isFuture ? "향후" : "현재"} 운임`} (USD)
-                  </th>
+                  <th colSpan={4}>{caCr} {CN_KR[caCr]} · {isFuture ? "향후" : "현재"} 운임 (USD)</th>
                 </tr>
                 <tr className="cg-head-row">
                   <th rowSpan={2} className="cg-th-area">AREA</th>
                   <th rowSpan={2} className="cg-th-pol">POL</th>
-                  {isDropAdmin ? (
-                    <>
-                      <th colSpan={2}>COC Drop off</th>
-                    </>
-                  ) : (
-                    <>
-                      <th colSpan={2}>COC</th>
-                      <th colSpan={2}>SOC</th>
-                    </>
-                  )}
+                  <th colSpan={2}>COC</th>
+                  <th colSpan={2}>SOC</th>
                 </tr>
                 <tr className="cg-head-row">
                   <th>20&apos;</th>
                   <th>40&apos;</th>
-                  {!isDropAdmin && (
-                    <>
-                      <th>20&apos;</th>
-                      <th>40&apos;</th>
-                    </>
-                  )}
+                  <th>20&apos;</th>
+                  <th>40&apos;</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredCarrierAreaGroups.length === 0 ? (
-                  <tr><td colSpan={isDropAdmin ? 4 : 6} style={{padding:20,color:"#9ca3af",fontSize:12}}>표시할 POL 없음 · 지역/POL 선택 확인</td></tr>
+                  <tr><td colSpan={6} style={{padding:20,color:"#9ca3af",fontSize:12}}>표시할 POL 없음 · 지역/POL 선택 확인</td></tr>
                 ) : filteredCarrierAreaGroups.map(({ area, rows }) => rows.map((row, ri) => (
                   <tr key={row.pol} className={ri % 2 === 1 ? "cg-stripe" : ""}>
                     {ri === 0 && (
                       <td rowSpan={rows.length} className="cg-area">{area}</td>
                     )}
                     <td className="cg-pol">{row.pol}</td>
-                    {isDropAdmin ? (
-                      <>
-                        {renderDropGridCell(row, "coc20")}
-                        {renderDropGridCell(row, "coc40")}
-                      </>
-                    ) : (
-                      <>
-                        {renderGridCell(row, "coc20")}
-                        {renderGridCell(row, "coc40")}
-                        {renderGridCell(row, "soc20")}
-                        {renderGridCell(row, "soc40")}
-                      </>
-                    )}
+                    {renderGridCell(row, "coc20")}
+                    {renderGridCell(row, "coc40")}
+                    {renderGridCell(row, "soc20")}
+                    {renderGridCell(row, "soc40")}
                   </tr>
                 )))}
               </tbody>
             </table>
           </div>
+          </>
+          )}
+          {isDropAdmin && (
+            <div className="drop-admin-panel">
+              <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12}}>
+                <Bg k={caCr}/>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700,color:"#047857"}}>
+                    {CN_KR[caCr]} · Drop off · {dropCityLabel}
+                  </div>
+                  <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>
+                    {isFuture ? "향후" : "현재"} · 반납지별 Drop off 단가 (출발지·해상 운임 제외) · 마진 기본 0
+                  </div>
+                </div>
+              </div>
+              <div className="drop-admin-grid">
+                {renderDropAdminCell(0, "20' COC")}
+                {renderDropAdminCell(1, "40' COC")}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     );
