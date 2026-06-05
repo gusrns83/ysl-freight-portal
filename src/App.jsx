@@ -524,10 +524,10 @@ const Logo = ({size=32}) => (
   </svg>
 );
 
-const Bg = ({k}) => {
+const Bg = ({k, title}) => {
   if (!k) return null;
   const styles = {SNK:{background:"#dbeafe",color:"#1d4ed8"},DY:{background:"#d1fae5",color:"#065f46"},CK:{background:"#ffedd5",color:"#9a3412"},RENTAL:{background:"#ede9fe",color:"#6d21a8"}};
-  return <span style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,...styles[k]}}>{k === "RENTAL" ? "RENT" : k}</span>;
+  return <span title={title || CN[k] || k} style={{fontSize:10,fontWeight:700,padding:"1px 6px",borderRadius:4,...styles[k]}}>{k === "RENTAL" ? "RENT" : k}</span>;
 };
 
 const tabIconStyle = (active) => ({ opacity: active ? 1 : 0.72, display: "block" });
@@ -2465,8 +2465,7 @@ export default function App() {
     const label = getValidityLabel(carrierKey);
     if (!label) return <span style={{fontSize:10,color:"#d1d5db"}}>—</span>;
     const isFuture = ratePeriod === "future";
-    const isFn = label === FURTHER_NOTICE_LABEL || label.includes(FURTHER_NOTICE_LABEL);
-    const tone = isFn ? "fn" : (isFuture ? "future" : "current");
+    const tone = isFuture ? "future" : "current";
     return (
       <span
         className={`validity-badge validity-badge--${tone}${compact ? " validity-badge--compact" : ""} validity-compact-text`}
@@ -3013,10 +3012,10 @@ export default function App() {
             ) : (
             <table className="carrier-validity-table" style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
               <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
-                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500,width:"28%"}}>Carrier</th>
-                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500,width:"36%"}}>Validity (From - Till)</th>
-                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500,width:"18%"}}>20'</th>
-                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500,width:"18%"}}>40'</th>
+                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500,width:"12%"}}>Carrier</th>
+                <th style={{textAlign:"left",padding:"4px 0",fontWeight:500,width:"38%"}}>Validity</th>
+                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500,width:"25%"}}>20'</th>
+                <th style={{textAlign:"right",padding:"4px 0",fontWeight:500,width:"25%"}}>40'</th>
               </tr></thead>
               <tbody>
                 {CRS.map(k=>{ const v20=getCarrierRate(row,k,t20),v40=getCarrierRate(row,k,t40); if(v20==null&&v40==null)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
@@ -3025,11 +3024,8 @@ export default function App() {
                   const s20=v20!=null?v20+m20:null, s40=v40!=null?v40+m40:null;
                   const best20=b20.val!=null?b20.val+m20:null, best40=b40.val!=null?b40.val+m40:null;
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
-                    <td style={{padding:"8px 0",verticalAlign:"middle"}}>
-                      <div style={{display:"flex",alignItems:"center",gap:6}}>
-                        <Bg k={k}/>
-                        <span style={{fontSize:11,color:"#6b7280"}}>{CN[k]}</span>
-                      </div>
+                    <td style={{padding:"8px 0",verticalAlign:"middle",width:"12%"}}>
+                      <Bg k={k}/>
                     </td>
                     <td style={{padding:"8px 8px 8px 0",verticalAlign:"middle"}}><ValidityCell carrierKey={k}/></td>
                     <td style={{textAlign:"right",padding:"8px 0",fontFamily:"monospace",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,t20,row.pol+" > VVO")}>{s20!=null?n(s20):"—"}</td>
@@ -3101,8 +3097,8 @@ export default function App() {
                   {cOpen && (
                     <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
                       {!isAdmin && carrierRows.length > 0 && (
-                        <div style={{display:"grid",gridTemplateColumns:"28% 32% 20% 20%",padding:"6px 12px 0 20px",fontSize:10,color:"#9ca3af",fontWeight:500}}>
-                          <span>Carrier</span><span>Validity (From - Till)</span><span style={{textAlign:"right"}}>20'</span><span style={{textAlign:"right"}}>40'</span>
+                        <div style={{display:"grid",gridTemplateColumns:"12% 38% 25% 25%",padding:"6px 12px 0 20px",fontSize:10,color:"#9ca3af",fontWeight:500}}>
+                          <span>Carrier</span><span>Validity</span><span style={{textAlign:"right"}}>20'</span><span style={{textAlign:"right"}}>40'</span>
                         </div>
                       )}
                       {carrierRows.length===0
@@ -3128,15 +3124,15 @@ export default function App() {
                             <table className="carrier-validity-table" style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
                               <tbody>
                                 <tr>
-                                  <td style={{padding:"8px 0",width:"28%",verticalAlign:"middle"}}>
-                                    <div style={{display:"flex",alignItems:"center",gap:6}}><Bg k={cr}/><span style={{fontSize:11,color:"#6b7280"}}>{CN[cr]}</span></div>
+                                  <td style={{padding:"8px 0",width:"12%",verticalAlign:"middle"}}>
+                                    <Bg k={cr}/>
                                   </td>
-                                  <td style={{padding:"8px 8px 8px 0",width:"36%",verticalAlign:"middle"}}><ValidityCell carrierKey={cr}/></td>
-                                  <td style={{textAlign:"right",padding:"8px 0",cursor:cdC20.sell?"pointer":"default",width:"20%"}} onClick={()=>cdC20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
+                                  <td style={{padding:"8px 8px 8px 0",width:"38%",verticalAlign:"middle"}}><ValidityCell carrierKey={cr}/></td>
+                                  <td style={{textAlign:"right",padding:"8px 0",cursor:cdC20.sell?"pointer":"default",width:"25%"}} onClick={()=>cdC20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
                                     <div style={{fontSize:10,color:"#9ca3af"}}>20'</div>
                                     <div style={{fontSize:13,fontWeight:700,color:cdC20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:cdC20.sell?"underline":"none"}}>{cdC20.sell?`$${n(cdC20.sell)}`:"—"}</div>
                                   </td>
-                                  <td style={{textAlign:"right",padding:"8px 0",cursor:cdC40.sell?"pointer":"default",width:"20%"}} onClick={()=>cdC40.sell&&openSC(cr,"coc40",row.pol+" > "+l)}>
+                                  <td style={{textAlign:"right",padding:"8px 0",cursor:cdC40.sell?"pointer":"default",width:"25%"}} onClick={()=>cdC40.sell&&openSC(cr,"coc40",row.pol+" > "+l)}>
                                     <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
                                     <div style={{fontSize:13,fontWeight:700,color:cdC40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:cdC40.sell?"underline":"none"}}>{cdC40.sell?`$${n(cdC40.sell)}`:"—"}</div>
                                   </td>
@@ -3243,7 +3239,6 @@ export default function App() {
                           <>
                           <div className="rent-carrier-line-head">
                             <Bg k={c.k}/>
-                            <span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[c.k]}</span>
                             <ValidityCell carrierKey={c.k} compact/>
                           </div>
                           <div className="rent-carrier-guest-row">
