@@ -1121,3 +1121,41 @@
     max-height: 74px;
   }
 }
+
+.drop-admin-panel {
+  background: #fff;
+  border: 1px solid #a7f3d0;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.drop-admin-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.drop-admin-cell {
+  position: relative;
+  min-height: 88px;
+}
+
+.drop-admin-cell-future .drop-admin-box {
+  background: #fffbeb;
+}
+
+.drop-admin-cell-active {
+  z-index: 5;
+}
+
+.drop-admin-size {
+  font-size: 11px;
+  font-weight: 700;
+  color: #047857;
+  margin-bottom: 6px;
+}
+
+.drop-admin-box {
+  width: 100%;
+}
