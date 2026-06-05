@@ -970,6 +970,7 @@ export default function App() {
   // Client mgmt
   const [showMgr, setShowMgr] = useState(false);
   const [showNoticeAdmin, setShowNoticeAdmin] = useState(false);
+  const [showAdAdmin, setShowAdAdmin] = useState(false);
   const [showCarrierAdmin, setShowCarrierAdmin] = useState(false);
   const [showRentalAdmin, setShowRentalAdmin] = useState(false);
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
@@ -2279,6 +2280,102 @@ export default function App() {
     );
   }
 
+  // ── AD BANNER ADMIN ──
+  if (showAdAdmin && isAdmin) {
+    const slot = adAdminTab;
+    const cur = adBanners[slot] ?? mkAds()[slot];
+    return (
+      <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+        {adminSaveToastEl}
+        <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
+          <button onClick={()=>setShowAdAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+          <div style={{fontSize:14,fontWeight:700,color:"#c2410c"}}>하단 광고 배너 (최대 3개)</div>
+          <div style={{width:48}}/>
+        </div>
+        <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 80px"}}>
+          <div style={{fontSize:11,color:"#c2410c",marginBottom:10}}>
+            ON인 광고가 10초마다 순환 · X로 닫으면 탭을 닫을 때까지 숨김
+          </div>
+          <div style={{display:"flex",background:"#ffedd5",borderRadius:10,padding:3,marginBottom:12}}>
+            {adBanners.map((a, i) => (
+              <button key={i} type="button" onClick={() => { setAdAdminTab(i); setAdUploadMsg(""); }}
+                style={{flex:1,padding:"8px 4px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                  background:adAdminTab===i?"#fff":"transparent",color:adAdminTab===i?"#c2410c":"#ea580c",
+                  boxShadow:adAdminTab===i?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+                광고 {i + 1}{a.on && a.imageUrl ? " ●" : ""}
+              </button>
+            ))}
+          </div>
+          <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:12,padding:16}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
+              <div style={{fontSize:12,fontWeight:700,color:"#9a3412"}}>광고 {slot + 1} 표시</div>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:12,color:"#c2410c",fontWeight:600}}>{cur.on ? "ON" : "OFF"}</span>
+                <div onClick={async () => {
+                  const next = adBanners.map((a, i) => i === slot ? { ...a, on: !a.on } : a);
+                  setAdBanners(next);
+                  try { await saveAdBannersSetting(next); } catch (e) { setAdUploadMsg("저장 실패: " + e.message); }
+                }} style={{width:40,height:22,borderRadius:11,background:cur.on?"#ea580c":"#d1d5db",cursor:"pointer",position:"relative"}}>
+                  <div style={{position:"absolute",top:2,left:cur.on?20:2,width:18,height:18,borderRadius:9,background:"#fff",transition:"left 0.2s"}}/>
+                </div>
+              </div>
+            </div>
+            <div style={{fontSize:11,fontWeight:700,color:"#9a3412",marginBottom:4}}>클릭 링크 URL</div>
+            <input
+              type="url"
+              value={cur.linkUrl}
+              onChange={e => patchAd(slot, { linkUrl: e.target.value })}
+              onBlur={e => {
+                const next = adBanners.map((a, i) => i === slot ? { ...a, linkUrl: e.target.value.trim() } : a);
+                setAdBanners(next);
+                persistAdBanners(next);
+              }}
+              placeholder="https://example.com"
+              style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#7c2d12",background:"#fff",border:"1px solid #fdba74",borderRadius:8,boxSizing:"border-box",marginBottom:12}}
+            />
+            <div style={{fontSize:11,fontWeight:700,color:"#9a3412",marginBottom:8}}>배너 이미지 (JPG · PNG · GIF · WebP)</div>
+            <label
+              onDragOver={e => { e.preventDefault(); setAdDragOver(true); }}
+              onDragLeave={() => setAdDragOver(false)}
+              onDrop={e => { e.preventDefault(); setAdDragOver(false); const f = e.dataTransfer.files[0]; if (f) uploadAdFile(f, slot); }}
+              style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,padding:"20px 12px",background:adDragOver?"#ffedd5":"#fff",border:`2px dashed ${adDragOver?"#ea580c":"#fdba74"}`,borderRadius:10,cursor:"pointer",transition:"all 0.2s"}}>
+              <span style={{fontSize:28}}>🖼️</span>
+              <span style={{fontSize:13,color:"#c2410c",fontWeight:600}}>{adUploadLoading ? "업로드 중..." : "이미지 선택 또는 드래그 앤 드롭"}</span>
+              <span style={{fontSize:11,color:"#fb923c"}}>Supabase Storage (Notices 버킷)</span>
+              <input type="file" accept="image/*,.gif" style={{display:"none"}} onChange={e => { if (e.target.files[0]) uploadAdFile(e.target.files[0], slot); e.target.value = ""; }} disabled={adUploadLoading}/>
+            </label>
+            {adUploadMsg && <div style={{fontSize:12,marginTop:8,color:adUploadMsg.includes("실패")?"#dc2626":"#16a34a"}}>{adUploadMsg}</div>}
+            {cur.imageUrl && (
+              <div style={{marginTop:12,padding:"10px 12px",background:"#fff",border:"1px solid #fdba74",borderRadius:8}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8}}>
+                  <span style={{fontSize:12,color:"#c2410c",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>✅ {cur.imageUrl.split("/").pop()}</span>
+                  <button type="button" onClick={async () => {
+                    const next = adBanners.map((a, i) => i === slot ? { ...a, imageUrl: "", on: false } : a);
+                    setAdBanners(next);
+                    await persistAdBanners(next);
+                  }} style={{fontSize:12,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
+                </div>
+                <img src={cur.imageUrl} alt="" style={{width:"100%",maxHeight:120,objectFit:"contain",borderRadius:6,background:"#f8fafc"}}/>
+              </div>
+            )}
+            <button type="button" onClick={() => persistAdBanners(adBanners)} disabled={saveBusy}
+              style={{width:"100%",marginTop:16,padding:"12px",fontSize:13,fontWeight:700,color:"#fff",background:saveBusy?"#fdba74":"#ea580c",border:"none",borderRadius:8,cursor:saveBusy?"not-allowed":"pointer"}}>
+              {saveBusy ? "저장 중…" : "💾 광고 3개 모두 저장"}
+            </button>
+          </div>
+          <div style={{marginTop:12,padding:12,background:"#fff",border:"1px solid #e5e7eb",borderRadius:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#6b7280",marginBottom:8}}>전체 요약</div>
+            {adBanners.map((a, i) => (
+              <div key={i} style={{fontSize:12,color:"#374151",marginBottom:4}}>
+                광고 {i + 1}: {a.on ? "ON" : "OFF"} · {a.imageUrl ? "이미지 있음" : "비어 있음"}{a.linkUrl ? " · 링크 설정됨" : ""}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   const costInp = { width:"100%",maxWidth:"100%",minWidth:0,padding:"2px 4px",fontSize:11,fontWeight:700,color:"#1e40af",background:"#fff",border:"1px solid #93c5fd",borderRadius:4,boxSizing:"border-box",textAlign:"right" };
 
   const AdminPriceCols = ({d20,d40,prefix="",editable,onCost20,onCost40}) => (
@@ -3166,6 +3263,7 @@ export default function App() {
                 <button onClick={()=>setShowCarrierAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#1e40af",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>선사운임</button>
                 <button onClick={()=>setShowRentalAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#7c3aed",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>렌탈운임</button>
                 <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer",whiteSpace:"nowrap"}}>Notice</button>
+                <button onClick={()=>setShowAdAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa",cursor:"pointer",whiteSpace:"nowrap"}}>광고</button>
                 <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer",whiteSpace:"nowrap"}}>Clients</button>
               </>
             )}
@@ -3196,85 +3294,10 @@ export default function App() {
           <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:8,fontSize:11,color:"#92400e",lineHeight:1.5}}>
             MARGIN · Validity(현재/향후) 설정은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴에서 관리합니다.
           </div>
-          <div style={{background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:12,marginBottom:8}}>
-            <div style={{marginBottom:10}}>
-              <div style={{fontSize:11,fontWeight:700,color:"#9a3412"}}>하단 광고 배너 (최대 3개)</div>
-              <div style={{fontSize:9,color:"#c2410c",marginTop:2}}>ON인 광고가 10초마다 순환 · X로 닫으면 탭을 닫을 때까지 숨김</div>
-            </div>
-            <div style={{display:"flex",background:"#ffedd5",borderRadius:10,padding:3,marginBottom:12}}>
-              {adBanners.map((a, i) => (
-                <button key={i} type="button" onClick={() => { setAdAdminTab(i); setAdUploadMsg(""); }}
-                  style={{flex:1,padding:"8px 4px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
-                    background:adAdminTab===i?"#fff":"transparent",color:adAdminTab===i?"#c2410c":"#ea580c",
-                    boxShadow:adAdminTab===i?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
-                  광고 {i + 1}{a.on && a.imageUrl ? " ●" : ""}
-                </button>
-              ))}
-            </div>
-            {(() => {
-              const slot = adAdminTab;
-              const cur = adBanners[slot];
-              return (
-                <>
-                  <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:12}}>
-                    <div style={{fontSize:12,fontWeight:700,color:"#9a3412"}}>광고 {slot + 1} 표시</div>
-                    <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      <span style={{fontSize:12,color:"#c2410c",fontWeight:600}}>{cur.on ? "ON" : "OFF"}</span>
-                      <div onClick={async () => {
-                        const next = adBanners.map((a, i) => i === slot ? { ...a, on: !a.on } : a);
-                        setAdBanners(next);
-                        try { await saveAdBannersSetting(next); } catch (e) { setAdUploadMsg("저장 실패: " + e.message); }
-                      }} style={{width:40,height:22,borderRadius:11,background:cur.on?"#ea580c":"#d1d5db",cursor:"pointer",position:"relative"}}>
-                        <div style={{position:"absolute",top:2,left:cur.on?20:2,width:18,height:18,borderRadius:9,background:"#fff",transition:"left 0.2s"}}/>
-                      </div>
-                    </div>
-                  </div>
-                  <div style={{fontSize:11,fontWeight:700,color:"#9a3412",marginBottom:4}}>클릭 링크 URL</div>
-                  <input
-                    type="url"
-                    value={cur.linkUrl}
-                    onChange={e => patchAd(slot, { linkUrl: e.target.value })}
-                    onBlur={e => {
-                      const next = adBanners.map((a, i) => i === slot ? { ...a, linkUrl: e.target.value.trim() } : a);
-                      setAdBanners(next);
-                      persistAdBanners(next);
-                    }}
-                    placeholder="https://example.com"
-                    style={{width:"100%",padding:"8px 12px",fontSize:13,color:"#7c2d12",background:"#fff",border:"1px solid #fdba74",borderRadius:8,boxSizing:"border-box",marginBottom:12}}
-                  />
-                  <div style={{fontSize:11,fontWeight:700,color:"#9a3412",marginBottom:8}}>배너 이미지 (JPG · PNG · GIF · WebP)</div>
-                  <label
-                    onDragOver={e => { e.preventDefault(); setAdDragOver(true); }}
-                    onDragLeave={() => setAdDragOver(false)}
-                    onDrop={e => { e.preventDefault(); setAdDragOver(false); const f = e.dataTransfer.files[0]; if (f) uploadAdFile(f, slot); }}
-                    style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:6,padding:"20px 12px",background:adDragOver?"#ffedd5":"#fff",border:`2px dashed ${adDragOver?"#ea580c":"#fdba74"}`,borderRadius:10,cursor:"pointer",transition:"all 0.2s"}}>
-                    <span style={{fontSize:28}}>🖼️</span>
-                    <span style={{fontSize:13,color:"#c2410c",fontWeight:600}}>{adUploadLoading ? "업로드 중..." : "이미지 선택 또는 드래그 앤 드롭"}</span>
-                    <span style={{fontSize:11,color:"#fb923c"}}>Supabase Storage (Notices 버킷)</span>
-                    <input type="file" accept="image/*,.gif" style={{display:"none"}} onChange={e => { if (e.target.files[0]) uploadAdFile(e.target.files[0], slot); e.target.value = ""; }} disabled={adUploadLoading}/>
-                  </label>
-                  {adUploadMsg && <div style={{fontSize:12,marginTop:8,color:adUploadMsg.includes("실패")?"#dc2626":"#16a34a"}}>{adUploadMsg}</div>}
-                  {cur.imageUrl && (
-                    <div style={{marginTop:12,padding:"10px 12px",background:"#fff",border:"1px solid #fdba74",borderRadius:8}}>
-                      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:8,marginBottom:8}}>
-                        <span style={{fontSize:12,color:"#c2410c",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap",flex:1}}>✅ {cur.imageUrl.split("/").pop()}</span>
-                        <button type="button" onClick={async () => {
-                          const next = adBanners.map((a, i) => i === slot ? { ...a, imageUrl: "", on: false } : a);
-                          setAdBanners(next);
-                          await persistAdBanners(next);
-                        }} style={{fontSize:12,color:"#dc2626",background:"none",border:"none",cursor:"pointer",flexShrink:0}}>삭제</button>
-                      </div>
-                      <img src={cur.imageUrl} alt="" style={{width:"100%",maxHeight:80,objectFit:"contain",borderRadius:6,background:"#f8fafc"}}/>
-                    </div>
-                  )}
-                  <button type="button" onClick={() => persistAdBanners(adBanners)} disabled={saveBusy}
-                    style={{width:"100%",marginTop:12,padding:"10px",fontSize:12,fontWeight:700,color:"#fff",background:saveBusy?"#fdba74":"#ea580c",border:"none",borderRadius:8,cursor:saveBusy?"not-allowed":"pointer"}}>
-                    {saveBusy ? "저장 중…" : "💾 광고 3개 모두 저장"}
-                  </button>
-                </>
-              );
-            })()}
-          </div>
+          <button type="button" onClick={()=>setShowAdAdmin(true)}
+            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#ea580c",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            하단 광고 배너 관리 (최대 3개)
+          </button>
           </>
           )}
         </div>
