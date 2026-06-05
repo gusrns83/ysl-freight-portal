@@ -3412,11 +3412,9 @@ export default function App() {
         </div>
       </div>
 
-      {tab==="ocean" && (
-        <div className="carrier-port-guide-shell">
-          <CarrierPortGuide/>
-        </div>
-      )}
+      <div className="carrier-port-guide-shell">
+        <CarrierPortGuide/>
+      </div>
 
       {/* COC/SOC TOGGLE */}
       {tab==="ocean" && (
