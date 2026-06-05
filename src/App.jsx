@@ -3010,10 +3010,16 @@ export default function App() {
                   ); })}
               </div>
             ) : (
-            <table className="carrier-validity-table" style={{width:"100%",marginTop:12,fontSize:12,borderCollapse:"collapse"}}>
+            <table className="carrier-validity-table" style={{marginTop:12,fontSize:12}}>
+              <colgroup>
+                <col className="cvt-col-carrier"/>
+                <col className="cvt-col-validity"/>
+                <col className="cvt-col-price"/>
+                <col className="cvt-col-price"/>
+              </colgroup>
               <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
                 <th className="cvt-carrier" style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Carrier</th>
-                <th className="cvt-validity" style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Validity</th>
+                <th className="cvt-validity" style={{padding:"4px 0",fontWeight:500}}>Validity</th>
                 <th className="cvt-price" style={{padding:"4px 0",fontWeight:500}}>20'</th>
                 <th className="cvt-price" style={{padding:"4px 0",fontWeight:500}}>40'</th>
               </tr></thead>
@@ -3028,8 +3034,8 @@ export default function App() {
                       <Bg k={k}/>
                     </td>
                     <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={k}/></td>
-                    <td className="cvt-price" style={{padding:"8px 0",fontFamily:"monospace",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,t20,row.pol+" > VVO")}>{s20!=null?`$${n(s20)}`:"—"}</td>
-                    <td className="cvt-price" style={{padding:"8px 0",fontFamily:"monospace",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&openSC(k,t40,row.pol+" > VVO")}>{s40!=null?`$${n(s40)}`:"—"}</td>
+                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,t20,row.pol+" > VVO")}>{s20!=null?`$${n(s20)}`:"—"}</td>
+                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&openSC(k,t40,row.pol+" > VVO")}>{s40!=null?`$${n(s40)}`:"—"}</td>
                   </tr>; })}
               </tbody>
             </table>
@@ -3121,7 +3127,13 @@ export default function App() {
                           </div>
                           ) : (
                           <div key={cr} style={{padding:"0 12px 0 20px",borderBottom:"1px solid #e0f2fe"}}>
-                            <table className="carrier-validity-table" style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+                            <table className="carrier-validity-table" style={{fontSize:12}}>
+                              <colgroup>
+                                <col className="cvt-col-carrier"/>
+                                <col className="cvt-col-validity"/>
+                                <col className="cvt-col-price"/>
+                                <col className="cvt-col-price"/>
+                              </colgroup>
                               <tbody>
                                 <tr>
                                   <td className="cvt-carrier" style={{padding:"8px 0"}}>
@@ -3205,6 +3217,11 @@ export default function App() {
                   </button>
                   {cOpen && (
                     <div style={{background:"#faf5ff",borderBottom:"1px solid #ede9fe"}}>
+                      {!isAdmin && carriers.length > 0 && (
+                        <div className="carrier-validity-grid-head">
+                          <span>Carrier</span><span className="cvt-validity-col">Validity</span><span style={{textAlign:"right"}}>20'</span><span style={{textAlign:"right"}}>40'</span>
+                        </div>
+                      )}
                       {carriers.length===0?<div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
                         :carriers.map(c=>{
                         const cdC20=mkPrice(c.cost20,c.m20,c.k);
@@ -3213,8 +3230,9 @@ export default function App() {
                         const socC40=mkPrice(c.soc40,getM(fp,fr.area,"soc40"),c.k);
                         const rentC20=mkPrice(c.rent20,getRentalM(fp,fr.area,"r20"),c.k);
                         const rentC40=mkPrice(c.rent40,getRentalM(fp,fr.area,"r40"),c.k);
+                        const rentPriceColor = ratePeriod==="future"?"#b45309":"#7c3aed";
                         return (
-                        <div key={c.k} className="rent-carrier-line" style={{padding:"8px 12px 8px 20px",borderBottom:"1px solid #ede9fe"}}>
+                        <div key={c.k} style={{padding:isAdmin?"8px 12px 8px 20px":"0 12px 0 20px",borderBottom:"1px solid #ede9fe"}}>
                           {isAdmin ? (
                             <>
                           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>
@@ -3234,22 +3252,30 @@ export default function App() {
                               <AdminPriceCols d20={cdC20} d40={cdC40} prefix="" editable={false}/>
                             </>
                           ) : (
-                          <>
-                          <div className="rent-carrier-line-head">
-                            <Bg k={c.k}/>
-                            <ValidityCell carrierKey={c.k} compact/>
-                          </div>
-                          <div className="rent-carrier-guest-row">
-                          <div className="rent-carrier-guest-col" style={{cursor:c.t20?"pointer":"default"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
-                            <div className="rent-carrier-guest-price">{c.t20?`$${n(c.t20)}`:"—"}</div>
-                            {c.t20&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental {n(row.r20[city])}</div>}
-                          </div>
-                          <div className="rent-carrier-guest-col" style={{cursor:c.t40?"pointer":"default"}} onClick={()=>c.t40&&openSC(c.k,"soc40",row.pol+" > "+city)}>
-                            <div className="rent-carrier-guest-price">{c.t40?`$${n(c.t40)}`:"—"}</div>
-                            {c.t40&&<div style={{fontSize:9,color:"#9ca3af"}}>Rental {n(row.r40[city])}</div>}
-                          </div>
-                          </div>
-                          </>
+                            <table className="carrier-validity-table carrier-rent-table" style={{fontSize:12}}>
+                              <colgroup>
+                                <col className="cvt-col-carrier"/>
+                                <col className="cvt-col-validity"/>
+                                <col className="cvt-col-price"/>
+                                <col className="cvt-col-price"/>
+                              </colgroup>
+                              <tbody>
+                                <tr>
+                                  <td className="cvt-carrier" style={{padding:"8px 0"}}>
+                                    <Bg k={c.k}/>
+                                  </td>
+                                  <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={c.k}/></td>
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:c.t20?"pointer":"default",color:c.t20?rentPriceColor:"#d1d5db",textDecoration:c.t20?"underline":"none"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
+                                    <div className="cvt-price-main">{c.t20?`$${n(c.t20)}`:"—"}</div>
+                                    {c.t20&&<div className="cvt-price-sub">Rental {n(row.r20[city])}</div>}
+                                  </td>
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:c.t40?"pointer":"default",color:c.t40?rentPriceColor:"#d1d5db",textDecoration:c.t40?"underline":"none"}} onClick={()=>c.t40&&openSC(c.k,"soc40",row.pol+" > "+city)}>
+                                    <div className="cvt-price-main">{c.t40?`$${n(c.t40)}`:"—"}</div>
+                                    {c.t40&&<div className="cvt-price-sub">Rental {n(row.r40[city])}</div>}
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
                           )}
                         </div>
                       );})}
