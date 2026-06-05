@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v15"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v16"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -929,6 +929,9 @@ const buildCopyCurrentToFutureMargins = (rows, marginCtx) => {
 };
 
 const griPeriodLabel = (period) => (period === "future" ? "향후 운임" : "현재 운임");
+
+const displayMarginFromPrices = (cost, sell) =>
+  (cost != null && sell != null ? sell - cost : null);
 
 /** 현재 운임 매입가 → 향후 운임 pol_costs 복사 */
 const buildCopyCurrentToFutureCosts = (prevCosts, { rows, carrier, carrierRates, fData }) => {
@@ -3708,7 +3711,7 @@ export default function App() {
                 <span className="cg-lbl cg-lbl-sell">매출</span>
                 <span className="cg-val cg-val-sell">{n(sell)}</span>
               </div>
-              <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {n(margin)}</div>
+              <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {margin != null ? n(margin) : "—"}</div>
             </button>
           )}
         </td>
@@ -3874,19 +3877,9 @@ export default function App() {
       if (cost == null) return;
       applyCarrierDropMargin(caCr, cityKey, si, sell - cost);
     };
-    const filteredCarrierAreaGroups = carrierAreaGroups
-      .filter(({ area }) => !(marginTab === "area" && selArea) || area === selArea)
-      .map(({ area, rows }) => ({
-        area,
-        rows: marginTab === "pol" && selPol ? rows.filter(r => r.pol === selPol) : rows,
-      }))
-      .filter(({ rows }) => rows.length > 0);
+    const filteredCarrierAreaGroups = carrierAreaGroups;
     const gridPolCount = filteredCarrierAreaGroups.reduce((n, g) => n + g.rows.length, 0);
-    const gridFilterLabel = marginTab === "area" && selArea
-      ? `${selArea} · ${gridPolCount}개 POL`
-      : marginTab === "pol" && selPol
-        ? `${selPol} · ${gridPolCount}개 POL`
-        : `${gridPolCount}개 POL (전체)`;
+    const gridFilterLabel = `${gridPolCount}개 POL (전체)`;
     const griTargetRows = griScopeTab === "area" && griSelAreas.length > 0
       ? fData.filter(r => griSelAreas.includes(r.area))
       : fData;
@@ -3899,8 +3892,8 @@ export default function App() {
       if (base == null && cost == null) {
         return <td className="cg-cell cg-empty">—</td>;
       }
-      const margin = getM(row.pol, row.area, type, caPeriod);
-      const sell = cost != null ? cost + margin : null;
+      const sell = cost != null ? cost + getM(row.pol, row.area, type, caPeriod) : null;
+      const margin = displayMarginFromPrices(cost, sell);
       const cellKey = `${row.pol}:${type}`;
       const isOpen = carrierEditCell === cellKey;
       return (
@@ -3925,15 +3918,11 @@ export default function App() {
                         onChange={e => applyCellSell(row, type, e.target.value)}/>
                     </td>
                   </tr>
-                  <tr className="cg-mini-margin-tr">
-                    <td className="cg-mini-label cg-mini-label-margin">마진</td>
-                    <td className="cg-mini-val-margin">
-                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
-                        value={margin} onChange={e => applyPolMargin(row.pol, type, e.target.value, caPeriod)}/>
-                    </td>
-                  </tr>
                 </tbody>
               </table>
+              {margin != null && (
+                <div className="cg-edit-margin-readonly">마진 {n(margin)} (매출 − 매입)</div>
+              )}
               <button type="button" className="cg-close" onClick={() => setCarrierEditCell(null)}>닫기</button>
             </div>
           ) : (
@@ -3946,7 +3935,7 @@ export default function App() {
                 <span className="cg-lbl cg-lbl-sell">매출</span>
                 <span className="cg-val cg-val-sell">{sell != null ? n(sell) : "—"}</span>
               </div>
-              <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {n(margin)}</div>
+              <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {margin != null ? n(margin) : "—"}</div>
             </button>
           )}
         </td>
@@ -3954,8 +3943,8 @@ export default function App() {
     };
     const renderDropAdminCell = (cityKey, si) => {
       const cost = getCarrierDropAddon(caCr, cityKey, si, caPeriod);
-      const margin = getDropM(caCr, cityKey, si);
-      const sell = cost != null ? cost + margin : null;
+      const sell = cost != null ? cost + getDropM(caCr, cityKey, si) : null;
+      const margin = displayMarginFromPrices(cost, sell);
       const cellKey = `drop:${caCr}:${cityKey}:${caPeriod}:${si}`;
       const isOpen = carrierEditCell === cellKey;
       return (
@@ -3980,15 +3969,11 @@ export default function App() {
                         onChange={e => applyDropAdminSell(cityKey, si, e.target.value)}/>
                     </td>
                   </tr>
-                  <tr className="cg-mini-margin-tr">
-                    <td className="cg-mini-label cg-mini-label-margin">마진</td>
-                    <td className="cg-mini-val-margin">
-                      <input type="number" inputMode="numeric" className="cg-mini-inp cg-inp-margin"
-                        value={margin} onChange={e => applyCarrierDropMargin(caCr, cityKey, si, e.target.value)}/>
-                    </td>
-                  </tr>
                 </tbody>
               </table>
+              {margin != null && (
+                <div className="cg-edit-margin-readonly">마진 {n(margin)} (매출 − 매입)</div>
+              )}
               <button type="button" className="cg-close" onClick={() => setCarrierEditCell(null)}>닫기</button>
             </div>
           ) : (
@@ -4001,7 +3986,7 @@ export default function App() {
                 <span className="cg-lbl cg-lbl-sell">매출</span>
                 <span className="cg-val cg-val-sell">{sell != null ? n(sell) : "—"}</span>
               </div>
-              <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {n(margin)}</div>
+              <div className="cg-margin-hint"><span className="cg-lbl-margin">마진</span> {margin != null ? n(margin) : "—"}</div>
             </button>
           )}
         </td>
@@ -4079,21 +4064,6 @@ export default function App() {
               )}
             </div>
           )}
-          <MarginPanel
-            filterHint={
-              marginTab === "area" && selArea ? `운임표: ${selArea} 지역만 표시` :
-              marginTab === "pol" && selPol ? `운임표: ${selPol} 만 표시` :
-              marginTab === "area" ? "지역 선택 시 해당 지역 운임만 표시" : null
-            }
-            marginTab={marginTab} setMarginTab={setMarginTab}
-            margins={margins} applyGlobalMargin={applyGlobalMargin}
-            selArea={selArea} setSelArea={setSelArea}
-            areaM={areaM} applyAreaMarginType={applyAreaMarginType} applyAreaMargins={applyAreaMargins}
-            selPol={selPol} setSelPol={setSelPol}
-            polM={polM} applyPolMargins={applyPolMargins} clearPolMargins={clearPolMargins}
-            polEdit={polEdit} setPolEdit={setPolEdit}
-            areas={areas} fData={fData} getM={getM}
-          />
           <GriAdjustPanel
             periodLabel={griPeriodLabel(caPeriod)}
             areas={areas}
@@ -4124,7 +4094,7 @@ export default function App() {
               futureFromMin={getFutureFromMinDate(caCr)} />
           </div>
           <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
-            셀 클릭 → 매입·매출 조정 · {gridFilterLabel}
+            셀 클릭 → 매입·매출 조정 · 마진 = 매출 − 매입 · {gridFilterLabel}
           </div>
           <div className="carrier-grid-wrap">
             <table className="carrier-grid">
