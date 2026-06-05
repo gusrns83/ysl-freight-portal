@@ -711,6 +711,12 @@ const marginInpVal = (v) => (v === "" || v == null || v === undefined ? "" : v);
 const settingBundleHas = (s, key) =>
   Object.prototype.hasOwnProperty.call(s, key) && s[key] != null && s[key] !== "";
 
+const countPolCostOverrides = (polCostO) =>
+  Object.values(polCostO || {}).filter(p => p?.carrier && Object.keys(p.carrier).length > 0).length;
+
+const countPolMarginOverrides = (polM) =>
+  Object.keys(polM || {}).filter(pol => polM[pol] && Object.keys(polM[pol]).length > 0).length;
+
 const resolveCarrierCostFromStore = (costs, pol, cr, t, period, carrierRates, fData) => {
   const c = costs[pol]?.carrier?.[cr];
   if (c?.[period]?.[t] != null && c[period][t] !== "") return Number(c[period][t]);
@@ -1292,6 +1298,7 @@ export default function App() {
   const skipAutoSaveRef = useRef(true);
   const autoSaveTimerRef = useRef(null);
   const saveQueueRef = useRef(Promise.resolve());
+  const pricingSaveRef = useRef({});
   const [dragOverSlot, setDragOverSlot] = useState(null);
   const [adBanners, setAdBanners] = useState(mkAds);
   const [adAdminTab, setAdAdminTab] = useState(0);
@@ -1331,6 +1338,36 @@ export default function App() {
   const isAdmin = mode === "admin";
   const isClient = mode === "client";
   const isGuest = mode === "guest";
+
+  pricingSaveRef.current = {
+    polCostO,
+    polM,
+    polTs,
+    margins,
+    areaM,
+    marginTs,
+    areaTs,
+    carrierRates,
+    carrierDropRates,
+    carrierDropMargins,
+    validityInfo,
+    rentalRates,
+    rentalMargins,
+    rentalAreaM,
+    rentalPolM,
+    rentalMarginTs,
+    rentalAreaTs,
+    rentalPolTs,
+  };
+
+  const cancelPendingPricingSave = () => {
+    clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = null;
+  };
+
+  const resetSaveQueue = () => {
+    saveQueueRef.current = Promise.resolve();
+  };
 
   const doLogin = async () => {
     setLoginLoading(true); setLoginErr("");
@@ -1450,9 +1487,16 @@ export default function App() {
     const nextCosts = buildBuyingGriCosts(polCostO, {
       deltas, rows, carrier, period, carrierRates, fData,
     });
-    setPolCostO(nextCosts);
-    writePricingCache({ ...(readStoredPricingCache() || { v: 1 }), v: 1, polCostO: nextCosts });
+    cancelPendingPricingSave();
+    resetSaveQueue();
     enqueueSave(async () => {
+      setPolCostO(nextCosts);
+      writePricingCache({
+        ...(readStoredPricingCache() || { v: 1 }),
+        v: 1,
+        polCostO: nextCosts,
+        pricingSavedAt: Date.now(),
+      });
       await saveOneSettingWithRetry("pol_costs", JSON.stringify(nextCosts));
     })
       .then(() => flashSaveFeedback("success", "✅ 매입 GRI 적용 · 저장 완료"))
@@ -1462,10 +1506,17 @@ export default function App() {
   const undoBuyingGriBulk = () => {
     if (!griBuyUndo) return;
     const restored = griBuyUndo.polCostO;
-    setPolCostO(restored);
     setGriBuyUndo(null);
-    writePricingCache({ ...(readStoredPricingCache() || { v: 1 }), v: 1, polCostO: restored });
+    cancelPendingPricingSave();
+    resetSaveQueue();
     enqueueSave(async () => {
+      setPolCostO(restored);
+      writePricingCache({
+        ...(readStoredPricingCache() || { v: 1 }),
+        v: 1,
+        polCostO: restored,
+        pricingSavedAt: Date.now(),
+      });
       await saveOneSettingWithRetry("pol_costs", JSON.stringify(restored));
     })
       .then(() => flashSaveFeedback("success", "✅ 매입 GRI 되돌리기 · 저장 완료"))
@@ -1495,11 +1546,18 @@ export default function App() {
       areaTs,
       polTs,
     });
-    setPolM(nextPolM);
-    setPolTs(nextPolTs);
-    const cache = readStoredPricingCache() || { v: 1 };
-    writePricingCache({ ...cache, v: 1, polM: nextPolM, polTs: nextPolTs });
+    cancelPendingPricingSave();
+    resetSaveQueue();
     enqueueSave(async () => {
+      setPolM(nextPolM);
+      setPolTs(nextPolTs);
+      writePricingCache({
+        ...(readStoredPricingCache() || { v: 1 }),
+        v: 1,
+        polM: nextPolM,
+        polTs: nextPolTs,
+        pricingSavedAt: Date.now(),
+      });
       await saveSettingsEntries([
         ["pol_margins", JSON.stringify(nextPolM)],
         ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
@@ -1512,12 +1570,19 @@ export default function App() {
   const undoSellingGriBulk = () => {
     if (!griSellUndo) return;
     const { polM: restoredPolM, polTs: restoredPolTs } = griSellUndo;
-    setPolM(restoredPolM);
-    setPolTs(restoredPolTs);
     setGriSellUndo(null);
-    const cache = readStoredPricingCache() || { v: 1 };
-    writePricingCache({ ...cache, v: 1, polM: restoredPolM, polTs: restoredPolTs });
+    cancelPendingPricingSave();
+    resetSaveQueue();
     enqueueSave(async () => {
+      setPolM(restoredPolM);
+      setPolTs(restoredPolTs);
+      writePricingCache({
+        ...(readStoredPricingCache() || { v: 1 }),
+        v: 1,
+        polM: restoredPolM,
+        polTs: restoredPolTs,
+        pricingSavedAt: Date.now(),
+      });
       await saveSettingsEntries([
         ["pol_margins", JSON.stringify(restoredPolM)],
         ["pol_margin_timestamps", JSON.stringify(restoredPolTs)],
@@ -2010,30 +2075,36 @@ export default function App() {
     ? createPortal(<AdminSaveToast busy={saveBusy} feedback={saveFeedback} />, document.body)
     : null;
 
-  const getCarrierSaveEntries = () => [
-    ["pol_costs", JSON.stringify(polCostO)],
-    ["pol_margins", JSON.stringify(polM)],
-    ["global_margins", JSON.stringify(margins)],
-    ["area_margins", JSON.stringify(areaM)],
-    ["margin_timestamps", JSON.stringify(marginTs)],
-    ["area_margin_timestamps", JSON.stringify(areaTs)],
-    ["pol_margin_timestamps", JSON.stringify(polTs)],
-    ["carrier_rates_json", JSON.stringify(carrierRates)],
-    ["carrier_drop_rates_json", JSON.stringify(carrierDropRates)],
-    ["carrier_drop_margins_json", JSON.stringify(carrierDropMargins)],
-    ["validity_info_json", JSON.stringify(validityInfo)],
-  ];
+  const getCarrierSaveEntries = () => {
+    const s = pricingSaveRef.current;
+    return [
+      ["pol_costs", JSON.stringify(s.polCostO)],
+      ["pol_margins", JSON.stringify(s.polM)],
+      ["global_margins", JSON.stringify(s.margins)],
+      ["area_margins", JSON.stringify(s.areaM)],
+      ["margin_timestamps", JSON.stringify(s.marginTs)],
+      ["area_margin_timestamps", JSON.stringify(s.areaTs)],
+      ["pol_margin_timestamps", JSON.stringify(s.polTs)],
+      ["carrier_rates_json", JSON.stringify(s.carrierRates)],
+      ["carrier_drop_rates_json", JSON.stringify(s.carrierDropRates)],
+      ["carrier_drop_margins_json", JSON.stringify(s.carrierDropMargins)],
+      ["validity_info_json", JSON.stringify(s.validityInfo)],
+    ];
+  };
 
-  const getRentalSaveEntries = () => [
-    ["rental_rates_json", JSON.stringify(rentalRates)],
-    ["rental_global_margins", JSON.stringify(rentalMargins)],
-    ["rental_area_margins", JSON.stringify(rentalAreaM)],
-    ["rental_pol_margins", JSON.stringify(rentalPolM)],
-    ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
-    ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
-    ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
-    ["validity_info_json", JSON.stringify(validityInfo)],
-  ];
+  const getRentalSaveEntries = () => {
+    const s = pricingSaveRef.current;
+    return [
+      ["rental_rates_json", JSON.stringify(s.rentalRates)],
+      ["rental_global_margins", JSON.stringify(s.rentalMargins)],
+      ["rental_area_margins", JSON.stringify(s.rentalAreaM)],
+      ["rental_pol_margins", JSON.stringify(s.rentalPolM)],
+      ["rental_margin_timestamps", JSON.stringify(s.rentalMarginTs)],
+      ["rental_area_margin_timestamps", JSON.stringify(s.rentalAreaTs)],
+      ["rental_pol_margin_timestamps", JSON.stringify(s.rentalPolTs)],
+      ["validity_info_json", JSON.stringify(s.validityInfo)],
+    ];
+  };
 
   const getPricingSaveEntries = () => [...getCarrierSaveEntries(), ...getRentalSaveEntries().filter(
     ([k]) => k !== "validity_info_json"
@@ -2050,27 +2121,30 @@ export default function App() {
     }
   });
 
-  const buildPricingCache = () => ({
-    v: 1,
-    polCostO,
-    margins,
-    areaM,
-    polM,
-    marginTs,
-    areaTs,
-    polTs,
-    carrierRates,
-    carrierDropRates,
-    carrierDropMargins,
-    validityInfo,
-    rentalRates,
-    rentalMargins,
-    rentalAreaM,
-    rentalPolM,
-    rentalMarginTs,
-    rentalAreaTs,
-    rentalPolTs,
-  });
+  const buildPricingCache = () => {
+    const s = pricingSaveRef.current;
+    return {
+      v: 1,
+      polCostO: s.polCostO,
+      margins: s.margins,
+      areaM: s.areaM,
+      polM: s.polM,
+      marginTs: s.marginTs,
+      areaTs: s.areaTs,
+      polTs: s.polTs,
+      carrierRates: s.carrierRates,
+      carrierDropRates: s.carrierDropRates,
+      carrierDropMargins: s.carrierDropMargins,
+      validityInfo: s.validityInfo,
+      rentalRates: s.rentalRates,
+      rentalMargins: s.rentalMargins,
+      rentalAreaM: s.rentalAreaM,
+      rentalPolM: s.rentalPolM,
+      rentalMarginTs: s.rentalMarginTs,
+      rentalAreaTs: s.rentalAreaTs,
+      rentalPolTs: s.rentalPolTs,
+    };
+  };
 
   const applyPricingSnapshot = (snap, s = {}) => {
     if (!snap) return;
@@ -2082,7 +2156,13 @@ export default function App() {
     if (settingBundleHas(s, "rental_rates_json")) setRentalRates(snap.rentalRates);
     if (settingBundleHas(s, "global_margins")) setMargins(snap.margins);
     if (settingBundleHas(s, "area_margins")) setAreaM(snap.areaM);
-    if (settingBundleHas(s, "pol_margins")) setPolM(snap.polM);
+    if (settingBundleHas(s, "pol_margins")) {
+      setPolM(prev => {
+        const next = snap.polM;
+        if (countPolMarginOverrides(next) === 0 && countPolMarginOverrides(prev) > 0) return prev;
+        return next;
+      });
+    }
     if (settingBundleHas(s, "margin_timestamps")) setMarginTs(snap.marginTs);
     if (settingBundleHas(s, "area_margin_timestamps")) setAreaTs(snap.areaTs);
     if (settingBundleHas(s, "pol_margin_timestamps")) setPolTs(snap.polTs);
@@ -2092,7 +2172,13 @@ export default function App() {
     if (settingBundleHas(s, "rental_margin_timestamps")) setRentalMarginTs(snap.rentalMarginTs);
     if (settingBundleHas(s, "rental_area_margin_timestamps")) setRentalAreaTs(snap.rentalAreaTs);
     if (settingBundleHas(s, "rental_pol_margin_timestamps")) setRentalPolTs(snap.rentalPolTs);
-    if (settingBundleHas(s, "pol_costs")) setPolCostO(snap.polCostO);
+    if (settingBundleHas(s, "pol_costs")) {
+      setPolCostO(prev => {
+        const next = snap.polCostO;
+        if (countPolCostOverrides(next) === 0 && countPolCostOverrides(prev) > 0) return prev;
+        return next;
+      });
+    }
     if (settingBundleHas(s, "carrier_drop_rates_json")) {
       setCarrierDropRates(snap.carrierDropRates ?? defaultCarrierDropRates());
     }
@@ -2132,6 +2218,9 @@ export default function App() {
     });
     if (["validity_snk", "validity_dy", "validity_ck", "validity_rental"].some(k => settingBundleHas(s, k))) {
       merged.validityInfo = patch.validityInfo;
+    }
+    if (settingBundleHas(s, "pol_costs") || settingBundleHas(s, "pol_margins")) {
+      merged.pricingSavedAt = merged.pricingSavedAt || Date.now();
     }
     writePricingCache(merged);
   };
@@ -2218,9 +2307,44 @@ export default function App() {
           ...settingsMapFromRows(pricingLightRows),
           ...settingsMapFromRows(polCostsRows),
         };
+        const cached = readStoredPricingCache();
+        const serverSnap = parsePricingFromSettings(priority);
+        const cacheCosts = cached?.polCostO;
+        const serverCosts = serverSnap.polCostO;
+        const cacheMargins = cached?.polM;
+        const serverMargins = serverSnap.polM;
+        const cacheIsNewer = (cached?.pricingSavedAt || 0) > 0;
+        const cacheHasMoreCosts = countPolCostOverrides(cacheCosts) > countPolCostOverrides(serverCosts);
+        const cacheHasMoreMargins = countPolMarginOverrides(cacheMargins) > countPolMarginOverrides(serverMargins);
+
+        if (cacheIsNewer && (cacheHasMoreCosts || cacheHasMoreMargins)) {
+          if (cacheHasMoreCosts) priority.pol_costs = JSON.stringify(cacheCosts);
+          if (cacheHasMoreMargins) priority.pol_margins = JSON.stringify(cacheMargins);
+        }
+
         applySettingsBundle(priority);
+
+        if (cacheIsNewer && (cacheHasMoreCosts || cacheHasMoreMargins)) {
+          skipAutoSaveRef.current = true;
+          try {
+            if (cacheHasMoreCosts) {
+              await saveOneSettingWithRetry("pol_costs", JSON.stringify(cacheCosts));
+            }
+            if (cacheHasMoreMargins) {
+              await saveSettingsEntries([
+                ["pol_margins", JSON.stringify(cacheMargins)],
+                ...(cached?.polTs ? [["pol_margin_timestamps", JSON.stringify(cached.polTs)]] : []),
+              ]);
+            }
+          } catch (e) {
+            console.warn("cache re-sync failed", e);
+          }
+          setTimeout(() => { skipAutoSaveRef.current = false; }, 4000);
+        } else {
+          setTimeout(() => { skipAutoSaveRef.current = false; }, 4000);
+        }
+
         setSettingsLoaded(true);
-        skipAutoSaveRef.current = false;
 
         const [rentalRows, carrierRows, miscRows] = await Promise.all([
           fetchSettingsByKey("rental_rates_json"),
