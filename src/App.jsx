@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v13"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v14"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -196,6 +196,111 @@ const fetchSettingsInKeys = (keys) =>
 
 const fetchSettingsExceptKeys = (excludeKeys) =>
   api(`settings?select=key,value&key=not.in.(${excludeKeys.join(",")})`);
+
+const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json", "carrier_rates_json"]);
+
+/** Supabase settings 쓰기 — 동시 요청 방지 (Failed to fetch 원인) */
+let networkWriteQueue = Promise.resolve();
+const enqueueNetworkWrite = (task) => {
+  const job = networkWriteQueue.then(task);
+  networkWriteQueue = job.catch(() => {});
+  return job;
+};
+
+const saveSettingValue = async (key, value) => enqueueNetworkWrite(async () => {
+  const strVal = String(value);
+  const isHeavy = HEAVY_SETTING_KEYS.has(key);
+  const attempts = isHeavy ? 6 : 3;
+  const timeoutMs = isHeavy ? 120000 : 60000;
+  let lastErr;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1200 * attempt));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${SB_URL}/rest/v1/settings`, {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: {
+          apikey: SB_KEY,
+          Authorization: `Bearer ${SB_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify({ key, value: strVal }),
+      });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      return;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      const msg = String(e.message || e);
+      const retryable = /fetch|Failed|abort|network/i.test(msg);
+      if (!retryable) throw new Error(`${key}: ${msg}`);
+    }
+  }
+  const hint = /fetch|Failed|abort|network/i.test(String(lastErr?.message || ""))
+    ? " · 네트워크 일시 오류 (화면값은 캐시 보존 · 💾 저장 재시도)"
+    : "";
+  throw new Error(`Supabase 연결 실패 (${key}) — ${lastErr?.message || "Failed to fetch"}${hint}`);
+});
+
+const postSettingsRows = async (rows, label) => enqueueNetworkWrite(async () => {
+  if (!rows.length) return;
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 800 * attempt));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), rows.length > 1 ? 45000 : 60000);
+    try {
+      const res = await fetch(`${SB_URL}/rest/v1/settings`, {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: {
+          apikey: SB_KEY,
+          Authorization: `Bearer ${SB_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify(rows),
+      });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(await res.text());
+      return;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      const msg = String(e.message || e);
+      if (!msg.includes("fetch") && !msg.includes("Failed") && !msg.includes("abort")) {
+        throw new Error(`${label}: ${msg}`);
+      }
+    }
+  }
+  throw new Error(`Supabase 연결 실패 (${label}) — ${lastErr?.message || "Failed to fetch"}`);
+});
+
+const saveSettingsEntries = async (entries) => {
+  const light = [];
+  const flushLight = async () => {
+    if (!light.length) return;
+    const chunk = light.splice(0, light.length);
+    await postSettingsRows(chunk, chunk.map(r => r.key).join(", "));
+  };
+  for (const entry of entries) {
+    if (HEAVY_SETTING_KEYS.has(entry[0])) {
+      await flushLight();
+      await saveSettingValue(entry[0], entry[1]);
+      await new Promise(r => setTimeout(r, 300));
+    } else {
+      light.push({ key: entry[0], value: String(entry[1]) });
+    }
+  }
+  await flushLight();
+};
+
+const saveOneSettingWithRetry = (key, value) => saveSettingValue(key, value);
 
 const RC = ["Moscow","Chelyabinsk","Novosibirsk","Irkutsk","Krasnoyarsk","Ekaterinburg","Vladivostok","St.Petersburg","Samara","Tolyatti","Kazan","Minsk"];
 const FR = [
@@ -2258,109 +2363,6 @@ export default function App() {
     await saveOneSettingWithRetry(key, value);
   };
 
-  const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json", "carrier_rates_json"]);
-
-  const saveSettingValue = async (key, value) => {
-    const strVal = String(value);
-    const isHeavy = HEAVY_SETTING_KEYS.has(key);
-    const attempts = isHeavy ? 5 : 3;
-    const timeoutMs = isHeavy ? 120000 : 60000;
-    let lastErr;
-
-    for (let attempt = 0; attempt < attempts; attempt++) {
-      if (attempt > 0) await new Promise(r => setTimeout(r, 1000 * attempt));
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), timeoutMs);
-      try {
-        const res = await fetch(`${SB_URL}/rest/v1/settings`, {
-          method: "POST",
-          signal: ctrl.signal,
-          headers: {
-            apikey: SB_KEY,
-            Authorization: `Bearer ${SB_KEY}`,
-            "Content-Type": "application/json",
-            Prefer: "resolution=merge-duplicates,return=minimal",
-          },
-          body: JSON.stringify({ key, value: strVal }),
-        });
-        clearTimeout(timer);
-        if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
-        return;
-      } catch (e) {
-        clearTimeout(timer);
-        lastErr = e;
-        const msg = String(e.message || e);
-        const retryable = /fetch|Failed|abort|network/i.test(msg);
-        if (!retryable) throw new Error(`${key}: ${msg}`);
-      }
-    }
-    throw new Error(`Supabase 연결 실패 (${key}) — ${lastErr?.message || "Failed to fetch"}`);
-  };
-
-  const postSettingsRows = async (rows, label) => {
-    if (!rows.length) return;
-    let lastErr;
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await new Promise(r => setTimeout(r, 450 * attempt));
-      const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), rows.length > 1 ? 45000 : 60000);
-      try {
-        const res = await fetch(`${SB_URL}/rest/v1/settings`, {
-          method: "POST",
-          signal: ctrl.signal,
-          headers: {
-            "apikey": SB_KEY,
-            "Authorization": `Bearer ${SB_KEY}`,
-            "Content-Type": "application/json",
-            "Prefer": "resolution=merge-duplicates,return=minimal",
-          },
-          body: JSON.stringify(rows),
-        });
-        clearTimeout(timer);
-        if (!res.ok) throw new Error(await res.text());
-        return;
-      } catch (e) {
-        clearTimeout(timer);
-        lastErr = e;
-        const msg = String(e.message || e);
-        if (!msg.includes("fetch") && !msg.includes("Failed") && !msg.includes("abort")) {
-          throw new Error(`${label}: ${msg}`);
-        }
-      }
-    }
-    throw new Error(`Supabase 연결 실패 (${label}) — ${lastErr?.message || "Failed to fetch"}`);
-  };
-
-  const saveOneSettingWithRetry = async (key, value) => {
-    await saveSettingValue(key, value);
-  };
-
-  const saveSettingsBatchPost = async (entries) => {
-    const rows = entries.map(([key, value]) => ({ key, value: String(value) }));
-    const label = rows.map(r => r.key).join(", ");
-    await postSettingsRows(rows, label);
-  };
-
-  /** 작은 설정은 한 번에, 큰 JSON(pol_costs 등)만 개별 전송 */
-  const saveSettingsEntries = async (entries) => {
-    const light = [];
-    const flushLight = async () => {
-      if (!light.length) return;
-      const chunk = light.splice(0, light.length);
-      await saveSettingsBatchPost(chunk);
-    };
-    for (const entry of entries) {
-      if (HEAVY_SETTING_KEYS.has(entry[0])) {
-        await flushLight();
-        await saveSettingValue(entry[0], entry[1]);
-        await new Promise(r => setTimeout(r, 150));
-      } else {
-        light.push(entry);
-      }
-    }
-    await flushLight();
-  };
-
   const enqueueSave = (task) => {
     const job = saveQueueRef.current.then(task);
     saveQueueRef.current = job.catch(() => {});
@@ -2668,22 +2670,24 @@ export default function App() {
 
         if (pendingCostResync || pendingMarginResync) {
           skipAutoSaveRef.current = true;
-          try {
-            if (pendingCostResync) {
-              await saveOneSettingWithRetry("pol_costs", JSON.stringify(cacheCosts));
+          enqueueNetworkWrite(async () => {
+            try {
+              if (pendingCostResync) {
+                await saveOneSettingWithRetry("pol_costs", JSON.stringify(cacheCosts));
+              }
+              if (pendingMarginResync) {
+                await saveSettingsEntries([
+                  ...(cacheMargins ? [["pol_margins", JSON.stringify(cacheMargins)]] : []),
+                  ...(cached?.polTs ? [["pol_margin_timestamps", JSON.stringify(cached.polTs)]] : []),
+                  ...(cacheMarginsFuture ? [["pol_margins_future", JSON.stringify(cacheMarginsFuture)]] : []),
+                  ...(cached?.polTsFuture ? [["pol_margin_timestamps_future", JSON.stringify(cached.polTsFuture)]] : []),
+                ]);
+              }
+              writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+            } catch (e) {
+              console.warn("cache re-sync failed", e);
             }
-            if (pendingMarginResync) {
-              await saveSettingsEntries([
-                ...(cacheMargins ? [["pol_margins", JSON.stringify(cacheMargins)]] : []),
-                ...(cached?.polTs ? [["pol_margin_timestamps", JSON.stringify(cached.polTs)]] : []),
-                ...(cacheMarginsFuture ? [["pol_margins_future", JSON.stringify(cacheMarginsFuture)]] : []),
-                ...(cached?.polTsFuture ? [["pol_margin_timestamps_future", JSON.stringify(cached.polTsFuture)]] : []),
-              ]);
-            }
-            writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
-          } catch (e) {
-            console.warn("cache re-sync failed", e);
-          }
+          });
           setTimeout(() => { skipAutoSaveRef.current = false; }, 4000);
         } else {
           setTimeout(() => { skipAutoSaveRef.current = false; }, 4000);
