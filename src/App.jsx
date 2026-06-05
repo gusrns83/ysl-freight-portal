@@ -3291,9 +3291,6 @@ export default function App() {
             style={{width:"100%",padding:"12px 14px",marginBottom:10,fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
             컨테이너 Rental 운임 관리 (매입 · 매출 · 마진)
           </button>
-          <div style={{background:"#fffbeb",border:"1px solid #fde68a",borderRadius:10,padding:12,marginBottom:8,fontSize:11,color:"#92400e",lineHeight:1.5}}>
-            MARGIN · Validity(현재/향후) 설정은 <b>선사운임</b> · <b>렌탈운임</b> 메뉴에서 관리합니다.
-          </div>
           <button type="button" onClick={()=>setShowAdAdmin(true)}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#ea580c",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
             하단 광고 배너 관리 (최대 3개)
