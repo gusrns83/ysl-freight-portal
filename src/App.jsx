@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v14"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v15"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -1305,6 +1305,12 @@ function GriAdjustPanel({
   gridCols = "1fr 1fr 1fr 1fr",
   filterHint,
   periodLabel,
+  areas = [],
+  scopeTab = "all",
+  setScopeTab,
+  selAreas = [],
+  toggleArea,
+  clearAreas,
   onApplyBuying,
   onApplySelling,
   canUndoBuying = false,
@@ -1315,6 +1321,7 @@ function GriAdjustPanel({
   const empty = () => Object.fromEntries(rateTypes.map(t => [t, ""]));
   const [buyGri, setBuyGri] = useState(empty);
   const [sellGri, setSellGri] = useState(empty);
+  const areaModeBlocked = scopeTab === "area" && selAreas.length === 0;
 
   const parseDeltas = (vals) => {
     const deltas = {};
@@ -1325,6 +1332,20 @@ function GriAdjustPanel({
       if (Number.isFinite(v) && v !== 0) deltas[t] = v;
     });
     return deltas;
+  };
+
+  const tryApplyBuying = () => {
+    if (areaModeBlocked) return;
+    const deltas = parseDeltas(buyGri);
+    if (Object.keys(deltas).length) onApplyBuying(deltas);
+    setBuyGri(empty());
+  };
+
+  const tryApplySelling = () => {
+    if (areaModeBlocked) return;
+    const deltas = parseDeltas(sellGri);
+    if (Object.keys(deltas).length) onApplySelling(deltas);
+    setSellGri(empty());
   };
 
   const buyInpStyle = { ...marginInpStyle, color: "#3d6a9e", borderColor: "#93c5fd" };
@@ -1339,6 +1360,18 @@ function GriAdjustPanel({
     borderRadius: 6,
     cursor: enabled ? "pointer" : "not-allowed",
     whiteSpace: "nowrap",
+  });
+
+  const applyBtnStyle = (enabled, bg) => ({
+    flex: 1,
+    padding: "7px",
+    fontSize: 11,
+    fontWeight: 700,
+    color: "#fff",
+    background: enabled ? bg : "#d1d5db",
+    border: "none",
+    borderRadius: 6,
+    cursor: enabled ? "pointer" : "not-allowed",
   });
 
   return (
@@ -1357,6 +1390,54 @@ function GriAdjustPanel({
           </span>
         )}
       </div>
+      <div style={{ display: "flex", background: "#eff6ff", borderRadius: 8, padding: 2, marginBottom: 8 }}>
+        {[["all", "전체"], ["area", "지역별"]].map(([k, l]) => (
+          <button
+            key={k}
+            type="button"
+            onClick={() => setScopeTab(k)}
+            style={{
+              flex: 1, padding: "6px", fontSize: 11, fontWeight: 600, borderRadius: 6, border: "none", cursor: "pointer",
+              background: scopeTab === k ? "#fff" : "transparent",
+              color: scopeTab === k ? "#1d4ed8" : "#60a5fa",
+              boxShadow: scopeTab === k ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
+            }}
+          >
+            {l}
+          </button>
+        ))}
+      </div>
+      {scopeTab === "area" && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+            <div style={{ fontSize: 9, color: "#6b7280" }}>적용 지역 선택 (중복 선택 가능)</div>
+            {selAreas.length > 0 && (
+              <button type="button" onClick={clearAreas}
+                style={{ fontSize: 9, color: "#dc2626", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+                선택 해제
+              </button>
+            )}
+          </div>
+          <div className="gri-area-chips">
+            {areas.map(area => {
+              const on = selAreas.includes(area);
+              return (
+                <button
+                  key={area}
+                  type="button"
+                  className={`gri-area-chip${on ? " gri-area-chip--on" : ""}`}
+                  onClick={() => toggleArea(area)}
+                >
+                  {area}
+                </button>
+              );
+            })}
+          </div>
+          {areaModeBlocked && (
+            <div style={{ fontSize: 9, color: "#dc2626", marginTop: 6 }}>지역을 하나 이상 선택하세요</div>
+          )}
+        </div>
+      )}
       {filterHint && <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 8 }}>{filterHint}</div>}
       <div style={{ marginBottom: 10 }}>
         <div style={{ fontSize: 10, fontWeight: 700, color: "#3d6a9e", marginBottom: 6 }}>매입 GRI</div>
@@ -1371,12 +1452,8 @@ function GriAdjustPanel({
           ))}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          <button type="button" onClick={() => {
-            const deltas = parseDeltas(buyGri);
-            if (Object.keys(deltas).length) onApplyBuying(deltas);
-            setBuyGri(empty());
-          }}
-            style={{ flex: 1, padding: "7px", fontSize: 11, fontWeight: 700, color: "#fff", background: "#2563eb", border: "none", borderRadius: 6, cursor: "pointer" }}>
+          <button type="button" onClick={tryApplyBuying} disabled={areaModeBlocked}
+            style={applyBtnStyle(!areaModeBlocked, "#2563eb")}>
             매입 GRI 적용
           </button>
           <button type="button" disabled={!canUndoBuying} onClick={onUndoBuying} style={undoBtnStyle(canUndoBuying)}>
@@ -1399,12 +1476,8 @@ function GriAdjustPanel({
           ))}
         </div>
         <div style={{ display: "flex", gap: 6 }}>
-          <button type="button" onClick={() => {
-            const deltas = parseDeltas(sellGri);
-            if (Object.keys(deltas).length) onApplySelling(deltas);
-            setSellGri(empty());
-          }}
-            style={{ flex: 1, padding: "7px", fontSize: 11, fontWeight: 700, color: "#fff", background: "#b45309", border: "none", borderRadius: 6, cursor: "pointer" }}>
+          <button type="button" onClick={tryApplySelling} disabled={areaModeBlocked}
+            style={applyBtnStyle(!areaModeBlocked, "#b45309")}>
             매출 GRI 적용
           </button>
           <button type="button" disabled={!canUndoSelling} onClick={onUndoSelling} style={undoBtnStyle(canUndoSelling)}>
@@ -1487,6 +1560,11 @@ export default function App() {
   const [griBuyUndo, setGriBuyUndo] = useState(null);
   const [griSellUndo, setGriSellUndo] = useState(null);
   const [importFreightUndo, setImportFreightUndo] = useState(null);
+  const [griScopeTab, setGriScopeTab] = useState("all");
+  const [griSelAreas, setGriSelAreas] = useState([]);
+  const toggleGriArea = (area) => {
+    setGriSelAreas(prev => (prev.includes(area) ? prev.filter(a => a !== area) : [...prev, area]));
+  };
   const [marginTab, setMarginTab] = useState("global");
   const [rentalMarginTab, setRentalMarginTab] = useState("global");
   const [selArea, setSelArea] = useState("");
@@ -3809,7 +3887,12 @@ export default function App() {
       : marginTab === "pol" && selPol
         ? `${selPol} · ${gridPolCount}개 POL`
         : `${gridPolCount}개 POL (전체)`;
-    const griTargetRows = filteredCarrierAreaGroups.flatMap(g => g.rows);
+    const griTargetRows = griScopeTab === "area" && griSelAreas.length > 0
+      ? fData.filter(r => griSelAreas.includes(r.area))
+      : fData;
+    const griFilterLabel = griScopeTab === "area" && griSelAreas.length > 0
+      ? `${griTargetRows.length}개 POL · ${griSelAreas.join(", ")}`
+      : `${griTargetRows.length}개 POL (전체)`;
     const renderGridCell = (row, type) => {
       const base = row.rates[caCr]?.[type];
       const cost = getCarrierRate(row, caCr, type, caPeriod);
@@ -4013,7 +4096,16 @@ export default function App() {
           />
           <GriAdjustPanel
             periodLabel={griPeriodLabel(caPeriod)}
-            filterHint={`${gridFilterLabel} · COC/SOC 타입별 금액 입력 후 적용`}
+            areas={areas}
+            scopeTab={griScopeTab}
+            setScopeTab={tab => {
+              setGriScopeTab(tab);
+              if (tab === "all") setGriSelAreas([]);
+            }}
+            selAreas={griSelAreas}
+            toggleArea={toggleGriArea}
+            clearAreas={() => setGriSelAreas([])}
+            filterHint={`${griFilterLabel} · COC/SOC 타입별 금액 입력 후 적용`}
             onApplyBuying={deltas => applyBuyingGriBulk(deltas, griTargetRows, caCr, caPeriod)}
             onApplySelling={deltas => applySellingGriBulk(deltas, griTargetRows, caCr, caPeriod)}
             canUndoBuying={griBuyUndo?.carrier === caCr && griBuyUndo?.period === caPeriod}
