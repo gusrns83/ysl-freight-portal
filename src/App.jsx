@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v12"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v13"; // Admin 저장 로직 버전 (배포 확인용)
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -794,17 +794,33 @@ const resolveMarginCandidates = (pol, area, type, period, ctx) => {
   if (areaVal != null && areaVal !== "") {
     candidates.push({ value: marginNum(areaVal), ts: ctx.areaTs[area]?.[type] ?? 0 });
   }
+  // POL 마진은 기간별 완전 분리 — current↔future 상호 참조 금지
   if (period === "future") {
     const futVal = ctx.polMFuture[pol]?.[type];
     if (futVal != null && futVal !== "") {
       candidates.push({ value: marginNum(futVal), ts: ctx.polTsFuture[pol]?.[type] ?? 0 });
     }
-  }
-  const polVal = ctx.polM[pol]?.[type];
-  if (polVal != null && polVal !== "") {
-    candidates.push({ value: marginNum(polVal), ts: ctx.polTs[pol]?.[type] ?? 0 });
+  } else {
+    const polVal = ctx.polM[pol]?.[type];
+    if (polVal != null && polVal !== "") {
+      candidates.push({ value: marginNum(polVal), ts: ctx.polTs[pol]?.[type] ?? 0 });
+    }
   }
   return candidates;
+};
+
+const buildCopyCurrentToFutureMargins = (rows, marginCtx) => {
+  const nextPolMFuture = {};
+  const nextPolTsFuture = {};
+  const ts = marginNowTs();
+  rows.forEach(row => {
+    RATE_TYPES.forEach(t => {
+      const m = pickLatestMargin(resolveMarginCandidates(row.pol, row.area, t, "current", marginCtx));
+      nextPolMFuture[row.pol] = { ...(nextPolMFuture[row.pol] || {}), [t]: m };
+      nextPolTsFuture[row.pol] = { ...(nextPolTsFuture[row.pol] || {}), [t]: ts };
+    });
+  });
+  return { polMFuture: nextPolMFuture, polTsFuture: nextPolTsFuture };
 };
 
 const griPeriodLabel = (period) => (period === "future" ? "향후 운임" : "현재 운임");
@@ -1265,7 +1281,9 @@ function GriAdjustPanel({
       </div>
       <div>
         <div style={{ fontSize: 10, fontWeight: 700, color: "#6b5038", marginBottom: 6 }}>매출 GRI</div>
-        <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 6 }}>입력값만큼 매출가(마진)에 가산 · 매입은 유지</div>
+        <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 6 }}>
+          {periodLabel ? `${periodLabel} 매출(마진)에만 가산 · 다른 기간·매입은 유지` : "입력값만큼 매출가(마진)에 가산 · 매입은 유지"}
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 8, marginBottom: 8 }}>
           {rateTypes.map(t => (
             <div key={`sell-${t}`}>
@@ -1731,6 +1749,8 @@ export default function App() {
       polCostO: JSON.parse(JSON.stringify(polCostO)),
       carrierRates: JSON.parse(JSON.stringify(carrierRates)),
       carrierDropRates: JSON.parse(JSON.stringify(carrierDropRates)),
+      polMFuture: JSON.parse(JSON.stringify(polMFuture)),
+      polTsFuture: JSON.parse(JSON.stringify(polTsFuture)),
     });
     cancelPendingPricingSave();
     resetSaveQueue();
@@ -1762,19 +1782,27 @@ export default function App() {
       rows: fData, carrier, carrierRates, fData,
     });
     const nextRates = copyCarrierRatesPeriod(carrierRates, carrier);
+    const marginCtx = { margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture };
+    const { polMFuture: nextPolMFuture, polTsFuture: nextPolTsFuture } = buildCopyCurrentToFutureMargins(fData, marginCtx);
     setPolCostO(nextCosts);
     setCarrierRates(nextRates);
+    setPolMFuture(nextPolMFuture);
+    setPolTsFuture(nextPolTsFuture);
     writePricingCache({
       ...(readStoredPricingCache() || { v: 1 }),
       v: 1,
       polCostO: nextCosts,
       carrierRates: nextRates,
+      polMFuture: nextPolMFuture,
+      polTsFuture: nextPolTsFuture,
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
       await saveSettingsEntries([
         ["pol_costs", JSON.stringify(nextCosts)],
         ["carrier_rates_json", JSON.stringify(nextRates)],
+        ["pol_margins_future", JSON.stringify(nextPolMFuture)],
+        ["pol_margin_timestamps_future", JSON.stringify(nextPolTsFuture)],
       ]);
     })
       .then(() => {
@@ -1787,7 +1815,11 @@ export default function App() {
 
   const undoImportFreight = () => {
     if (!importFreightUndo) return;
-    const { carrier, dropoffMode, polCostO: restoredCosts, carrierRates: restoredRates, carrierDropRates: restoredDrop } = importFreightUndo;
+    const {
+      carrier, dropoffMode,
+      polCostO: restoredCosts, carrierRates: restoredRates, carrierDropRates: restoredDrop,
+      polMFuture: restoredPolMFuture, polTsFuture: restoredPolTsFuture,
+    } = importFreightUndo;
     setImportFreightUndo(null);
     cancelPendingPricingSave();
     resetSaveQueue();
@@ -1813,17 +1845,23 @@ export default function App() {
     }
     setPolCostO(restoredCosts);
     setCarrierRates(restoredRates);
+    setPolMFuture(restoredPolMFuture ?? {});
+    setPolTsFuture(restoredPolTsFuture ?? {});
     writePricingCache({
       ...(readStoredPricingCache() || { v: 1 }),
       v: 1,
       polCostO: restoredCosts,
       carrierRates: restoredRates,
+      polMFuture: restoredPolMFuture,
+      polTsFuture: restoredPolTsFuture,
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
       await saveSettingsEntries([
         ["pol_costs", JSON.stringify(restoredCosts)],
         ["carrier_rates_json", JSON.stringify(restoredRates)],
+        ["pol_margins_future", JSON.stringify(restoredPolMFuture ?? {})],
+        ["pol_margin_timestamps_future", JSON.stringify(restoredPolTsFuture ?? {})],
       ]);
     })
       .then(() => {
