@@ -1035,6 +1035,15 @@
   box-sizing: border-box;
 }
 
+.portal-sticky-top {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}
+
 .app-ad-slot {
   position: fixed;
   bottom: 0;
