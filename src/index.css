@@ -115,8 +115,12 @@
   background: #f3f4f6;
   border: 1px solid #e5e7eb;
 }
+.validity-compact-text {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
 .carrier-validity-table .validity-badge {
-  max-width: 220px;
+  max-width: 240px;
 }
 
 .validity-date-inp {
