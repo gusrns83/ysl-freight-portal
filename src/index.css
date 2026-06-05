@@ -537,6 +537,32 @@
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
   pointer-events: none;
 }
+.admin-save-toast--dismissible {
+  pointer-events: auto;
+  text-align: left;
+  padding-right: 36px;
+  position: fixed;
+}
+.admin-save-toast-msg {
+  display: block;
+  line-height: 1.45;
+}
+.admin-save-toast-close {
+  position: absolute;
+  top: 8px;
+  right: 10px;
+  background: none;
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  opacity: 0.65;
+  color: inherit;
+}
+.admin-save-toast-close:hover {
+  opacity: 1;
+}
 .admin-save-toast--ok {
   background: #dcfce7;
   color: #166534;
