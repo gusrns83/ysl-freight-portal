@@ -2472,6 +2472,13 @@ export default function App() {
     </div>
   );
 
+  const RouteCardLabel = ({area, pol}) => (
+    <div className="route-card-label">
+      <span className="route-card-area">{area}</span>
+      <span className="route-card-pol">{pol}</span>
+    </div>
+  );
+
   const getValidityLabel = (cr) => {
     const period = ratePeriod === "future" ? "future" : "current";
     return formatValidityCompact(validityInfo[cr]?.[period]);
@@ -2983,14 +2990,11 @@ export default function App() {
     const t20=types[0],t40=types[1];
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>setExp(open?null:`o${idx}`)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
-          <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1,width:"100%"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
-              <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
-              <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
-            </div>
+        <button onClick={()=>setExp(open?null:`o${idx}`)} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+          <div className={isAdmin?"admin-card-top":"route-card-head"}>
+            <RouteCardLabel area={row.area} pol={row.pol}/>
             {!isAdmin && <GuestPricePair d20={d20} d40={d40}/>}
-            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+            <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
           </div>
           {isAdmin && (
             <div className="admin-card-prices">
@@ -3074,14 +3078,11 @@ export default function App() {
     const d20=doDetail(row,"mow",0),d40=doDetail(row,"mow",1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>{setExp(open?null:`d${idx}`);setDoCityOpen(null);}} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
-          <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1,width:"100%"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
-              <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
-              <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.pol}</span>
-            </div>
+        <button onClick={()=>{setExp(open?null:`d${idx}`);setDoCityOpen(null);}} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+          <div className={isAdmin?"admin-card-top":"route-card-head"}>
+            <RouteCardLabel area={row.area} pol={row.pol}/>
             {!isAdmin && d20.sell!=null && <GuestPricePair d20={d20} d40={d40} prefix="MOW"/>}
-            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+            <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
           </div>
           {isAdmin && (
             <div className="admin-card-prices">
@@ -3196,14 +3197,11 @@ export default function App() {
     const d20=rentDetail(row.pol,mow,row,0),d40=rentDetail(row.pol,mow,row,1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
-          <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1,width:"100%"}}>
-            <div style={{display:"flex",alignItems:"center",gap:8,minWidth:0,flex:1}}>
-              <span style={{fontSize:10,color:"#9ca3af",background:"#f3f4f6",padding:"2px 8px",borderRadius:4,flexShrink:0}}>{row.area}</span>
-              <span style={{fontSize:14,fontWeight:600,color:"#111",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{row.displayPol || row.pol}</span>
-            </div>
+        <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+          <div className={isAdmin?"admin-card-top":"route-card-head"}>
+            <RouteCardLabel area={row.area} pol={row.displayPol || row.pol}/>
             {!isAdmin && <GuestPricePair d20={d20} d40={d40} prefix="MOW"/>}
-            <span style={{fontSize:14,color:"#9ca3af",transform:open?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+            <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
           </div>
           {isAdmin && (
             <div className="admin-card-prices">
