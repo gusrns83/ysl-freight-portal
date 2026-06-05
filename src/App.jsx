@@ -172,6 +172,30 @@ const api = async (path, opts = {}) => {
   return t ? JSON.parse(t) : [];
 };
 
+const HEAVY_SETTING_KEYS_LIST = ["pol_costs", "rental_rates_json", "carrier_rates_json"];
+
+const PRICING_LIGHT_KEYS = [
+  "global_margins", "area_margins", "pol_margins",
+  "margin_timestamps", "area_margin_timestamps", "pol_margin_timestamps",
+  "rental_global_margins", "rental_area_margins", "rental_pol_margins",
+  "rental_margin_timestamps", "rental_area_margin_timestamps", "rental_pol_margin_timestamps",
+  "validity_info_json", "validity_snk", "validity_dy", "validity_ck", "validity_rental",
+];
+
+const settingsMapFromRows = (rows) => {
+  if (!Array.isArray(rows)) return {};
+  return Object.fromEntries(rows.filter(r => r?.key).map(r => [r.key, r.value]));
+};
+
+const fetchSettingsByKey = (key) =>
+  api(`settings?select=key,value&key=eq.${encodeURIComponent(key)}`);
+
+const fetchSettingsInKeys = (keys) =>
+  api(`settings?select=key,value&key=in.(${keys.join(",")})`);
+
+const fetchSettingsExceptKeys = (excludeKeys) =>
+  api(`settings?select=key,value&key=not.in.(${excludeKeys.join(",")})`);
+
 const RC = ["Moscow","Chelyabinsk","Novosibirsk","Irkutsk","Krasnoyarsk","Ekaterinburg","Vladivostok","St.Petersburg","Samara","Tolyatti","Kazan","Minsk"];
 const FR = [
   ["KOREA","BUSAN",950,1300,800,930,1000,1400,850,1150,1100,1650,1000,1500],
@@ -993,7 +1017,7 @@ export default function App() {
 
   // Default margins — localStorage 캐시로 첫 렌더부터 복원 (깜빡임 방지)
   const [pricingBoot] = useState(() => bootPricingFromCache());
-  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [settingsLoaded, setSettingsLoaded] = useState(() => !!pricingBoot);
   const [margins, setMargins] = useState(() => pricingBoot?.margins ?? { ...DEFAULT_MARGINS });
   const [marginTs, setMarginTs] = useState(() => pricingBoot?.marginTs ?? Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])));
   const [areaM, setAreaM] = useState(() => pricingBoot?.areaM ?? {});
@@ -1782,42 +1806,78 @@ export default function App() {
     ["ad_banners_json", JSON.stringify(adBanners)],
   ]));
 
+  const applyNoticesAndAdsFromSettings = (s) => {
+    if (s.notices_json) {
+      try {
+        const parsed = JSON.parse(s.notices_json);
+        if (Array.isArray(parsed)) {
+          setNotices(mkNotices().map((n, i) => {
+            const p = parsed[i];
+            if (!p) return n;
+            return { ...n, text: p.text ?? "", fileUrl: p.fileUrl ?? "", title: p.title || n.title, on: parseNoticeOn(p.on) };
+          }));
+        }
+      } catch (e) {}
+    } else if (s.notice_text !== undefined || s.notice_on !== undefined || s.notice_file_url !== undefined) {
+      setNotices(prev => prev.map((n, i) => i === 0 ? {
+        ...n,
+        text: s.notice_text ?? "",
+        on: s.notice_on === "true",
+        fileUrl: s.notice_file_url ?? "",
+      } : n));
+    }
+    if (s.ad_banners_json || s.ad_banner_json) {
+      setAdBanners(parseAdsFromSettings(s));
+    }
+  };
+
+  const applySettingsBundle = (s) => {
+    applyPricingFromSettings(s);
+    applyNoticesAndAdsFromSettings(s);
+  };
+
   useEffect(() => {
-    api("settings?select=key,value")
-      .then(rows => {
-        if (!Array.isArray(rows)) throw new Error("settings 응답 오류");
-        const s = Object.fromEntries(rows.map(r => [r.key, r.value]));
-        if (s.notices_json) {
-          try {
-            const parsed = JSON.parse(s.notices_json);
-            if (Array.isArray(parsed)) {
-              setNotices(mkNotices().map((n, i) => {
-                const p = parsed[i];
-                if (!p) return n;
-                return { ...n, text: p.text ?? "", fileUrl: p.fileUrl ?? "", title: p.title || n.title, on: parseNoticeOn(p.on) };
-              }));
-            }
-          } catch (e) {}
-        } else if (s.notice_text !== undefined || s.notice_on !== undefined || s.notice_file_url !== undefined) {
-          setNotices(prev => prev.map((n, i) => i === 0 ? {
-            ...n,
-            text: s.notice_text ?? "",
-            on: s.notice_on === "true",
-            fileUrl: s.notice_file_url ?? "",
-          } : n));
-        }
-        applyPricingFromSettings(s);
-        if (s.ad_banners_json || s.ad_banner_json) {
-          setAdBanners(parseAdsFromSettings(s));
-        }
+    let cancelled = false;
+
+    const loadSettings = async () => {
+      try {
+        const deferExclude = [...HEAVY_SETTING_KEYS_LIST, ...PRICING_LIGHT_KEYS];
+        const [polCostsRows, pricingLightRows] = await Promise.all([
+          fetchSettingsByKey("pol_costs"),
+          fetchSettingsInKeys(PRICING_LIGHT_KEYS),
+        ]);
+        if (cancelled) return;
+
+        const priority = {
+          ...settingsMapFromRows(pricingLightRows),
+          ...settingsMapFromRows(polCostsRows),
+        };
+        applySettingsBundle(priority);
         setSettingsLoaded(true);
         skipAutoSaveRef.current = false;
-      })
-      .catch(err => {
+
+        const [rentalRows, carrierRows, miscRows] = await Promise.all([
+          fetchSettingsByKey("rental_rates_json"),
+          fetchSettingsByKey("carrier_rates_json"),
+          fetchSettingsExceptKeys(deferExclude),
+        ]);
+        if (cancelled) return;
+
+        applySettingsBundle({
+          ...priority,
+          ...settingsMapFromRows(rentalRows),
+          ...settingsMapFromRows(carrierRows),
+          ...settingsMapFromRows(miscRows),
+        });
+      } catch (err) {
         console.error("settings load failed", err);
         setSettingsLoaded(true);
         skipAutoSaveRef.current = false;
-      });
+      }
+    };
+
+    loadSettings();
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {
