@@ -1021,6 +1021,82 @@ function MarginPanel({
   );
 }
 
+function GriAdjustPanel({
+  rateTypes = RATE_TYPES,
+  rateLabel = (t) => t.toUpperCase(),
+  gridCols = "1fr 1fr 1fr 1fr",
+  filterHint,
+  onApplyBuying,
+  onApplySelling,
+}) {
+  const empty = () => Object.fromEntries(rateTypes.map(t => [t, ""]));
+  const [buyGri, setBuyGri] = useState(empty);
+  const [sellGri, setSellGri] = useState(empty);
+
+  const parseDeltas = (vals) => {
+    const deltas = {};
+    rateTypes.forEach(t => {
+      const raw = String(vals[t] ?? "").trim();
+      if (raw === "") return;
+      const v = parseInt(raw, 10);
+      if (Number.isFinite(v) && v !== 0) deltas[t] = v;
+    });
+    return deltas;
+  };
+
+  const buyInpStyle = { ...marginInpStyle, color: "#3d6a9e", borderColor: "#93c5fd" };
+  const sellInpStyle = { ...marginInpStyle, color: "#6b5038", borderColor: "#d6b88a" };
+
+  return (
+    <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#374151", marginBottom: 8 }}>GRI 일괄 조정 (USD)</div>
+      {filterHint && <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 8 }}>{filterHint}</div>}
+      <div style={{ marginBottom: 10 }}>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#3d6a9e", marginBottom: 6 }}>매입 GRI</div>
+        <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 6 }}>입력값만큼 매입가에 가산 (+/- 가능)</div>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 8, marginBottom: 8 }}>
+          {rateTypes.map(t => (
+            <div key={`buy-${t}`}>
+              <div style={{ fontSize: 10, color: "#3d6a9e", marginBottom: 2 }}>{rateLabel(t)}</div>
+              <input type="number" value={buyGri[t]} onChange={e => setBuyGri(p => ({ ...p, [t]: e.target.value }))}
+                placeholder="0" style={buyInpStyle} />
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={() => {
+          const deltas = parseDeltas(buyGri);
+          if (Object.keys(deltas).length) onApplyBuying(deltas);
+          setBuyGri(empty());
+        }}
+          style={{ width: "100%", padding: "7px", fontSize: 11, fontWeight: 700, color: "#fff", background: "#2563eb", border: "none", borderRadius: 6, cursor: "pointer" }}>
+          매입 GRI 적용
+        </button>
+      </div>
+      <div>
+        <div style={{ fontSize: 10, fontWeight: 700, color: "#6b5038", marginBottom: 6 }}>매출 GRI</div>
+        <div style={{ fontSize: 9, color: "#6b7280", marginBottom: 6 }}>입력값만큼 매출가(마진)에 가산 · 매입은 유지</div>
+        <div style={{ display: "grid", gridTemplateColumns: gridCols, gap: 8, marginBottom: 8 }}>
+          {rateTypes.map(t => (
+            <div key={`sell-${t}`}>
+              <div style={{ fontSize: 10, color: "#6b5038", marginBottom: 2 }}>{rateLabel(t)}</div>
+              <input type="number" value={sellGri[t]} onChange={e => setSellGri(p => ({ ...p, [t]: e.target.value }))}
+                placeholder="0" style={sellInpStyle} />
+            </div>
+          ))}
+        </div>
+        <button type="button" onClick={() => {
+          const deltas = parseDeltas(sellGri);
+          if (Object.keys(deltas).length) onApplySelling(deltas);
+          setSellGri(empty());
+        }}
+          style={{ width: "100%", padding: "7px", fontSize: 11, fontWeight: 700, color: "#fff", background: "#b45309", border: "none", borderRadius: 6, cursor: "pointer" }}>
+          매출 GRI 적용
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const fData = useMemo(() => FR.map(r => ({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})), []);
   const rData = useMemo(() => RN.map(r => { const r20={},r40={}; RC.forEach((c,i)=>{r20[c]=r[1+i];r40[c]=r[13+i];}); return {pol:r[0],r20,r40}; }), []);
@@ -3036,6 +3112,74 @@ export default function App() {
       : marginTab === "pol" && selPol
         ? `${selPol} · ${gridPolCount}개 POL`
         : `${gridPolCount}개 POL (전체)`;
+    const griTargetRows = filteredCarrierAreaGroups.flatMap(g => g.rows);
+    const resolveCarrierCost = (prevCosts, pol, cr, t, period) => {
+      const c = prevCosts[pol]?.carrier?.[cr];
+      if (c?.[period]?.[t] != null && c[period][t] !== "") return Number(c[period][t]);
+      if (period === "current" && c?.[t] != null && c[t] !== "") return Number(c[t]);
+      const g = carrierRates[cr]?.[period]?.[t];
+      if (g != null && g !== "") return Number(g);
+      const row = fData.find(d => d.pol === pol);
+      const base = row?.rates[cr]?.[t];
+      return base != null ? Number(base) : null;
+    };
+    const applyBuyingGriBulk = (deltas) => {
+      if (!griTargetRows.length) return;
+      setPolCostO(prev => {
+        let next = { ...prev };
+        griTargetRows.forEach(row => {
+          RATE_TYPES.forEach(t => {
+            const delta = deltas[t];
+            if (!Number.isFinite(delta)) return;
+            const cost = resolveCarrierCost(next, row.pol, caCr, t, caPeriod);
+            if (cost == null) return;
+            const prevCr = { ...(next[row.pol]?.carrier?.[caCr] || {}) };
+            const bucket = { ...(prevCr[caPeriod] || {}) };
+            bucket[t] = cost + delta;
+            const nextCr = { ...prevCr, [caPeriod]: bucket };
+            delete nextCr[t];
+            next = {
+              ...next,
+              [row.pol]: {
+                ...(next[row.pol] || {}),
+                carrier: { ...(next[row.pol]?.carrier || {}), [caCr]: nextCr },
+              },
+            };
+          });
+        });
+        return next;
+      });
+    };
+    const applySellingGriBulk = (deltas) => {
+      if (!griTargetRows.length) return;
+      const ts = marginNowTs();
+      setPolM(prev => {
+        const next = { ...prev };
+        griTargetRows.forEach(row => {
+          RATE_TYPES.forEach(t => {
+            const delta = deltas[t];
+            if (!Number.isFinite(delta)) return;
+            const cost = resolveCarrierCost(polCostO, row.pol, caCr, t, caPeriod);
+            if (cost == null) return;
+            const curM = getM(row.pol, row.area, t);
+            next[row.pol] = { ...(next[row.pol] || {}), [t]: curM + delta };
+          });
+        });
+        return next;
+      });
+      setPolTs(prev => {
+        const next = { ...prev };
+        griTargetRows.forEach(row => {
+          RATE_TYPES.forEach(t => {
+            if (!Number.isFinite(deltas[t])) return;
+            const cost = resolveCarrierCost(polCostO, row.pol, caCr, t, caPeriod);
+            if (cost == null) return;
+            next[row.pol] = { ...(next[row.pol] || {}), [t]: ts };
+          });
+        });
+        return next;
+      });
+    };
     const renderGridCell = (row, type) => {
       const base = row.rates[caCr]?.[type];
       const cost = getCarrierRate(row, caCr, type, caPeriod);
@@ -3212,6 +3356,11 @@ export default function App() {
             polM={polM} applyPolMargins={applyPolMargins} clearPolMargins={clearPolMargins}
             polEdit={polEdit} setPolEdit={setPolEdit}
             areas={areas} fData={fData} getM={getM}
+          />
+          <GriAdjustPanel
+            filterHint={`${gridFilterLabel} · COC/SOC 타입별 금액 입력 후 적용`}
+            onApplyBuying={applyBuyingGriBulk}
+            onApplySelling={applySellingGriBulk}
           />
           <div style={{marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:10}}>
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
