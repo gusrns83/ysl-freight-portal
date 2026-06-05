@@ -2946,25 +2946,29 @@ export default function App() {
     return (
       <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}} onClick={() => setRentalEditCell(null)}>
         {adminSaveToastEl}
-        <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
-          <button onClick={()=>setShowRentalAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
-          <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
-          <button type="button" onClick={saveRentalPricing} disabled={saveBusy}
-            style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#c4b5fd":"#7c3aed",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
-            {saveBusy ? "저장 중…" : "💾 저장"}
-          </button>
+        <div className="portal-sticky-top admin-sticky-top">
+          <div style={{padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <button onClick={()=>setShowRentalAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+            <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
+            <button type="button" onClick={saveRentalPricing} disabled={saveBusy}
+              style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#c4b5fd":"#7c3aed",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
+              {saveBusy ? "저장 중…" : "💾 저장"}
+            </button>
+          </div>
+          <div className="carrier-admin-page rental-admin-page" onClick={e => e.stopPropagation()}>
+            <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3}}>
+              {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
+                <button key={k} type="button" onClick={()=>{setRentalAdminPeriod(k);setRentalEditCell(null);}}
+                  style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                    background:rentalAdminPeriod===k?"#fff":"transparent",
+                    color:rentalAdminPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="carrier-admin-page rental-admin-page" onClick={e => e.stopPropagation()}>
-          <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:10}}>
-            {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
-              <button key={k} type="button" onClick={()=>{setRentalAdminPeriod(k);setRentalEditCell(null);}}
-                style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
-                  background:rentalAdminPeriod===k?"#fff":"transparent",
-                  color:rentalAdminPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
-                {l}
-              </button>
-            ))}
-          </div>
           <div style={{marginBottom:10,background:"#fff",border:"1px solid #ddd6fe",borderRadius:10,padding:10}}>
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
               <Bg k="RENTAL"/><span style={{fontSize:11,fontWeight:700,color:"#5b21b6"}}>{CN_KR.RENTAL} Validity</span>
@@ -3297,49 +3301,53 @@ export default function App() {
     return (
       <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}} onClick={() => setCarrierEditCell(null)}>
         {adminSaveToastEl}
-        <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
-          <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
-          <div style={{textAlign:"center"}}>
-            <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
-            <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV} · 변경 시 자동 저장</div>
+        <div className="portal-sticky-top admin-sticky-top">
+          <div style={{padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
+              <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV} · 변경 시 자동 저장</div>
+            </div>
+            <button type="button" onClick={saveCarrierPricing} disabled={saveBusy}
+              style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#93c5fd":"#2563eb",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
+              {saveBusy ? "저장 중…" : "💾 저장"}
+            </button>
           </div>
-          <button type="button" onClick={saveCarrierPricing} disabled={saveBusy}
-            style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#93c5fd":"#2563eb",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
-            {saveBusy ? "저장 중…" : "💾 저장"}
-          </button>
+          <div className="carrier-admin-page" onClick={e => e.stopPropagation()}>
+            <div style={{display:"flex",background:"#eff6ff",borderRadius:10,padding:3,marginBottom:8}}>
+              {CRS.map(k=>(
+                <button key={k} type="button" onClick={()=>{setCarrierAdminCr(k);setCarrierEditCell(null);}}
+                  style={{flex:1,padding:"8px 4px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                    background:carrierAdminCr===k?"#fff":"transparent",color:carrierAdminCr===k?"#1e40af":"#60a5fa",
+                    boxShadow:carrierAdminCr===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+                  {CN_KR[k]} ({k})
+                </button>
+              ))}
+            </div>
+            <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:8}}>
+              {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
+                <button key={k} type="button" onClick={()=>{setCarrierAdminPeriod(k);setCarrierEditCell(null);}}
+                  style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                    background:carrierAdminPeriod===k?"#fff":"transparent",
+                    color:carrierAdminPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <div style={{display:"flex",background:"#ecfdf5",borderRadius:10,padding:3}}>
+              {[["ocean","해상 운임"],["dropoff","Drop off"]].map(([k,l])=>(
+                <button key={k} type="button" onClick={()=>{setCarrierAdminMode(k);setCarrierEditCell(null);}}
+                  style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                    background:carrierAdminMode===k?"#fff":"transparent",
+                    color:carrierAdminMode===k?"#047857":"#6ee7b7",
+                    boxShadow:carrierAdminMode===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
         <div className="carrier-admin-page" onClick={e => e.stopPropagation()}>
-          <div style={{display:"flex",background:"#eff6ff",borderRadius:10,padding:3,marginBottom:8}}>
-            {CRS.map(k=>(
-              <button key={k} type="button" onClick={()=>{setCarrierAdminCr(k);setCarrierEditCell(null);}}
-                style={{flex:1,padding:"8px 4px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
-                  background:carrierAdminCr===k?"#fff":"transparent",color:carrierAdminCr===k?"#1e40af":"#60a5fa",
-                  boxShadow:carrierAdminCr===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
-                {CN_KR[k]} ({k})
-              </button>
-            ))}
-          </div>
-          <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:10}}>
-            {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
-              <button key={k} type="button" onClick={()=>{setCarrierAdminPeriod(k);setCarrierEditCell(null);}}
-                style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
-                  background:carrierAdminPeriod===k?"#fff":"transparent",
-                  color:carrierAdminPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
-                {l}
-              </button>
-            ))}
-          </div>
-          <div style={{display:"flex",background:"#ecfdf5",borderRadius:10,padding:3,marginBottom:10}}>
-            {[["ocean","해상 운임"],["dropoff","Drop off"]].map(([k,l])=>(
-              <button key={k} type="button" onClick={()=>{setCarrierAdminMode(k);setCarrierEditCell(null);}}
-                style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
-                  background:carrierAdminMode===k?"#fff":"transparent",
-                  color:carrierAdminMode===k?"#047857":"#6ee7b7",
-                  boxShadow:carrierAdminMode===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
-                {l}
-              </button>
-            ))}
-          </div>
           {!isDropAdmin && (
           <>
           <MarginPanel
