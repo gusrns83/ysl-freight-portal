@@ -1101,6 +1101,10 @@ function GriAdjustPanel({
   filterHint,
   onApplyBuying,
   onApplySelling,
+  canUndoBuying = false,
+  canUndoSelling = false,
+  onUndoBuying,
+  onUndoSelling,
 }) {
   const empty = () => Object.fromEntries(rateTypes.map(t => [t, ""]));
   const [buyGri, setBuyGri] = useState(empty);
@@ -1119,6 +1123,17 @@ function GriAdjustPanel({
 
   const buyInpStyle = { ...marginInpStyle, color: "#3d6a9e", borderColor: "#93c5fd" };
   const sellInpStyle = { ...marginInpStyle, color: "#6b5038", borderColor: "#d6b88a" };
+  const undoBtnStyle = (enabled) => ({
+    padding: "7px 10px",
+    fontSize: 10,
+    fontWeight: 600,
+    color: enabled ? "#6b7280" : "#d1d5db",
+    background: enabled ? "#f3f4f6" : "#fafafa",
+    border: `1px solid ${enabled ? "#e5e7eb" : "#f3f4f6"}`,
+    borderRadius: 6,
+    cursor: enabled ? "pointer" : "not-allowed",
+    whiteSpace: "nowrap",
+  });
 
   return (
     <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 10, padding: 12, marginBottom: 10 }}>
@@ -1136,14 +1151,19 @@ function GriAdjustPanel({
             </div>
           ))}
         </div>
-        <button type="button" onClick={() => {
-          const deltas = parseDeltas(buyGri);
-          if (Object.keys(deltas).length) onApplyBuying(deltas);
-          setBuyGri(empty());
-        }}
-          style={{ width: "100%", padding: "7px", fontSize: 11, fontWeight: 700, color: "#fff", background: "#2563eb", border: "none", borderRadius: 6, cursor: "pointer" }}>
-          매입 GRI 적용
-        </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button type="button" onClick={() => {
+            const deltas = parseDeltas(buyGri);
+            if (Object.keys(deltas).length) onApplyBuying(deltas);
+            setBuyGri(empty());
+          }}
+            style={{ flex: 1, padding: "7px", fontSize: 11, fontWeight: 700, color: "#fff", background: "#2563eb", border: "none", borderRadius: 6, cursor: "pointer" }}>
+            매입 GRI 적용
+          </button>
+          <button type="button" disabled={!canUndoBuying} onClick={onUndoBuying} style={undoBtnStyle(canUndoBuying)}>
+            되돌리기
+          </button>
+        </div>
       </div>
       <div>
         <div style={{ fontSize: 10, fontWeight: 700, color: "#6b5038", marginBottom: 6 }}>매출 GRI</div>
@@ -1157,14 +1177,19 @@ function GriAdjustPanel({
             </div>
           ))}
         </div>
-        <button type="button" onClick={() => {
-          const deltas = parseDeltas(sellGri);
-          if (Object.keys(deltas).length) onApplySelling(deltas);
-          setSellGri(empty());
-        }}
-          style={{ width: "100%", padding: "7px", fontSize: 11, fontWeight: 700, color: "#fff", background: "#b45309", border: "none", borderRadius: 6, cursor: "pointer" }}>
-          매출 GRI 적용
-        </button>
+        <div style={{ display: "flex", gap: 6 }}>
+          <button type="button" onClick={() => {
+            const deltas = parseDeltas(sellGri);
+            if (Object.keys(deltas).length) onApplySelling(deltas);
+            setSellGri(empty());
+          }}
+            style={{ flex: 1, padding: "7px", fontSize: 11, fontWeight: 700, color: "#fff", background: "#b45309", border: "none", borderRadius: 6, cursor: "pointer" }}>
+            매출 GRI 적용
+          </button>
+          <button type="button" disabled={!canUndoSelling} onClick={onUndoSelling} style={undoBtnStyle(canUndoSelling)}>
+            되돌리기
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -1236,6 +1261,8 @@ export default function App() {
   const [rentalPolM, setRentalPolM] = useState(() => pricingBoot?.rentalPolM ?? {});
   const [rentalPolTs, setRentalPolTs] = useState(() => pricingBoot?.rentalPolTs ?? {});
   const [polCostO, setPolCostO] = useState(() => pricingBoot?.polCostO ?? {});
+  const [griBuyUndo, setGriBuyUndo] = useState(null);
+  const [griSellUndo, setGriSellUndo] = useState(null);
   const [marginTab, setMarginTab] = useState("global");
   const [rentalMarginTab, setRentalMarginTab] = useState("global");
   const [selArea, setSelArea] = useState("");
@@ -1419,6 +1446,7 @@ export default function App() {
 
   const applyBuyingGriBulk = (deltas, rows, carrier, period) => {
     if (!rows?.length || !Object.keys(deltas).length) return;
+    setGriBuyUndo({ carrier, period, polCostO: JSON.parse(JSON.stringify(polCostO)) });
     const nextCosts = buildBuyingGriCosts(polCostO, {
       deltas, rows, carrier, period, carrierRates, fData,
     });
@@ -1431,8 +1459,27 @@ export default function App() {
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
   };
 
+  const undoBuyingGriBulk = () => {
+    if (!griBuyUndo) return;
+    const restored = griBuyUndo.polCostO;
+    setPolCostO(restored);
+    setGriBuyUndo(null);
+    writePricingCache({ ...(readStoredPricingCache() || { v: 1 }), v: 1, polCostO: restored });
+    enqueueSave(async () => {
+      await saveOneSettingWithRetry("pol_costs", JSON.stringify(restored));
+    })
+      .then(() => flashSaveFeedback("success", "✅ 매입 GRI 되돌리기 · 저장 완료"))
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
+  };
+
   const applySellingGriBulk = (deltas, rows, carrier, period) => {
     if (!rows?.length || !Object.keys(deltas).length) return;
+    setGriSellUndo({
+      carrier,
+      period,
+      polM: JSON.parse(JSON.stringify(polM)),
+      polTs: JSON.parse(JSON.stringify(polTs)),
+    });
     const { polM: nextPolM, polTs: nextPolTs } = buildSellingGriMargins(polM, polTs, {
       deltas,
       rows,
@@ -1459,6 +1506,24 @@ export default function App() {
       ]);
     })
       .then(() => flashSaveFeedback("success", "✅ 매출 GRI 적용 · 저장 완료"))
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
+  };
+
+  const undoSellingGriBulk = () => {
+    if (!griSellUndo) return;
+    const { polM: restoredPolM, polTs: restoredPolTs } = griSellUndo;
+    setPolM(restoredPolM);
+    setPolTs(restoredPolTs);
+    setGriSellUndo(null);
+    const cache = readStoredPricingCache() || { v: 1 };
+    writePricingCache({ ...cache, v: 1, polM: restoredPolM, polTs: restoredPolTs });
+    enqueueSave(async () => {
+      await saveSettingsEntries([
+        ["pol_margins", JSON.stringify(restoredPolM)],
+        ["pol_margin_timestamps", JSON.stringify(restoredPolTs)],
+      ]);
+    })
+      .then(() => flashSaveFeedback("success", "✅ 매출 GRI 되돌리기 · 저장 완료"))
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`));
   };
 
@@ -3455,6 +3520,10 @@ export default function App() {
             filterHint={`${gridFilterLabel} · COC/SOC 타입별 금액 입력 후 적용`}
             onApplyBuying={deltas => applyBuyingGriBulk(deltas, griTargetRows, caCr, caPeriod)}
             onApplySelling={deltas => applySellingGriBulk(deltas, griTargetRows, caCr, caPeriod)}
+            canUndoBuying={griBuyUndo?.carrier === caCr && griBuyUndo?.period === caPeriod}
+            canUndoSelling={griSellUndo?.carrier === caCr && griSellUndo?.period === caPeriod}
+            onUndoBuying={undoBuyingGriBulk}
+            onUndoSelling={undoSellingGriBulk}
           />
           <div style={{marginBottom:10,background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:10}}>
             <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8}}>
