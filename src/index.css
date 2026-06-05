@@ -83,6 +83,42 @@
   box-sizing: border-box;
 }
 
+.validity-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.35;
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+.validity-badge--compact {
+  font-size: 9px;
+  padding: 2px 8px;
+}
+.validity-badge--current {
+  color: #166534;
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+}
+.validity-badge--future {
+  color: #b45309;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+}
+.validity-badge--fn {
+  color: #6b7280;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+}
+.carrier-validity-table .validity-badge {
+  max-width: 220px;
+}
+
 .validity-date-inp {
   width: 100%;
   padding: 6px 8px;
