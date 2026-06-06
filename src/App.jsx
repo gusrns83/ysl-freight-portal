@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v29"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v30"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 90000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -1028,7 +1028,9 @@ const flattenRateSnapshot = ({
         RATE_TYPES.forEach(t => {
           const cost = resolveCarrierCostFromStore(polCostO, row.pol, cr, t, period, carrierRates, fData);
           if (cost == null) return;
-          const sell = resolveCarrierEffectiveSell(polCostO, row.pol, cr, t, period, cost, { polM, polMFuture });
+          const sell = resolveCarrierEffectiveSell(polCostO, row.pol, cr, t, period, cost, {
+            polM, polMFuture, adminMode: true,
+          });
           put({
             carrier: cr, area: row.area, pol: row.pol, route: row.pol, rate_type: t, period,
             category: "ocean", cost, sell, margin: sell != null ? sell - cost : null,
@@ -2493,15 +2495,13 @@ function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
   const areaMap = Object.fromEntries((fData || []).map(r => [r.pol, r.area]));
   const batchNote = note || "";
 
-  const pushOcean = (carrier, netRows, marginRows) => {
+  const pushOcean = (carrier, netRows) => {
     Object.entries(netRows || {}).forEach(([pol, rates]) => {
-      const margins = (marginRows || {})[pol] || {};
       RATE_TYPES.forEach(t => {
         if (rates[t] == null) return;
-        const margin = margins[t];
         rows.push({
           carrier, area: areaMap[pol] || "", pol, route: pol, rate_type: t, period,
-          category: "ocean", cost: rates[t], sell: margin != null ? rates[t] + margin : null, margin: margin ?? null,
+          category: "ocean", cost: rates[t], sell: null, margin: null,
           source: "excel_upload", note: batchNote,
         });
       });
@@ -2531,16 +2531,16 @@ function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
   }
 
   if (parsed.format === "DY") {
-    pushOcean("DY", parsed.oceanRows, {});
+    pushOcean("DY", parsed.oceanRows);
     return rows;
   }
 
   if (parsed.format === "YSL") {
-    pushOcean(parsed.carrier, parsed.netRows, parsed.marginRows);
+    pushOcean(parsed.carrier, parsed.netRows);
     return rows;
   }
 
-  pushOcean(parsed.carrier, parsed.netRows, parsed.marginRows);
+  pushOcean(parsed.carrier, parsed.netRows);
   return rows;
 }
 
