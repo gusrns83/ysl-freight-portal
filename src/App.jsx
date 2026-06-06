@@ -2240,31 +2240,76 @@ async function readExcelFile(file) {
 }
 
 function detectSnkColumns(rows) {
+  const pickDataStart = (headerRow, netI) => {
+    const nextRow = cell(rows, headerRow + 1, netI);
+    const tag = String(nextRow ?? "").trim().toUpperCase();
+    return nextRow == null || tag === "COC" || tag === "FILO / COC" ? headerRow + 4 : headerRow + 3;
+  };
+
+  const findAreaPolRow = (fromRow, toRow) => {
+    for (let r2 = fromRow; r2 < toRow; r2++) {
+      const h = (rows[r2] || []).map(c => String(c ?? "").trim().toUpperCase());
+      const areaI = h.indexOf("AREA");
+      const polI = h.findIndex(t => t === "POL" || /^POL\b/.test(t));
+      if (areaI >= 0 && polI >= 0) {
+        let dataStart = r2 + 1;
+        const sizeRow = rows[r2 + 1] || [];
+        const hasSizes = sizeRow.some(c => {
+          const t = String(c ?? "").trim();
+          return t === "20'" || t === "20" || t === "40'" || t === "40";
+        });
+        if (hasSizes) dataStart = r2 + 2;
+        return { areaCol: areaI, polCol: polI, dataStart };
+      }
+    }
+    return null;
+  };
+
   for (let r = 0; r < 7; r++) {
     const vals = [];
-    for (let c = 0; c < 20; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
-    if (vals.includes("NET")) {
+    for (let c = 0; c < 22; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
+    if (vals.includes("NET") && vals.includes("SELL") && vals.includes("PROFIT")) {
       const netI = vals.indexOf("NET");
-      const nextRow = cell(rows, r + 1, netI);
-      const dataStart = nextRow == null || nextRow === "COC" || nextRow === "FILO / COC" ? r + 4 : r + 3;
+      const ap = findAreaPolRow(r + 1, Math.min(r + 5, rows.length));
       return {
-        dataStart,
-        areaCol: 0,
-        polCol: 1,
+        dataStart: ap?.dataStart ?? pickDataStart(r, netI),
+        areaCol: ap?.areaCol ?? 0,
+        polCol: ap?.polCol ?? 1,
         netStart: netI,
       };
     }
   }
+
+  for (let r = 0; r < 10; r++) {
+    const vals = [];
+    for (let c = 0; c < 14; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
+    if (!vals.includes("NET") || vals.includes("SELL") || vals.includes("PROFIT")) continue;
+    const netI = vals.indexOf("NET");
+    const ap = findAreaPolRow(r + 1, Math.min(r + 5, rows.length));
+    if (ap) return { ...ap, netStart: netI };
+  }
+
   for (let r = 0; r < 7; r++) {
     const vals = [];
     for (let c = 0; c < 22; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
-    if (vals.includes("NET")) {
+    if (vals.includes("NET") && vals.includes("SELL") && vals.includes("PROFIT")) {
       const netI = vals.indexOf("NET");
       return { dataStart: 6, areaCol: 1, polCol: 2, netStart: netI };
     }
   }
-  throw new Error("NET 헤더를 찾을 수 없습니다 · POL 스캔 모드로 재시도합니다");
+
+  throw new Error("NET 헤더를 찾을 수 없습니다 · 「Vladivostok 06.01 (업로드용)」 시트를 선택하세요");
 }
+
+const isSnkLegacyTransitSheet = (rows) => {
+  for (let r = 0; r < Math.min(20, rows.length); r++) {
+    const row = rows[r] || [];
+    if (row.some(c => /L\.AREA|POL\s*NAME|POR\s*NAME/i.test(String(c ?? "").replace(/\n/g, " ")))) {
+      return true;
+    }
+  }
+  return false;
+};
 
 function parseSnkSheet(rows) {
   try {
@@ -2303,8 +2348,14 @@ function parseSnkSheet(rows) {
       });
     }
     if (Object.keys(netRows).length) return { netRows, marginRows: {}, skipped, carrier: "SNK" };
-  } catch {
-    /* fallback below */
+  } catch (e) {
+    if (isSnkLegacyTransitSheet(rows)) {
+      throw new Error("구형 Vladivostok/TO RUSSIA 양식입니다 · 「Vladivostok 06.01 (업로드용)」 시트를 선택하세요");
+    }
+    if (e?.message && !/POL 스캔/.test(e.message)) throw e;
+  }
+  if (isSnkLegacyTransitSheet(rows)) {
+    throw new Error("구형 Vladivostok/TO RUSSIA 양식입니다 · 「Vladivostok 06.01 (업로드용)」 시트를 선택하세요");
   }
   return parsePolScanSheet(rows, "SNK");
 }
@@ -2445,8 +2496,12 @@ function suggestSheet(format, sheetNames) {
     if (hit) return hit;
   }
   if (format === "SNK") {
-    const hit = sheetNames.find(s => /06\.01|6\.01|Vladivostok/i.test(s));
-    if (hit) return hit;
+    const upload = sheetNames.find(s => /업로드용|\(upload\)/i.test(s));
+    if (upload) return upload;
+    const dated = sheetNames.find(s => /Vladivostok/i.test(s) && /06\.01|6\.01/.test(s));
+    if (dated) return dated;
+    const vladDated = sheetNames.find(s => /^Vladivostok\s+\d/i.test(s));
+    if (vladDated) return vladDated;
   }
   if (format === "YSL") {
     const cr = format === "YSL" ? null : format;
@@ -2657,7 +2712,7 @@ function previewSummary(parsed, period) {
     };
   }
   const netRows = parsed.netRows || parsed.oceanRows || {};
-  const scanNote = parsed.polScan ? " · POL 스캔" : "";
+  const scanNote = parsed.polScan ? " · POL 스캔 (양식 확인)" : " · NET 컬럼";
   return {
     title: `${parsed.carrier} · ${Object.keys(netRows).length} POL`,
     detail: `POL 기준 매입${scanNote} · 스킵 ${(parsed.skipped || []).length}건`,
@@ -3012,15 +3067,17 @@ export default function App() {
     }
   };
 
-  const refreshExcelPreview = () => {
+  const refreshExcelPreview = (sheetOverride) => {
     if (!excelWorkbook) return;
     try {
-      let sheet = excelSheet;
+      let sheet = sheetOverride ?? excelSheet;
       if (!sheet || !excelWorkbook.sheetNames.includes(sheet)) {
         sheet = excelFormat === "YSL"
           ? suggestYslSheet(excelYslCarrier, excelPeriod, excelWorkbook.sheetNames)
           : suggestSheet(excelFormat, excelWorkbook.sheetNames);
         setExcelSheet(sheet);
+      } else if (sheetOverride && sheetOverride !== excelSheet) {
+        setExcelSheet(sheetOverride);
       }
       const preview = parseExcelWorkbook(excelWorkbook, excelFormat, sheet, excelPeriod, excelYslCarrier);
       setExcelPreview(preview);
@@ -5080,7 +5137,7 @@ export default function App() {
               </label>
             ) : (
               <label style={{ fontSize: 10, color: "#6b7280" }}>시트
-                <select value={excelSheet} onChange={e => { setExcelSheet(e.target.value); if (excelWorkbook) setTimeout(refreshExcelPreview, 0); }} disabled={!excelWorkbook}
+                <select value={excelSheet} onChange={e => { const next = e.target.value; setExcelSheet(next); if (excelWorkbook) refreshExcelPreview(next); }} disabled={!excelWorkbook}
                   style={{ display: "block", width: "100%", marginTop: 4, padding: "8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }}>
                   {(excelWorkbook?.sheetNames || []).map(s => <option key={s} value={s}>{s}</option>)}
                   {!excelWorkbook && <option value="">파일 선택 후</option>}
@@ -5117,7 +5174,7 @@ export default function App() {
 
           {excelFormat === "YSL" && excelWorkbook && (
             <label style={{ fontSize: 10, color: "#6b7280", display: "block", marginBottom: 12 }}>시트
-              <select value={excelSheet} onChange={e => { setExcelSheet(e.target.value); setTimeout(refreshExcelPreview, 0); }}
+              <select value={excelSheet} onChange={e => { const next = e.target.value; setExcelSheet(next); refreshExcelPreview(next); }}
                 style={{ display: "block", width: "100%", marginTop: 4, padding: "8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }}>
                 {excelWorkbook.sheetNames.map(s => <option key={s} value={s}>{s}</option>)}
               </select>
