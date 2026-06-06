@@ -2483,6 +2483,26 @@ function mergePolCostsCarrier(polCostO, netRows, carrier, period) {
   return out;
 }
 
+/** 선사·기간 버킷 전체 제거 (재업로드 시 이전 POL/요율 누적 방지) */
+function clearPolCostsCarrierPeriod(polCostO, carrier, period) {
+  const out = JSON.parse(JSON.stringify(polCostO || {}));
+  Object.entries(out).forEach(([pol, polEntry]) => {
+    const carriers = polEntry?.carrier;
+    if (!carriers?.[carrier]?.[period]) return;
+    const cr = { ...carriers[carrier] };
+    delete cr[period];
+    if (!carrierBucketHasData(cr)) delete carriers[carrier];
+    else carriers[carrier] = cr;
+    if (!Object.keys(carriers).length) delete polEntry.carrier;
+    if (!Object.keys(polEntry).length) delete out[pol];
+  });
+  return out;
+}
+
+function replacePolCostsCarrier(polCostO, netRows, carrier, period) {
+  return mergePolCostsCarrier(clearPolCostsCarrierPeriod(polCostO, carrier, period), netRows, carrier, period);
+}
+
 const carrierBucketHasData = (cr) => {
   if (!cr || typeof cr !== "object") return false;
   if (["current", "future"].some(p => {
@@ -2577,7 +2597,7 @@ function mergePolMarginsMap(polM, marginRows) {
 function buildDyDropRates(existingJson, oceanRows, dropRows, period, carrier = "DY", refPol = "BUSAN") {
   let out = existingJson ? JSON.parse(existingJson) : {};
   if (!out[carrier]) out[carrier] = { current: {}, future: {} };
-  if (!out[carrier][period]) out[carrier][period] = {};
+  out[carrier][period] = {};
 
   const pol = dropRows[refPol] ? refPol : Object.keys(dropRows)[0];
   if (!pol) return out;
@@ -3027,13 +3047,14 @@ export default function App() {
       const baseCosts = pricingSaveRef.current.polCostO ?? polCostO;
 
       if (parsed.format === "RENTAL") {
+        const { rentalRates: clearedRental } = clearRentalPeriodRates(rentalRates, period);
         const patch = buildRentalRatesFromBases(parsed.bases, period);
-        const merged = mergeRentalRatesPatch(rentalRates, patch);
+        const merged = mergeRentalRatesPatch(clearedRental, patch);
         setRentalRates(merged);
         await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(merged));
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
       } else if (parsed.format === "DY") {
-        const nextCosts = mergePolCostsCarrier(baseCosts, parsed.oceanRows, "DY", period);
+        const nextCosts = replacePolCostsCarrier(baseCosts, parsed.oceanRows, "DY", period);
         const nextDrop = buildDyDropRates(
           JSON.stringify(carrierDropRates),
           parsed.oceanRows,
@@ -3049,7 +3070,7 @@ export default function App() {
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
       } else {
         const cr = parsed.carrier;
-        const nextCosts = mergePolCostsCarrier(baseCosts, parsed.netRows, cr, period);
+        const nextCosts = replacePolCostsCarrier(baseCosts, parsed.netRows, cr, period);
         setPolCostO(nextCosts);
         await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
