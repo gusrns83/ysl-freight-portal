@@ -5,8 +5,8 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v30"; // Admin 저장 로직 버전 (배포 확인용)
-const SAVE_UI_MAX_MS = 90000;
+const ADMIN_SAVE_REV = "save-v31"; // Admin 저장 로직 버전 (배포 확인용)
+const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
 const SAVE_LIGHT_TIMEOUT_MS = 30000;
@@ -372,21 +372,18 @@ const postSettingsRows = async (rows, label) => enqueueNetworkWrite(async () => 
 
 const saveSettingsEntries = async (entries) => {
   const light = [];
-  const flushLight = async () => {
-    if (!light.length) return;
-    const chunk = light.splice(0, light.length);
-    await postSettingsRows(chunk, chunk.map(r => r.key).join(", "));
-  };
+  const heavy = [];
   for (const entry of entries) {
-    if (HEAVY_SETTING_KEYS.has(entry[0])) {
-      await flushLight();
-      await saveSettingValue(entry[0], entry[1]);
-      await new Promise(r => setTimeout(r, 300));
-    } else {
-      light.push({ key: entry[0], value: String(entry[1]) });
-    }
+    if (HEAVY_SETTING_KEYS.has(entry[0])) heavy.push(entry);
+    else light.push({ key: entry[0], value: String(entry[1]) });
   }
-  await flushLight();
+  for (const [key, value] of heavy) {
+    await saveOneSettingWithRetry(key, value);
+    await new Promise(r => setTimeout(r, 300));
+  }
+  if (light.length) {
+    await postSettingsRows(light, light.map(r => r.key).join(", "));
+  }
 };
 
 const saveOneSettingWithRetry = (key, value) => saveSettingValue(key, value);
@@ -1112,8 +1109,13 @@ const postRateHistoryRows = async (rows) => {
   if (!rows.length) return 0;
   let sent = 0;
   for (let i = 0; i < rows.length; i += RATE_HISTORY_CHUNK) {
-    await api("rate_history", { method: "POST", body: JSON.stringify(rows.slice(i, i + RATE_HISTORY_CHUNK)) });
-    sent += Math.min(RATE_HISTORY_CHUNK, rows.length - i);
+    try {
+      await api("rate_history", { method: "POST", body: JSON.stringify(rows.slice(i, i + RATE_HISTORY_CHUNK)) });
+      sent += Math.min(RATE_HISTORY_CHUNK, rows.length - i);
+    } catch (e) {
+      console.warn("rate_history chunk skip", e);
+      break;
+    }
   }
   return sent;
 };
@@ -3681,14 +3683,17 @@ export default function App() {
   };
 
   const runSave = async (successLabel, fn) => {
-    if (saveBusy) return;
+    if (saveBusy) {
+      flashSaveFeedback("error", "다른 저장이 진행 중입니다. 완료 후 다시 시도하세요.");
+      return;
+    }
     setSaveBusy(true);
     setSaveFeedback({ type: null, message: "" });
     try {
       await withTimeout(
         enqueueSave(fn),
         SAVE_UI_MAX_MS,
-        "저장 시간 초과 (90초) · 네트워크 확인 후 💾 저장 재시도",
+        "저장 시간 초과 (3분) · 네트워크 확인 후 💾 저장 재시도",
       );
       writePricingCache({
         ...buildPricingCache(),
@@ -3958,15 +3963,30 @@ export default function App() {
         const cacheCosts = cached?.polCostO;
         const serverCosts = serverSnap.polCostO || {};
         let mergedCosts = mergePolCostODeep(serverCosts, cacheCosts || {});
-        const cacheMargins = cached?.polM;
+        let cacheMargins = cached?.polM;
         const serverMargins = serverSnap.polM || {};
-        const cacheMarginsFuture = cached?.polMFuture;
+        let cacheMarginsFuture = cached?.polMFuture;
         const serverMarginsFuture = serverSnap.polMFuture || {};
         const serverMarginsEmpty = !Object.keys(serverMargins).length;
         const serverMarginsFutureEmpty = !Object.keys(serverMarginsFuture).length;
         const cacheWouldRestoreMargins =
           (serverMarginsEmpty && cacheMargins && Object.keys(cacheMargins).length > 0)
           || (serverMarginsFutureEmpty && cacheMarginsFuture && Object.keys(cacheMarginsFuture).length > 0);
+
+        if (cacheWouldRestoreMargins && cached) {
+          writePricingCache({
+            ...cached,
+            v: 1,
+            polM: {},
+            polMFuture: {},
+            polTs: {},
+            polTsFuture: {},
+            serverSyncedAt: Date.now(),
+          });
+          cacheMargins = {};
+          cacheMarginsFuture = {};
+        }
+
         const pendingSellPurge = needsSellPurge();
         if (pendingSellPurge || !polCostOHasSellOverrides(serverCosts)) {
           mergedCosts = stripSellFromPolCosts(mergedCosts);
@@ -3976,44 +3996,45 @@ export default function App() {
         const marginsDiffer = cacheMargins && JSON.stringify(cacheMargins) !== JSON.stringify(serverMargins);
         const marginsFutureDiffer = cacheMarginsFuture && JSON.stringify(cacheMarginsFuture) !== JSON.stringify(serverMarginsFuture);
         const cacheNewer = (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
-        const pendingCostResync = pendingSellPurge || cacheWouldRestoreMargins
+        const pendingCostResync = pendingSellPurge
           || (cacheNewer && (costsDiffer || mergedDiffersFromServer));
-        const pendingMarginResync = !pendingSellPurge && !cacheWouldRestoreMargins
+        const pendingMarginCacheFix = cacheWouldRestoreMargins;
+        const pendingMarginResync = !pendingSellPurge && !pendingMarginCacheFix
           && (marginsDiffer || marginsFutureDiffer) && cacheNewer;
 
         priority.pol_costs = serializePolCosts(mergedCosts);
-        if (pendingSellPurge || cacheWouldRestoreMargins || serverMarginsEmpty) {
+        if (pendingSellPurge || pendingMarginCacheFix || serverMarginsEmpty) {
           priority.pol_margins = "{}";
         } else if (pendingMarginResync && cacheMargins) {
           priority.pol_margins = JSON.stringify(cacheMargins);
         }
-        if (pendingSellPurge || cacheWouldRestoreMargins || serverMarginsFutureEmpty) {
+        if (pendingSellPurge || pendingMarginCacheFix || serverMarginsFutureEmpty) {
           priority.pol_margins_future = "{}";
         } else if (pendingMarginResync && cacheMarginsFuture) {
           priority.pol_margins_future = JSON.stringify(cacheMarginsFuture);
         }
-        if (pendingSellPurge || cacheWouldRestoreMargins) {
+        if (pendingSellPurge || pendingMarginCacheFix) {
           priority.pol_margin_timestamps = "{}";
           priority.pol_margin_timestamps_future = "{}";
         }
 
-        applySettingsBundle(priority, { markServerSynced: !pendingCostResync && !pendingMarginResync });
+        applySettingsBundle(priority, { markServerSynced: !pendingCostResync && !pendingMarginResync && !pendingMarginCacheFix });
+        if (pendingSellPurge) markSellPurgeDone();
 
-        if (pendingCostResync || pendingMarginResync || pendingSellPurge || cacheWouldRestoreMargins) {
+        if (pendingCostResync || pendingMarginResync || pendingMarginCacheFix) {
           skipAutoSaveRef.current = true;
           enqueueNetworkWrite(async () => {
             try {
-              if (pendingCostResync || pendingSellPurge) {
+              if (pendingCostResync) {
                 await saveOneSettingWithRetry("pol_costs", serializePolCosts(mergedCosts));
               }
-              if (pendingSellPurge || cacheWouldRestoreMargins) {
+              if (pendingMarginCacheFix || pendingSellPurge) {
                 await saveSettingsEntries([
                   ["pol_margins", "{}"],
                   ["pol_margins_future", "{}"],
                   ["pol_margin_timestamps", "{}"],
                   ["pol_margin_timestamps_future", "{}"],
                 ]);
-                markSellPurgeDone();
               } else if (pendingMarginResync) {
                 await saveSettingsEntries([
                   ...(cacheMargins ? [["pol_margins", JSON.stringify(cacheMargins)]] : []),
@@ -4024,11 +4045,12 @@ export default function App() {
               }
               writePricingCache({
                 ...(readStoredPricingCache() || {}),
+                v: 1,
                 polCostO: mergedCosts,
-                polM: (pendingSellPurge || cacheWouldRestoreMargins || serverMarginsEmpty) ? {} : (readStoredPricingCache()?.polM || {}),
-                polMFuture: (pendingSellPurge || cacheWouldRestoreMargins || serverMarginsFutureEmpty) ? {} : (readStoredPricingCache()?.polMFuture || {}),
-                polTs: (pendingSellPurge || cacheWouldRestoreMargins) ? {} : (readStoredPricingCache()?.polTs || {}),
-                polTsFuture: (pendingSellPurge || cacheWouldRestoreMargins) ? {} : (readStoredPricingCache()?.polTsFuture || {}),
+                polM: {},
+                polMFuture: {},
+                polTs: {},
+                polTsFuture: {},
                 serverSyncedAt: Date.now(),
                 pricingSavedAt: Date.now(),
               });
@@ -4568,11 +4590,11 @@ export default function App() {
     const entries = getCarrierSaveEntries();
     const light = entries.filter(([k]) => !HEAVY_SETTING_KEYS.has(k));
     const heavy = entries.filter(([k]) => HEAVY_SETTING_KEYS.has(k));
-    if (light.length) {
-      await postSettingsRows(light.map(([key, value]) => ({ key, value: String(value) })), "carrier settings");
-    }
     for (const [key, value] of heavy) {
       await saveOneSettingWithRetry(key, value);
+    }
+    if (light.length) {
+      await postSettingsRows(light.map(([key, value]) => ({ key, value: String(value) })), "carrier settings");
     }
   });
 
