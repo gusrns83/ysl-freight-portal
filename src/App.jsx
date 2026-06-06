@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 
 const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
@@ -1987,6 +1987,24 @@ const UPLOAD_FORMATS = [
   { id: "RENTAL", label: "컨테이너 Rental", hint: "극동 컨테이너 운임 · POL별 base" },
 ];
 
+const excelUploadCarrierKey = (format, yslCarrier, parsed) => {
+  if (format === "RENTAL" || parsed?.format === "RENTAL") return "RENTAL";
+  if (format === "YSL" || parsed?.format === "YSL") return parsed?.carrier || yslCarrier;
+  return parsed?.carrier || format;
+};
+
+const LEGACY_VALIDITY_KEY = { SNK: "validity_snk", DY: "validity_dy", CK: "validity_ck", RENTAL: "validity_rental" };
+
+const mergeUploadValidity = (validityInfo, carrierKey, period, draft) => {
+  const entry = normalizeValidityCarrier(validityInfo[carrierKey] || {});
+  const slot = normalizeValiditySlot(draft);
+  const updated = { ...entry, [period]: slot };
+  if (period === "current" && slot.till && !updated.future?.furtherNotice) {
+    updated.future = { ...updated.future, from: syncFromAfterTill(slot.till, updated.future?.from) };
+  }
+  return { ...validityInfo, [carrierKey]: updated };
+};
+
 const num = (v) => {
   if (v == null || v === "" || v === "-") return null;
   const s = String(v).trim().replace(/,/g, "");
@@ -2688,6 +2706,8 @@ export default function App() {
   const [excelUploading, setExcelUploading] = useState(false);
   const [excelMsg, setExcelMsg] = useState("");
   const [excelDragOver, setExcelDragOver] = useState(false);
+  const [excelValidityDraft, setExcelValidityDraft] = useState(defaultValiditySlot);
+  const [excelSaveValidity, setExcelSaveValidity] = useState(true);
   const rateHistoryBaselineRef = useRef(null);
   const [rhRows, setRhRows] = useState([]);
   const [rhLoading, setRhLoading] = useState(false);
@@ -2903,6 +2923,20 @@ export default function App() {
         } catch (e) {
           console.warn("Rate History 기록 생략 (매입 저장은 완료됨):", e);
         }
+      }
+
+      if (excelSaveValidity) {
+        const carrierKey = excelUploadCarrierKey(excelFormat, excelYslCarrier, parsed);
+        const baseValidity = pricingSaveRef.current.validityInfo ?? validityInfo;
+        const nextValidityInfo = mergeUploadValidity(baseValidity, carrierKey, period, excelValidityDraft);
+        setValidityInfo(nextValidityInfo);
+        pricingSaveRef.current = { ...pricingSaveRef.current, validityInfo: nextValidityInfo };
+        const validitySaves = [["validity_info_json", JSON.stringify(nextValidityInfo)]];
+        const legacyKey = LEGACY_VALIDITY_KEY[carrierKey];
+        if (legacyKey) {
+          validitySaves.push([legacyKey, formatValiditySlotLabel(nextValidityInfo[carrierKey]?.current)]);
+        }
+        await saveSettingsEntries(validitySaves);
       }
 
       writePricingCache({
@@ -3541,25 +3575,47 @@ export default function App() {
 
   const rentalType = (si) => (si === 0 ? "r20" : "r40");
 
+  const patchValiditySlot = (entry, period, field, value) => {
+    const slot = { ...normalizeValiditySlot(entry[period]) };
+    if (field === "furtherNotice") {
+      slot.furtherNotice = !!value;
+      if (slot.furtherNotice) slot.till = "";
+    } else {
+      slot[field] = value;
+      if (field === "till") slot.furtherNotice = false;
+      if (period === "current" && field === "till" && value) {
+        const fut = { ...entry.future };
+        if (!fut.furtherNotice) {
+          entry.future = { ...fut, from: syncFromAfterTill(value, fut.from) };
+        }
+      }
+    }
+    entry[period] = slot;
+    return entry;
+  };
+
   const updateValiditySlot = (carrier, period, field, value) => {
     setValidityInfo(p => {
       const entry = normalizeValidityCarrier(p[carrier] || {});
-      const slot = { ...entry[period] };
-      if (field === "furtherNotice") {
-        slot.furtherNotice = !!value;
-        if (slot.furtherNotice) slot.till = "";
-      } else {
-        slot[field] = value;
-        if (field === "till") slot.furtherNotice = false;
-        if (period === "current" && field === "till" && value) {
-          const fut = { ...entry.future };
-          if (!fut.furtherNotice) {
-            entry.future = { ...fut, from: syncFromAfterTill(value, fut.from) };
-          }
-        }
-      }
-      entry[period] = slot;
+      patchValiditySlot(entry, period, field, value);
       return { ...p, [carrier]: entry };
+    });
+  };
+
+  const syncExcelValidityDraft = useCallback(() => {
+    const key = excelUploadCarrierKey(excelFormat, excelYslCarrier);
+    setExcelValidityDraft(normalizeValiditySlot(validityInfo[key]?.[excelPeriod]));
+  }, [excelFormat, excelPeriod, excelYslCarrier, validityInfo]);
+
+  useEffect(() => {
+    if (showExcelUploadAdmin) syncExcelValidityDraft();
+  }, [showExcelUploadAdmin, syncExcelValidityDraft]);
+
+  const updateExcelValidityDraft = (_carrier, period, field, value) => {
+    setExcelValidityDraft(prev => {
+      const entry = normalizeValidityCarrier({ [period]: prev });
+      patchValiditySlot(entry, period, field, value);
+      return entry[period];
     });
   };
 
@@ -4691,6 +4747,9 @@ export default function App() {
   if (showExcelUploadAdmin && isAdmin) {
     const fmt = UPLOAD_FORMATS.find(f => f.id === excelFormat);
     const sum = excelPreview ? previewSummary(excelPreview, excelPeriod) : null;
+    const uploadCarrierKey = excelUploadCarrierKey(excelFormat, excelYslCarrier, excelPreview);
+    const uploadCarrierLabel = CN_KR[uploadCarrierKey] || uploadCarrierKey;
+    const uploadValidityPreview = formatValiditySlotLabel(excelValidityDraft);
     return (
       <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: ff }}>
         {adminSaveToastEl}
@@ -4745,6 +4804,32 @@ export default function App() {
                   {!excelWorkbook && <option value="">파일 선택 후</option>}
                 </select>
               </label>
+            )}
+          </div>
+
+          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "#0f766e" }}>
+                Validity · {uploadCarrierLabel} · {excelPeriod === "future" ? "향후 운임" : "현재 운임"}
+              </div>
+              <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#6b7280", cursor: "pointer" }}>
+                <input type="checkbox" checked={excelSaveValidity} onChange={e => setExcelSaveValidity(e.target.checked)} />
+                업로드 시 저장
+              </label>
+            </div>
+            <ValidityPeriodFields
+              carrierKey={uploadCarrierKey}
+              period={excelPeriod}
+              periodLabel={excelPeriod === "future" ? "향후 (From ~ Till)" : "현재 (From ~ Till)"}
+              compact
+              validityInfo={{ [uploadCarrierKey]: { [excelPeriod]: excelValidityDraft } }}
+              onUpdate={updateExcelValidityDraft}
+              futureFromMin={excelPeriod === "future" ? getFutureFromMinDate(uploadCarrierKey) : undefined}
+            />
+            {uploadValidityPreview && (
+              <div style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}>
+                표시: {uploadValidityPreview}
+              </div>
             )}
           </div>
 
