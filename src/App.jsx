@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v25"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v28"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 90000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -246,6 +246,42 @@ const compactPolCostO = (polCostO) => {
     if (Object.keys(next).length) out[pol] = next;
   });
   return out;
+};
+
+/** pol_costs 선사 버킷에 저장된 sell(매출) 제거 — 매입만 유지 */
+const stripSellFromPolCosts = (polCostO) => {
+  if (!polCostO || typeof polCostO !== "object") return polCostO || {};
+  const out = {};
+  Object.entries(polCostO).forEach(([pol, data]) => {
+    if (!data || typeof data !== "object") return;
+    const next = { ...data };
+    if (data.carrier) {
+      const carrier = {};
+      Object.entries(data.carrier).forEach(([cr, crData]) => {
+        if (!crData || typeof crData !== "object") return;
+        const nextCr = { ...crData };
+        ["current", "future"].forEach(period => {
+          if (!nextCr[period] || typeof nextCr[period] !== "object") return;
+          const bucket = { ...nextCr[period] };
+          delete bucket.sell;
+          nextCr[period] = bucket;
+        });
+        carrier[cr] = nextCr;
+      });
+      next.carrier = carrier;
+    }
+    out[pol] = next;
+  });
+  return out;
+};
+
+const SELL_PURGE_REV = "v1";
+const needsSellPurge = () => {
+  try { return localStorage.getItem("ysl_sell_purge") !== SELL_PURGE_REV; }
+  catch { return false; }
+};
+const markSellPurgeDone = () => {
+  try { localStorage.setItem("ysl_sell_purge", SELL_PURGE_REV); } catch {}
 };
 
 const serializePolCosts = (polCostO) => JSON.stringify(compactPolCostO(polCostO));
@@ -1940,10 +1976,10 @@ const PDF_DROP = {
 };
 
 const UPLOAD_FORMATS = [
-  { id: "SNK", label: "장금상선 (SKR-YSL)", hint: "NET/SELL/PROFIT 시트 · Vladivostok 등" },
-  { id: "DY", label: "동영 (Fishery Import)", hint: "Import 시트 · 해상 + Drop off" },
-  { id: "CK", label: "천경 (CK Line)", hint: "첫 시트 · COC/SOC 열" },
-  { id: "YSL", label: "YSL 관리양식", hint: "SNK/DY/CK 선사 시트 · NET(C~F)" },
+  { id: "SNK", label: "장금상선 (SKR-YSL)", hint: "POL 이름 기준 매칭 · NET(매입)만" },
+  { id: "DY", label: "동영 (Fishery Import)", hint: "POL 기준 · Import 시트 · 해상+Drop" },
+  { id: "CK", label: "천경 (CK Line)", hint: "POL 기준 · COC/SOC 열 (매입만)" },
+  { id: "YSL", label: "YSL 관리양식", hint: "포털 POL 목록 · NET(C~F) 매입만" },
   { id: "RENTAL", label: "컨테이너 Rental", hint: "극동 컨테이너 운임 · POL별 base" },
 ];
 
@@ -1964,13 +2000,122 @@ const cell = (rows, r, c) => {
 
 const normalizePol = (raw) => String(raw).trim().replace(/\s+/g, " ").toUpperCase();
 
-const expandSnkPol = (name) => {
-  const key = String(name).trim().toUpperCase();
-  if (SNK_POL_EXPAND[key]) return SNK_POL_EXPAND[key];
-  return [key];
-};
-
 const reSkipSnk = (name) => /^(CK LINE|SC NUMBER)/i.test(name);
+
+const polCompact = (s) => normalizePol(s).replace(/[^A-Z0-9]/g, "");
+
+const ciPolMap = (obj) => Object.fromEntries(
+  Object.entries(obj).map(([k, v]) => [normalizePol(k), v]),
+);
+const DY_POL_MAP_CI = ciPolMap(DY_POL_MAP);
+const CK_POL_MAP_CI = ciPolMap(CK_POL_MAP);
+
+/** Excel POL명 → 포털 POL 목록 (선사별 별칭·그룹 확장 포함) */
+function resolveExcelPolList(rawName, carrier) {
+  const key = normalizePol(rawName);
+  if (!key || reSkipSnk(key)) return [];
+
+  const fromMap = (mapVal) => {
+    if (mapVal === null || mapVal === undefined) return [];
+    if (Array.isArray(mapVal)) return mapVal.filter(p => APP_POLS.has(p));
+    if (typeof mapVal === "string" && APP_POLS.has(mapVal)) return [mapVal];
+    return [];
+  };
+
+  if (carrier === "SNK" && SNK_POL_EXPAND[key]) return fromMap(SNK_POL_EXPAND[key]);
+  if (carrier === "DY" && DY_POL_MAP_CI[key] !== undefined) return fromMap(DY_POL_MAP_CI[key]);
+  if (carrier === "CK" && CK_POL_MAP_CI[key] !== undefined) return fromMap(CK_POL_MAP_CI[key]);
+
+  if (SNK_POL_EXPAND[key]) return fromMap(SNK_POL_EXPAND[key]);
+  if (APP_POLS.has(key)) return [key];
+
+  const compact = polCompact(key);
+  if (!compact) return [];
+  for (const pol of APP_POLS) {
+    if (polCompact(pol) === compact) return [pol];
+  }
+  return [];
+}
+
+const expandSnkPol = (name) => resolveExcelPolList(name, "SNK");
+
+const ratesFromCols = (rows, r, cols) => Object.fromEntries(
+  RATE_TYPES.map((t, i) => [t, num(cell(rows, r, cols[i]))]).filter(([, v]) => v != null),
+);
+
+/** 헤더·행 스캔으로 POL + 4운임 열 자동 탐지 (선사 양식 fallback) */
+function parsePolScanSheet(rows, carrier) {
+  const netRows = {};
+  const skipped = [];
+  let polCol = -1;
+  let rateCols = null;
+  let dataStart = 0;
+
+  for (let r = 0; r < Math.min(15, rows.length); r++) {
+    const headers = (rows[r] || []).map(c => String(c ?? "").trim().toUpperCase());
+    const polI = headers.findIndex(h => /^(POL|PORT|ORIGIN|LOADING)$/.test(h) || /^POL\b/.test(h));
+    const netI = headers.indexOf("NET");
+    if (polI >= 0 && netI >= 0) {
+      polCol = polI;
+      rateCols = [netI, netI + 1, netI + 2, netI + 3];
+      dataStart = r + 1;
+      break;
+    }
+    const c20 = headers.findIndex(h => /COC.*20|20.*COC|^C20$/.test(h.replace(/\s/g, "")));
+    if (polI >= 0 && c20 >= 0) {
+      polCol = polI;
+      rateCols = [c20, c20 + 1, c20 + 2, c20 + 3];
+      dataStart = r + 1;
+      break;
+    }
+  }
+
+  const applyRates = (portals, rates, rawLabel) => {
+    if (!Object.keys(rates).length) return false;
+    let mapped = false;
+    portals.forEach(pol => {
+      mapped = true;
+      netRows[pol] = { ...(netRows[pol] || {}), ...rates };
+    });
+    if (!mapped && rawLabel) skipped.push(rawLabel);
+    return mapped;
+  };
+
+  if (polCol >= 0 && rateCols) {
+    for (let r = dataStart; r < rows.length; r++) {
+      const raw = cell(rows, r, polCol);
+      if (raw == null || !String(raw).trim()) continue;
+      const name = String(raw).trim();
+      if (/^(remark|note|area|\*|-)/i.test(name)) continue;
+      const rates = ratesFromCols(rows, r, rateCols);
+      const portals = resolveExcelPolList(name, carrier);
+      if (!portals.length) { skipped.push(name); continue; }
+      applyRates(portals, rates, name);
+    }
+  } else {
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r] || [];
+      for (let c = 0; c < Math.min(row.length, 10); c++) {
+        const raw = cell(rows, r, c);
+        if (raw == null || !String(raw).trim()) continue;
+        const portals = resolveExcelPolList(raw, carrier);
+        if (!portals.length) continue;
+        const nums = [];
+        for (let cc = c + 1; cc < row.length && nums.length < 4; cc++) {
+          const v = num(cell(rows, r, cc));
+          if (v != null) nums.push(v);
+        }
+        if (!nums.length) continue;
+        const rates = {};
+        RATE_TYPES.forEach((t, i) => { if (nums[i] != null) rates[t] = nums[i]; });
+        applyRates(portals, rates, String(raw).trim());
+        break;
+      }
+    }
+  }
+
+  return { netRows, marginRows: {}, skipped, carrier, polScan: true };
+}
 
 async function readExcelFile(file) {
   const XLSX = await loadXlsx();
@@ -1987,9 +2132,8 @@ function detectSnkColumns(rows) {
   for (let r = 0; r < 7; r++) {
     const vals = [];
     for (let c = 0; c < 20; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
-    if (vals.includes("NET") && vals.includes("SELL") && vals.includes("PROFIT")) {
+    if (vals.includes("NET")) {
       const netI = vals.indexOf("NET");
-      const profitI = vals.indexOf("PROFIT");
       const nextRow = cell(rows, r + 1, netI);
       const dataStart = nextRow == null || nextRow === "COC" || nextRow === "FILO / COC" ? r + 4 : r + 3;
       return {
@@ -1997,75 +2141,66 @@ function detectSnkColumns(rows) {
         areaCol: 0,
         polCol: 1,
         netStart: netI,
-        profitStart: profitI,
       };
     }
   }
   for (let r = 0; r < 7; r++) {
     const vals = [];
     for (let c = 0; c < 22; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
-    if (vals.includes("NET") && vals.includes("SELL") && vals.includes("PROFIT")) {
+    if (vals.includes("NET")) {
       const netI = vals.indexOf("NET");
-      const profitI = vals.indexOf("PROFIT");
-      return { dataStart: 6, areaCol: 1, polCol: 2, netStart: netI, profitStart: profitI };
+      return { dataStart: 6, areaCol: 1, polCol: 2, netStart: netI };
     }
   }
-  throw new Error("NET/SELL/PROFIT 헤더를 찾을 수 없습니다 (장금상선 양식 확인)");
+  throw new Error("NET 헤더를 찾을 수 없습니다 · POL 스캔 모드로 재시도합니다");
 }
 
 function parseSnkSheet(rows) {
-  const cols = detectSnkColumns(rows);
-  const netRows = {};
-  const marginRows = {};
-  const skipped = [];
-  let currentArea = null;
+  try {
+    const cols = detectSnkColumns(rows);
+    const netRows = {};
+    const skipped = [];
+    let currentArea = null;
 
-  for (let r = cols.dataStart; r < rows.length; r++) {
-    const areaCell = cell(rows, r, cols.areaCol);
-    if (areaCell != null && String(areaCell).trim()) currentArea = String(areaCell).trim();
+    for (let r = cols.dataStart; r < rows.length; r++) {
+      const areaCell = cell(rows, r, cols.areaCol);
+      if (areaCell != null && String(areaCell).trim()) currentArea = String(areaCell).trim();
 
-    let polName = cell(rows, r, cols.polCol);
-    if (polName != null && String(polName).trim()) {
-      polName = String(polName).trim();
-    } else if (currentArea && currentArea.toUpperCase() === "SINGAPORE") {
-      polName = "SINGAPORE";
-    } else continue;
+      let polName = cell(rows, r, cols.polCol);
+      if (polName != null && String(polName).trim()) {
+        polName = String(polName).trim();
+      } else if (currentArea && currentArea.toUpperCase() === "SINGAPORE") {
+        polName = "SINGAPORE";
+      } else continue;
 
-    if (reSkipSnk(polName)) continue;
+      if (reSkipSnk(polName)) continue;
 
-    const net = {
-      coc20: num(cell(rows, r, cols.netStart)),
-      coc40: num(cell(rows, r, cols.netStart + 1)),
-      soc20: num(cell(rows, r, cols.netStart + 2)),
-      soc40: num(cell(rows, r, cols.netStart + 3)),
-    };
-    const profit = {
-      coc20: num(cell(rows, r, cols.profitStart)),
-      coc40: num(cell(rows, r, cols.profitStart + 1)),
-      soc20: num(cell(rows, r, cols.profitStart + 2)),
-      soc40: num(cell(rows, r, cols.profitStart + 3)),
-    };
+      const net = {
+        coc20: num(cell(rows, r, cols.netStart)),
+        coc40: num(cell(rows, r, cols.netStart + 1)),
+        soc20: num(cell(rows, r, cols.netStart + 2)),
+        soc40: num(cell(rows, r, cols.netStart + 3)),
+      };
 
-    if (RATE_TYPES.every(t => net[t] == null)) continue;
+      if (RATE_TYPES.every(t => net[t] == null)) continue;
 
-    let mapped = false;
-    for (const portal of expandSnkPol(polName)) {
-      if (!APP_POLS.has(portal)) continue;
-      mapped = true;
+      const portals = resolveExcelPolList(polName, "SNK");
+      if (!portals.length) { skipped.push(polName); continue; }
       const costs = Object.fromEntries(RATE_TYPES.filter(t => net[t] != null).map(t => [t, net[t]]));
-      if (Object.keys(costs).length) netRows[portal] = costs;
-      const margins = Object.fromEntries(RATE_TYPES.filter(t => profit[t] != null).map(t => [t, profit[t]]));
-      if (Object.keys(margins).length) marginRows[portal] = margins;
+      portals.forEach(portal => {
+        if (Object.keys(costs).length) netRows[portal] = costs;
+      });
     }
-    if (!mapped) skipped.push(polName);
+    if (Object.keys(netRows).length) return { netRows, marginRows: {}, skipped, carrier: "SNK" };
+  } catch {
+    /* fallback below */
   }
-  return { netRows, marginRows, skipped, carrier: "SNK" };
+  return parsePolScanSheet(rows, "SNK");
 }
 
 function mapDyPol(raw) {
-  const key = normalizePol(raw);
-  if (DY_POL_MAP[key]) return DY_POL_MAP[key];
-  return APP_POLS.has(key) ? key : null;
+  const list = resolveExcelPolList(raw, "DY");
+  return list[0] || null;
 }
 
 function parseDySheet(rows) {
@@ -2082,7 +2217,7 @@ function parseDySheet(rows) {
     if (!name || /^(remark|note|\*|-)/i.test(name)) continue;
 
     const portal = mapDyPol(name);
-    if (portal == null || !APP_POLS.has(portal)) {
+    if (portal == null) {
       skipped.push(name);
       continue;
     }
@@ -2108,7 +2243,11 @@ function parseDySheet(rows) {
     if (Object.keys(nsb).length) drop.nsb = nsb;
     if (Object.keys(drop).length) dropRows[portal] = drop;
   }
-  return { oceanRows, dropRows, skipped, carrier: "DY" };
+  if (Object.keys(oceanRows).length) {
+    return { oceanRows, dropRows, skipped, carrier: "DY" };
+  }
+  const scanned = parsePolScanSheet(rows, "DY");
+  return { oceanRows: scanned.netRows, dropRows: {}, skipped: scanned.skipped, carrier: "DY", polScan: true };
 }
 
 function parseCkSheet(rows) {
@@ -2121,13 +2260,9 @@ function parseCkSheet(rows) {
     const name = String(raw).trim();
     if (!name || /^(remark|note|\*|-)/i.test(name)) continue;
 
-    const portal = CK_POL_MAP[name];
-    if (portal == null) {
-      if (!(name in CK_POL_MAP)) skipped.push(name);
-      continue;
-    }
-    if (!APP_POLS.has(portal)) {
-      skipped.push(`${name} -> ${portal}`);
+    const portals = resolveExcelPolList(name, "CK");
+    if (!portals.length) {
+      skipped.push(name);
       continue;
     }
 
@@ -2139,23 +2274,26 @@ function parseCkSheet(rows) {
         soc40: num(cell(rows, r, 14)),
       }).filter(([, v]) => v != null),
     );
-    if (Object.keys(rates).length) netRows[portal] = rates;
+    if (Object.keys(rates).length) {
+      portals.forEach(portal => { netRows[portal] = rates; });
+    }
   }
-  return { netRows, marginRows: {}, skipped, carrier: "CK" };
+  if (Object.keys(netRows).length) {
+    return { netRows, marginRows: {}, skipped, carrier: "CK" };
+  }
+  return parsePolScanSheet(rows, "CK");
 }
 
 function parseYslCarrierSheet(rows, carrier) {
   const netRows = {};
-  const sellRows = {};
-  const marginRows = {};
   const skipped = [];
   const DATA_START = 10;
 
   for (let r = DATA_START; r < rows.length; r++) {
     const pol = cell(rows, r, 1);
     if (pol == null || !String(pol).trim()) continue;
-    const portal = String(pol).trim().toUpperCase();
-    if (!APP_POLS.has(portal)) {
+    const portals = resolveExcelPolList(pol, carrier);
+    if (!portals.length) {
       skipped.push(String(pol));
       continue;
     }
@@ -2165,24 +2303,14 @@ function parseYslCarrierSheet(rows, carrier) {
       soc20: num(cell(rows, r, 4)),
       soc40: num(cell(rows, r, 5)),
     };
-    const sell = {
-      coc20: num(cell(rows, r, 6)),
-      coc40: num(cell(rows, r, 7)),
-      soc20: num(cell(rows, r, 8)),
-      soc40: num(cell(rows, r, 9)),
-    };
     if (RATE_TYPES.every(t => net[t] == null)) continue;
-    netRows[portal] = Object.fromEntries(RATE_TYPES.filter(t => net[t] != null).map(t => [t, net[t]]));
-    const sells = Object.fromEntries(RATE_TYPES.filter(t => sell[t] != null).map(t => [t, sell[t]]));
-    if (Object.keys(sells).length) sellRows[portal] = sells;
-    RATE_TYPES.forEach(t => {
-      if (net[t] != null && sell[t] != null) {
-        if (!marginRows[portal]) marginRows[portal] = {};
-        marginRows[portal][t] = sell[t] - net[t];
-      }
-    });
+    const costs = Object.fromEntries(RATE_TYPES.filter(t => net[t] != null).map(t => [t, net[t]]));
+    portals.forEach(portal => { netRows[portal] = costs; });
   }
-  return { netRows, sellRows, marginRows, skipped, carrier };
+  if (Object.keys(netRows).length) {
+    return { netRows, sellRows: {}, marginRows: {}, skipped, carrier };
+  }
+  return parsePolScanSheet(rows, carrier);
 }
 
 function parseRentalSheet(rows) {
@@ -2352,10 +2480,10 @@ function previewSummary(parsed, period) {
     };
   }
   const netRows = parsed.netRows || parsed.oceanRows || {};
-  const marginCount = Object.keys(parsed.marginRows || {}).length;
+  const scanNote = parsed.polScan ? " · POL 스캔" : "";
   return {
     title: `${parsed.carrier} · ${Object.keys(netRows).length} POL`,
-    detail: `마진 POL ${marginCount} · 스킵 ${(parsed.skipped || []).length}건`,
+    detail: `POL 기준 매입${scanNote} · 스킵 ${(parsed.skipped || []).length}건`,
     sample: Object.entries(netRows).slice(0, 3),
   };
 }
@@ -2668,6 +2796,11 @@ export default function App() {
     const rows = workbook.sheets[sheet];
     if (!rows?.length) throw new Error(`시트 "${sheet}" 가 비어 있습니다`);
     const parsed = parseByFormat(format, rows, { carrier: yslCarrier });
+    const polCount = Object.keys(parsed.netRows || parsed.oceanRows || parsed.bases || {}).length;
+    if (format !== "RENTAL" && polCount === 0) {
+      const skipped = (parsed.skipped || []).slice(0, 5).join(", ");
+      throw new Error(`포털 POL과 매칭된 행이 없습니다${skipped ? ` · 예: ${skipped}` : ""}`);
+    }
     return { ...parsed, period, fileName: workbook.fileName, sheet };
   };
 
@@ -2751,55 +2884,12 @@ export default function App() {
           ["carrier_drop_rates_json", JSON.stringify(nextDrop)],
         ]);
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
-      } else if (parsed.format === "YSL") {
-        const cr = parsed.carrier;
-        let nextCosts = mergePolCostsWithSells(
-          polCostO, parsed.netRows, parsed.sellRows || {}, cr, period,
-        );
-        let nextPolM = polM;
-        if (Object.keys(parsed.marginRows || {}).length) {
-          nextPolM = mergePolMarginsMap(polM, parsed.marginRows);
-          setPolM(nextPolM);
-          const ts = marginNowTs();
-          const nextPolTs = { ...polTs };
-          Object.keys(parsed.marginRows).forEach(pol => {
-            nextPolTs[pol] = { ...(nextPolTs[pol] || {}), ...Object.fromEntries(RATE_TYPES.map(t => [t, ts])) };
-          });
-          setPolTs(nextPolTs);
-          await saveSettingsEntries([
-            ["pol_costs", serializePolCosts(nextCosts)],
-            ["pol_margins", JSON.stringify(nextPolM)],
-            ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
-          ]);
-        } else {
-          await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
-        }
-        setPolCostO(nextCosts);
-        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, polM: nextPolM };
       } else {
         const cr = parsed.carrier;
         const nextCosts = mergePolCostsCarrier(polCostO, parsed.netRows, cr, period);
-        let nextPolM = polM;
-        let nextPolTs = polTs;
-        if (Object.keys(parsed.marginRows || {}).length) {
-          nextPolM = mergePolMarginsMap(polM, parsed.marginRows);
-          const ts = marginNowTs();
-          nextPolTs = { ...polTs };
-          Object.keys(parsed.marginRows).forEach(pol => {
-            nextPolTs[pol] = { ...(nextPolTs[pol] || {}), ...Object.fromEntries(RATE_TYPES.map(t => [t, ts])) };
-          });
-          setPolM(nextPolM);
-          setPolTs(nextPolTs);
-          await saveSettingsEntries([
-            ["pol_costs", serializePolCosts(nextCosts)],
-            ["pol_margins", JSON.stringify(nextPolM)],
-            ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
-          ]);
-        } else {
-          await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
-        }
         setPolCostO(nextCosts);
-        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, polM: nextPolM, polTs: nextPolTs };
+        await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
+        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
       }
 
       const rhRaw = buildRateHistoryRowsFromUpload(parsed, period, fData, note);
@@ -3873,33 +3963,52 @@ export default function App() {
         const serverSnap = parsePricingFromSettings(priority);
         const cacheCosts = cached?.polCostO;
         const serverCosts = serverSnap.polCostO || {};
-        const mergedCosts = mergePolCostODeep(serverCosts, cacheCosts || {});
+        let mergedCosts = mergePolCostODeep(serverCosts, cacheCosts || {});
         const cacheMargins = cached?.polM;
         const serverMargins = serverSnap.polM;
         const cacheMarginsFuture = cached?.polMFuture;
         const serverMarginsFuture = serverSnap.polMFuture;
+        const pendingSellPurge = needsSellPurge();
+        if (pendingSellPurge) {
+          mergedCosts = stripSellFromPolCosts(mergedCosts);
+        }
         const costsDiffer = cacheCosts && JSON.stringify(cacheCosts) !== JSON.stringify(serverCosts);
         const mergedDiffersFromServer = JSON.stringify(mergedCosts) !== JSON.stringify(serverCosts);
         const marginsDiffer = cacheMargins && JSON.stringify(cacheMargins) !== JSON.stringify(serverMargins);
         const marginsFutureDiffer = cacheMarginsFuture && JSON.stringify(cacheMarginsFuture) !== JSON.stringify(serverMarginsFuture);
         const cacheNewer = (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
-        const pendingCostResync = cacheNewer && (costsDiffer || mergedDiffersFromServer);
-        const pendingMarginResync = (marginsDiffer || marginsFutureDiffer) && cacheNewer;
+        const pendingCostResync = pendingSellPurge || (cacheNewer && (costsDiffer || mergedDiffersFromServer));
+        const pendingMarginResync = !pendingSellPurge && (marginsDiffer || marginsFutureDiffer) && cacheNewer;
 
         priority.pol_costs = serializePolCosts(mergedCosts);
-        if (pendingMarginResync && cacheMargins) priority.pol_margins = JSON.stringify(cacheMargins);
-        if (pendingMarginResync && cacheMarginsFuture) priority.pol_margins_future = JSON.stringify(cacheMarginsFuture);
+        if (pendingSellPurge) {
+          priority.pol_margins = "{}";
+          priority.pol_margins_future = "{}";
+          priority.pol_margin_timestamps = "{}";
+          priority.pol_margin_timestamps_future = "{}";
+        } else {
+          if (pendingMarginResync && cacheMargins) priority.pol_margins = JSON.stringify(cacheMargins);
+          if (pendingMarginResync && cacheMarginsFuture) priority.pol_margins_future = JSON.stringify(cacheMarginsFuture);
+        }
 
         applySettingsBundle(priority, { markServerSynced: !pendingCostResync && !pendingMarginResync });
 
-        if (pendingCostResync || pendingMarginResync) {
+        if (pendingCostResync || pendingMarginResync || pendingSellPurge) {
           skipAutoSaveRef.current = true;
           enqueueNetworkWrite(async () => {
             try {
-              if (pendingCostResync) {
+              if (pendingCostResync || pendingSellPurge) {
                 await saveOneSettingWithRetry("pol_costs", serializePolCosts(mergedCosts));
               }
-              if (pendingMarginResync) {
+              if (pendingSellPurge) {
+                await saveSettingsEntries([
+                  ["pol_margins", "{}"],
+                  ["pol_margins_future", "{}"],
+                  ["pol_margin_timestamps", "{}"],
+                  ["pol_margin_timestamps_future", "{}"],
+                ]);
+                markSellPurgeDone();
+              } else if (pendingMarginResync) {
                 await saveSettingsEntries([
                   ...(cacheMargins ? [["pol_margins", JSON.stringify(cacheMargins)]] : []),
                   ...(cached?.polTs ? [["pol_margin_timestamps", JSON.stringify(cached.polTs)]] : []),
@@ -3910,6 +4019,10 @@ export default function App() {
               writePricingCache({
                 ...(readStoredPricingCache() || {}),
                 polCostO: mergedCosts,
+                polM: pendingSellPurge ? {} : (readStoredPricingCache()?.polM || {}),
+                polMFuture: pendingSellPurge ? {} : (readStoredPricingCache()?.polMFuture || {}),
+                polTs: pendingSellPurge ? {} : (readStoredPricingCache()?.polTs || {}),
+                polTsFuture: pendingSellPurge ? {} : (readStoredPricingCache()?.polTsFuture || {}),
                 serverSyncedAt: Date.now(),
                 pricingSavedAt: Date.now(),
               });
@@ -4537,7 +4650,7 @@ export default function App() {
         </div>
         <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 80px" }}>
           <div style={{ fontSize: 11, color: "#92400e", marginBottom: 12, lineHeight: 1.5 }}>
-            선사 원본 Excel 또는 YSL 관리양식을 업로드하면 Supabase에 반영되고 Rate History에 기록됩니다.
+            선사 원본 Excel 업로드 시 **포털 POL 이름**으로 자동 매칭합니다 (별칭·그룹항 포함). 매입(NET)만 저장 · 매출·마진은 Admin에서 설정.
           </div>
 
           <div style={{ background: "#fff", border: "1px solid #fde68a", borderRadius: 12, padding: 14, marginBottom: 12 }}>
