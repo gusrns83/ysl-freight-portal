@@ -1982,7 +1982,7 @@ const PDF_DROP = {
 const UPLOAD_FORMATS = [
   { id: "SNK", label: "장금상선 (SKR-YSL)", hint: "POL 이름 기준 매칭 · NET(매입)만" },
   { id: "DY", label: "동영 (Fishery Import)", hint: "POL 기준 · Import 시트 · 해상+Drop" },
-  { id: "CK", label: "천경 (CK Line)", hint: "POL 기준 · COC/SOC 열 (매입만)" },
+  { id: "CK", label: "천경 (CK Line)", hint: "POL 기준 · COC/SOC 해상만 (DROP OFF·REF 제외)" },
   { id: "YSL", label: "YSL 관리양식", hint: "포털 POL 목록 · NET(C~F) 매입만" },
   { id: "RENTAL", label: "컨테이너 Rental", hint: "극동 컨테이너 운임 · POL별 base" },
 ];
@@ -2065,8 +2065,88 @@ const ratesFromCols = (rows, r, cols) => Object.fromEntries(
   RATE_TYPES.map((t, i) => [t, num(cell(rows, r, cols[i]))]).filter(([, v]) => v != null),
 );
 
+/** CK Line: COC(해상) + IMPORT SOC(해상) 열만 — DROP OFF / REF 제외 */
+function detectCkColumns(rows) {
+  let polCol = 1;
+  let coc20Col = 2;
+  let coc40Col = 3;
+  let soc20Col = 13;
+  let soc40Col = 14;
+  let dataStart = 8;
+  let socAnchorCol = -1;
+
+  for (let r = 0; r < Math.min(15, rows.length); r++) {
+    const row = rows[r] || [];
+    const upper = row.map(c => String(c ?? "").trim().toUpperCase());
+
+    const polI = upper.indexOf("POL");
+    if (polI >= 0) polCol = polI;
+
+    const socI = upper.findIndex(t => /IMPORT\s*SOC/.test(t));
+    if (socI >= 0) socAnchorCol = socI;
+
+    const isSizeRow = upper.some(t => t === "20'" || t === "20");
+    const hasDropLabel = upper.some(t => t.includes("DROP OFF"));
+    if (!isSizeRow || hasDropLabel) continue;
+
+    const firstC20 = upper.findIndex(t => t === "20'" || t === "20");
+    if (firstC20 >= 0) {
+      coc20Col = firstC20;
+      coc40Col = firstC20 + 1;
+      dataStart = r + 1;
+    }
+    if (socAnchorCol >= 0) {
+      const soc20 = upper.findIndex((t, i) => i >= socAnchorCol && (t === "20'" || t === "20"));
+      if (soc20 >= 0) {
+        soc20Col = soc20;
+        soc40Col = soc20 + 1;
+      }
+    }
+  }
+
+  return { polCol, coc20Col, coc40Col, soc20Col, soc40Col, dataStart };
+}
+
+function parseCkOceanRows(rows, cols) {
+  const netRows = {};
+  const skipped = [];
+
+  for (let r = cols.dataStart; r < rows.length; r++) {
+    const raw = cell(rows, r, cols.polCol);
+    if (raw == null) continue;
+    const name = String(raw).trim();
+    if (!name || /^(remark|note|\*|-)/i.test(name)) continue;
+
+    const portals = resolveExcelPolList(name, "CK");
+    if (!portals.length) {
+      skipped.push(name);
+      continue;
+    }
+
+    const rates = Object.fromEntries(
+      Object.entries({
+        coc20: num(cell(rows, r, cols.coc20Col)),
+        coc40: num(cell(rows, r, cols.coc40Col)),
+        soc20: num(cell(rows, r, cols.soc20Col)),
+        soc40: num(cell(rows, r, cols.soc40Col)),
+      }).filter(([, v]) => v != null),
+    );
+    if (Object.keys(rates).length) {
+      portals.forEach(portal => { netRows[portal] = rates; });
+    }
+  }
+
+  return { netRows, skipped };
+}
+
 /** 헤더·행 스캔으로 POL + 4운임 열 자동 탐지 (선사 양식 fallback) */
 function parsePolScanSheet(rows, carrier) {
+  if (carrier === "CK") {
+    const cols = detectCkColumns(rows);
+    const { netRows, skipped } = parseCkOceanRows(rows, cols);
+    return { netRows, marginRows: {}, skipped, carrier: "CK", polScan: true };
+  }
+
   const netRows = {};
   const skipped = [];
   let polCol = -1;
@@ -2273,37 +2353,15 @@ function parseDySheet(rows) {
 }
 
 function parseCkSheet(rows) {
-  const netRows = {};
-  const skipped = [];
+  let cols = detectCkColumns(rows);
+  let { netRows, skipped } = parseCkOceanRows(rows, cols);
 
-  for (let r = 7; r < rows.length; r++) {
-    const raw = cell(rows, r, 1);
-    if (raw == null) continue;
-    const name = String(raw).trim();
-    if (!name || /^(remark|note|\*|-)/i.test(name)) continue;
-
-    const portals = resolveExcelPolList(name, "CK");
-    if (!portals.length) {
-      skipped.push(name);
-      continue;
-    }
-
-    const rates = Object.fromEntries(
-      Object.entries({
-        coc20: num(cell(rows, r, 2)),
-        coc40: num(cell(rows, r, 3)),
-        soc20: num(cell(rows, r, 13)),
-        soc40: num(cell(rows, r, 14)),
-      }).filter(([, v]) => v != null),
-    );
-    if (Object.keys(rates).length) {
-      portals.forEach(portal => { netRows[portal] = rates; });
-    }
+  if (!Object.keys(netRows).length && cols.polCol !== 0) {
+    cols = { ...cols, polCol: 0 };
+    ({ netRows, skipped } = parseCkOceanRows(rows, cols));
   }
-  if (Object.keys(netRows).length) {
-    return { netRows, marginRows: {}, skipped, carrier: "CK" };
-  }
-  return parsePolScanSheet(rows, "CK");
+
+  return { netRows, marginRows: {}, skipped, carrier: "CK" };
 }
 
 function parseYslCarrierSheet(rows, carrier) {
