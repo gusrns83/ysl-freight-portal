@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v21"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v22"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 90000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -974,6 +974,124 @@ const resolveCarrierEffectiveSell = (
   return cost;
 };
 
+const DROP_CITY_LABELS = { mow: "Moscow", spb: "St.Petersburg", nsb: "Novosibirsk", ekb: "Ekaterinburg" };
+const RATE_HISTORY_CHUNK = 80;
+
+const rateHistoryEntryKey = (row) =>
+  `${row.carrier}|${row.pol}|${row.rate_type}|${row.period}|${row.category}|${row.route || ""}`;
+
+const flattenRateSnapshot = ({
+  fData, rData, polCostO, carrierRates, carrierDropRates, carrierDropMargins, rentalRates, polM, polMFuture,
+}) => {
+  const map = new Map();
+  const put = (entry) => map.set(rateHistoryEntryKey(entry), entry);
+
+  fData.forEach(row => {
+    CRS.forEach(cr => {
+      ["current", "future"].forEach(period => {
+        RATE_TYPES.forEach(t => {
+          const cost = resolveCarrierCostFromStore(polCostO, row.pol, cr, t, period, carrierRates, fData);
+          if (cost == null) return;
+          const sell = resolveCarrierEffectiveSell(polCostO, row.pol, cr, t, period, cost, { polM, polMFuture });
+          put({
+            carrier: cr, area: row.area, pol: row.pol, route: row.pol, rate_type: t, period,
+            category: "ocean", cost, sell, margin: sell != null ? sell - cost : null,
+          });
+        });
+      });
+    });
+  });
+
+  Object.keys(DO).forEach(cityKey => {
+    CRS.forEach(cr => {
+      ["current", "future"].forEach(period => {
+        [0, 1].forEach(si => {
+          const sk = si === 0 ? "c20" : "c40";
+          const stored = carrierDropRates[cr]?.[period]?.[cityKey]?.[sk];
+          const base = DO[cityKey]?.[cr];
+          const cost = stored != null && stored !== "" ? Number(stored) : (base ? base[si] : null);
+          if (cost == null) return;
+          const dropM = carrierDropMargins[cr]?.[cityKey]?.[sk];
+          const margin = dropM != null && dropM !== "" ? Number(dropM) : 0;
+          const label = DROP_CITY_LABELS[cityKey] || cityKey;
+          put({
+            carrier: cr, area: "DROP", pol: label, route: `Drop · ${label}`,
+            rate_type: si === 0 ? "drop20" : "drop40", period, category: "dropoff",
+            cost, sell: cost + margin, margin,
+          });
+        });
+      });
+    });
+  });
+
+  rData.forEach(row => {
+    const freightPol = PM[row.pol] || row.pol;
+    const fr = fData.find(d => d.pol === freightPol);
+    RC.forEach(city => {
+      ["current", "future"].forEach(period => {
+        [0, 1].forEach(si => {
+          const sk = si === 0 ? "c20" : "c40";
+          const bucket = rentalRates[row.pol]?.[period]?.[city];
+          let cost = bucket?.[sk];
+          if (cost == null || cost === "") {
+            if (period === "future") cost = rentalRates[row.pol]?.current?.[city]?.[sk];
+            if (cost == null || cost === "") cost = si === 0 ? row.r20[city] : row.r40[city];
+          }
+          if (cost == null || cost === "") return;
+          cost = Number(cost);
+          put({
+            carrier: "RENTAL", area: fr?.area || "OTHERS", pol: freightPol,
+            route: `${freightPol} > ${city}`, rate_type: si === 0 ? "r20" : "r40", period,
+            category: "rental", cost, sell: null, margin: null,
+          });
+        });
+      });
+    });
+  });
+
+  return map;
+};
+
+const diffRateHistoryRows = (prevMap, nextMap, { source, note, batchId } = {}) => {
+  const batch_id = batchId || (typeof crypto !== "undefined" && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `batch-${Date.now()}`);
+  const rows = [];
+  nextMap.forEach((entry) => {
+    const prev = prevMap?.get(rateHistoryEntryKey(entry));
+    if (prev && prev.cost === entry.cost && prev.sell === entry.sell && prev.margin === entry.margin) return;
+    rows.push({
+      batch_id, source: source || "admin", note: note || null,
+      carrier: entry.carrier, area: entry.area || null, pol: entry.pol,
+      route: entry.route || entry.pol, rate_type: entry.rate_type, period: entry.period,
+      category: entry.category, cost: entry.cost, sell: entry.sell, margin: entry.margin,
+    });
+  });
+  return rows;
+};
+
+const postRateHistoryRows = async (rows) => {
+  if (!rows.length) return 0;
+  let sent = 0;
+  for (let i = 0; i < rows.length; i += RATE_HISTORY_CHUNK) {
+    await api("rate_history", { method: "POST", body: JSON.stringify(rows.slice(i, i + RATE_HISTORY_CHUNK)) });
+    sent += Math.min(RATE_HISTORY_CHUNK, rows.length - i);
+  }
+  return sent;
+};
+
+const buildRateHistoryQuery = (filters) => {
+  const parts = ["rate_history?select=*", "order=created_at.desc", "limit=400"];
+  if (filters.carrier && filters.carrier !== "ALL") parts.push(`carrier=eq.${encodeURIComponent(filters.carrier)}`);
+  if (filters.area && filters.area !== "ALL") parts.push(`area=eq.${encodeURIComponent(filters.area)}`);
+  if (filters.period && filters.period !== "ALL") parts.push(`period=eq.${encodeURIComponent(filters.period)}`);
+  if (filters.category && filters.category !== "ALL") parts.push(`category=eq.${encodeURIComponent(filters.category)}`);
+  if (filters.pol?.trim()) parts.push(`pol=ilike.*${encodeURIComponent(filters.pol.trim())}*`);
+  if (filters.dateFrom) parts.push(`created_at=gte.${filters.dateFrom}T00:00:00`);
+  if (filters.dateTo) parts.push(`created_at=lte.${filters.dateTo}T23:59:59.999`);
+  return parts.join("&");
+};
+
 const buildBuyingGriCosts = (prevCosts, { deltas, rows, carrier, period, carrierRates, fData }) => {
   let next = { ...prevCosts };
   rows.forEach(row => {
@@ -1750,6 +1868,18 @@ export default function App() {
   const [showAdAdmin, setShowAdAdmin] = useState(false);
   const [showCarrierAdmin, setShowCarrierAdmin] = useState(false);
   const [showRentalAdmin, setShowRentalAdmin] = useState(false);
+  const [showRateHistoryAdmin, setShowRateHistoryAdmin] = useState(false);
+  const rateHistoryBaselineRef = useRef(null);
+  const [rhRows, setRhRows] = useState([]);
+  const [rhLoading, setRhLoading] = useState(false);
+  const [rhError, setRhError] = useState("");
+  const [rhCarrier, setRhCarrier] = useState("ALL");
+  const [rhArea, setRhArea] = useState("ALL");
+  const [rhPeriod, setRhPeriod] = useState("ALL");
+  const [rhCategory, setRhCategory] = useState("ALL");
+  const [rhPol, setRhPol] = useState("");
+  const [rhDateFrom, setRhDateFrom] = useState("");
+  const [rhDateTo, setRhDateTo] = useState("");
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
   const [carrierAdminMode, setCarrierAdminMode] = useState("ocean");
@@ -1796,6 +1926,52 @@ export default function App() {
 
   const resetSaveQueue = () => {
     saveQueueRef.current = Promise.resolve();
+  };
+
+  const syncRateHistoryBaseline = () => {
+    const s = pricingSaveRef.current;
+    rateHistoryBaselineRef.current = flattenRateSnapshot({ ...s, fData, rData });
+  };
+
+  const recordRateHistory = (opts = {}, snapOverride = null) => {
+    const base = snapOverride || pricingSaveRef.current;
+    const nextMap = flattenRateSnapshot({ ...base, fData, rData });
+    const rows = diffRateHistoryRows(rateHistoryBaselineRef.current, nextMap, opts);
+    if (!rows.length) return Promise.resolve(0);
+    return postRateHistoryRows(rows)
+      .then(count => {
+        rateHistoryBaselineRef.current = nextMap;
+        return count;
+      })
+      .catch(err => {
+        console.warn("rate history save failed", err);
+        return 0;
+      });
+  };
+
+  const loadRateHistory = async () => {
+    setRhLoading(true);
+    setRhError("");
+    try {
+      const data = await api(buildRateHistoryQuery({
+        carrier: rhCarrier,
+        area: rhArea,
+        period: rhPeriod,
+        category: rhCategory,
+        pol: rhPol,
+        dateFrom: rhDateFrom,
+        dateTo: rhDateTo,
+      }));
+      setRhRows(Array.isArray(data) ? data : []);
+    } catch (e) {
+      const msg = String(e.message || e);
+      setRhRows([]);
+      setRhError(/rate_history|42P01|relation|does not exist/i.test(msg)
+        ? "rate_history 테이블 없음 · supabase-rate-history.sql 을 Supabase SQL Editor에서 실행하세요."
+        : msg);
+    } finally {
+      setRhLoading(false);
+    }
   };
 
   const doLogin = async () => {
@@ -1935,6 +2111,7 @@ export default function App() {
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        recordRateHistory({ source: "gri", note: `매입 GRI ${griPeriodLabel(period)}` }, { ...pricingSaveRef.current, polCostO: nextCosts });
         flashSaveFeedback("success", `✅ 매입 GRI (${griPeriodLabel(period)}) · 저장 완료`);
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -1960,6 +2137,7 @@ export default function App() {
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        recordRateHistory({ source: "gri", note: "매입 GRI 되돌리기" }, { ...pricingSaveRef.current, polCostO: restored });
         flashSaveFeedback("success", "✅ 매입 GRI 되돌리기 · 저장 완료");
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -2003,6 +2181,7 @@ export default function App() {
           pricingSavedAt: Date.now(),
           serverSyncedAt: Date.now(),
         });
+        recordRateHistory({ source: "gri", note: `매출 GRI ${griPeriodLabel(period)}` }, { ...pricingSaveRef.current, polCostO: nextCosts });
         flashSaveFeedback("success", `✅ 매출 GRI (${griPeriodLabel(period)}) · 저장 완료`);
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -2028,6 +2207,7 @@ export default function App() {
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        recordRateHistory({ source: "gri", note: "매출 GRI 되돌리기" }, { ...pricingSaveRef.current, polCostO: restoredCosts });
         flashSaveFeedback("success", "✅ 매출 GRI 되돌리기 · 저장 완료");
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -2062,6 +2242,7 @@ export default function App() {
       })
         .then(() => {
           writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+          recordRateHistory({ source: "import", note: `${CN_KR[carrier]} Drop off 향후 복사` }, { ...pricingSaveRef.current, carrierDropRates: nextDrop });
           flashSaveFeedback("success", `✅ ${CN_KR[carrier]} Drop off · 기존운임 → 향후 복사 완료`);
         })
         .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -2090,6 +2271,7 @@ export default function App() {
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        recordRateHistory({ source: "import", note: `${CN_KR[carrier]} 향후 복사` }, { ...pricingSaveRef.current, polCostO: nextCosts, carrierRates: nextRates });
         flashSaveFeedback("success", `✅ ${CN_KR[carrier]} · 기존운임 → 향후 복사 완료 · GRI로 조정하세요`);
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -2119,6 +2301,7 @@ export default function App() {
       })
         .then(() => {
           writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+          recordRateHistory({ source: "import_undo" }, { ...pricingSaveRef.current, carrierDropRates: restoredDrop });
           flashSaveFeedback("success", "✅ 기존운임 가져오기 되돌리기 · 저장 완료");
         })
         .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -2142,6 +2325,7 @@ export default function App() {
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        recordRateHistory({ source: "import_undo" }, { ...pricingSaveRef.current, polCostO: restoredCosts, carrierRates: restoredRates });
         flashSaveFeedback("success", "✅ 기존운임 가져오기 되돌리기 · 저장 완료");
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -2572,6 +2756,7 @@ export default function App() {
         serverSyncedAt: Date.now(),
       });
       flashSaveFeedback("success", `✅ ${successLabel} 저장 완료`);
+      recordRateHistory({ source: "admin_save", note: successLabel });
     } catch (e) {
       resetSaveQueue();
       flashSaveFeedback("error", `저장 실패: ${e.message}`);
@@ -2893,6 +3078,7 @@ export default function App() {
         }
 
         setSettingsLoaded(true);
+        setTimeout(() => syncRateHistoryBaseline(), 500);
 
         const [rentalRows, carrierRows, miscRows] = await Promise.all([
           fetchSettingsByKey("rental_rates_json"),
@@ -2941,6 +3127,7 @@ export default function App() {
             pricingSavedAt: Date.now(),
             serverSyncedAt: Date.now(),
           });
+          recordRateHistory({ source: "auto_save" });
         })
         .catch(err => {
           console.error("auto-save failed", err);
@@ -3487,6 +3674,115 @@ export default function App() {
       </div>
     </div>
   );
+
+  // ── RATE HISTORY ADMIN ──
+  if (showRateHistoryAdmin && isAdmin) {
+    const fmtRhDate = (iso) => {
+      if (!iso) return "—";
+      try {
+        return new Date(iso).toLocaleString("ko-KR", { year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" });
+      } catch { return iso; }
+    };
+    const rhSourceLabel = (s) => ({
+      admin_save: "Admin 저장", auto_save: "자동 저장", excel_upload: "Excel 업로드",
+      gri: "GRI", import: "기존운임 복사", import_undo: "복사 되돌리기", rental_save: "렌탈 저장",
+    }[s] || s || "—");
+    return (
+      <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: ff }}>
+        {adminSaveToastEl}
+        <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", zIndex: 30 }}>
+          <button type="button" onClick={() => setShowRateHistoryAdmin(false)} style={{ fontSize: 13, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>← Back</button>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f766e" }}>Rate History</div>
+          <button type="button" onClick={loadRateHistory} disabled={rhLoading} style={{ fontSize: 11, fontWeight: 700, padding: "6px 10px", borderRadius: 8, background: rhLoading ? "#99f6e4" : "#0d9488", color: "#fff", border: "none", cursor: rhLoading ? "not-allowed" : "pointer" }}>
+            {rhLoading ? "…" : "검색"}
+          </button>
+        </div>
+        <div style={{ maxWidth: 960, margin: "0 auto", padding: "16px 16px 80px" }}>
+          <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#0f766e", marginBottom: 10 }}>검색 조건</div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8, marginBottom: 8 }}>
+              <label style={{ fontSize: 10, color: "#6b7280" }}>시작일
+                <input type="date" value={rhDateFrom} onChange={e => setRhDateFrom(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }} />
+              </label>
+              <label style={{ fontSize: 10, color: "#6b7280" }}>종료일
+                <input type="date" value={rhDateTo} onChange={e => setRhDateTo(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }} />
+              </label>
+              <label style={{ fontSize: 10, color: "#6b7280" }}>선사
+                <select value={rhCarrier} onChange={e => setRhCarrier(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
+                  {["ALL", ...CRS, "RENTAL"].map(c => <option key={c} value={c}>{c === "ALL" ? "전체" : (CN_KR[c] || c)}</option>)}
+                </select>
+              </label>
+              <label style={{ fontSize: 10, color: "#6b7280" }}>구간(Area)
+                <select value={rhArea} onChange={e => setRhArea(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
+                  <option value="ALL">전체</option>
+                  {areas.map(a => <option key={a} value={a}>{a}</option>)}
+                  <option value="DROP">DROP</option>
+                </select>
+              </label>
+              <label style={{ fontSize: 10, color: "#6b7280" }}>기간
+                <select value={rhPeriod} onChange={e => setRhPeriod(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
+                  <option value="ALL">전체</option>
+                  <option value="current">현재</option>
+                  <option value="future">향후</option>
+                </select>
+              </label>
+              <label style={{ fontSize: 10, color: "#6b7280" }}>유형
+                <select value={rhCategory} onChange={e => setRhCategory(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
+                  <option value="ALL">전체</option>
+                  <option value="ocean">해상</option>
+                  <option value="dropoff">Drop off</option>
+                  <option value="rental">Rental</option>
+                </select>
+              </label>
+            </div>
+            <label style={{ fontSize: 10, color: "#6b7280", display: "block" }}>POL / 구간 검색
+              <input type="text" value={rhPol} onChange={e => setRhPol(e.target.value)} placeholder="BUSAN, SHANGHAI, Moscow…" style={{ display: "block", width: "100%", marginTop: 4, padding: "8px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }} />
+            </label>
+          </div>
+          {rhError && (
+            <div style={{ fontSize: 12, color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: 10, marginBottom: 12 }}>{rhError}</div>
+          )}
+          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>{rhLoading ? "불러오는 중…" : `${rhRows.length}건 (최대 400건)`}</div>
+          <div style={{ overflowX: "auto", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 720 }}>
+              <thead>
+                <tr style={{ background: "#f0fdfa", borderBottom: "1px solid #e5e7eb" }}>
+                  {["일시", "선사", "Area", "POL/구간", "타입", "기간", "매입", "매출", "마진", "출처"].map(h => (
+                    <th key={h} style={{ padding: "8px 6px", textAlign: "left", fontWeight: 700, color: "#0f766e", whiteSpace: "nowrap" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rhRows.length === 0 && !rhLoading && (
+                  <tr><td colSpan={10} style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>기록 없음 · 저장 후 자동 적재됩니다</td></tr>
+                )}
+                {rhRows.map(row => (
+                  <tr key={row.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                    <td style={{ padding: "7px 6px", whiteSpace: "nowrap", color: "#374151" }}>{fmtRhDate(row.created_at)}</td>
+                    <td style={{ padding: "7px 6px", fontWeight: 600 }}>{CN_KR[row.carrier] || row.carrier}</td>
+                    <td style={{ padding: "7px 6px", color: "#6b7280" }}>{row.area || "—"}</td>
+                    <td style={{ padding: "7px 6px" }}>
+                      <div style={{ fontWeight: 600 }}>{row.pol}</div>
+                      {row.route && row.route !== row.pol && <div style={{ fontSize: 9, color: "#9ca3af" }}>{row.route}</div>}
+                    </td>
+                    <td style={{ padding: "7px 6px" }}>{row.rate_type}</td>
+                    <td style={{ padding: "7px 6px" }}>{row.period === "future" ? "향후" : "현재"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right" }}>{row.cost != null ? n(row.cost) : "—"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right" }}>{row.sell != null ? n(row.sell) : "—"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "right", color: "#059669" }}>{row.margin != null ? n(row.margin) : "—"}</td>
+                    <td style={{ padding: "7px 6px", fontSize: 10, color: "#6b7280" }} title={row.note || ""}>{rhSourceLabel(row.source)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 12, lineHeight: 1.5 }}>
+            Admin 저장·자동 저장·Excel 업로드 시 변경된 운임만 기록됩니다. 최초 사용 시 Supabase에서 <code style={{ fontSize: 9 }}>supabase-rate-history.sql</code> 실행이 필요합니다.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   // ── NOTICE ADMIN ──
   if (showNoticeAdmin && isAdmin) {
@@ -4737,6 +5033,7 @@ export default function App() {
               <>
                 <button onClick={()=>setShowCarrierAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#1e40af",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>선사운임</button>
                 <button onClick={()=>setShowRentalAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#7c3aed",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>렌탈운임</button>
+                <button onClick={()=>{setShowRateHistoryAdmin(true);}} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#0d9488",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>Rate History</button>
                 <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer",whiteSpace:"nowrap"}}>Notice</button>
                 <button onClick={()=>setShowAdAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa",cursor:"pointer",whiteSpace:"nowrap"}}>광고</button>
                 <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer",whiteSpace:"nowrap"}}>Clients</button>
@@ -4824,8 +5121,12 @@ export default function App() {
             선사별 운임 관리 (매입 · 매출 · 마진)
           </button>
           <button type="button" onClick={()=>setShowRentalAdmin(true)}
-            style={{width:"100%",padding:"12px 14px",marginBottom:10,fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
             컨테이너 Rental 운임 관리 (매입 · 매출 · 마진)
+          </button>
+          <button type="button" onClick={()=>{ setShowRateHistoryAdmin(true); loadRateHistory(); }}
+            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#0d9488",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            Rate History (운임 변경 이력)
           </button>
           <button type="button" onClick={()=>setShowAdAdmin(true)}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#ea580c",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
