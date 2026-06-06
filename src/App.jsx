@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v28"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v29"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 90000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -275,7 +275,7 @@ const stripSellFromPolCosts = (polCostO) => {
   return out;
 };
 
-const SELL_PURGE_REV = "v1";
+const SELL_PURGE_REV = "v2";
 const needsSellPurge = () => {
   try { return localStorage.getItem("ysl_sell_purge") !== SELL_PURGE_REV; }
   catch { return false; }
@@ -996,10 +996,10 @@ const getPolStoredMargin = (pol, type, period, polM, polMFuture) => {
   return marginNum(val);
 };
 
-/** 매출가: 저장된 sell → cost+POL마진 → cost+fullMargin(게스트) → cost */
+/** 매출가: 저장된 sell → cost+POL마진 → (게스트만) cost+fullMargin → null(Admin) / cost(게스트 fallback) */
 const resolveCarrierEffectiveSell = (
   costs, pol, cr, t, period, cost,
-  { polM, polMFuture, fullMargin = null } = {},
+  { polM, polMFuture, fullMargin = null, adminMode = false } = {},
 ) => {
   if (cost == null) return null;
   const explicit = resolveCarrierExplicitSell(costs, pol, cr, t, period);
@@ -1007,7 +1007,7 @@ const resolveCarrierEffectiveSell = (
   const polMargin = getPolStoredMargin(pol, t, period, polM, polMFuture);
   if (polMargin != null) return cost + polMargin;
   if (fullMargin != null) return cost + fullMargin;
-  return cost;
+  return adminMode ? null : cost;
 };
 
 const DROP_CITY_LABELS = { mow: "Moscow", spb: "St.Petersburg", nsb: "Novosibirsk", ekb: "Ekaterinburg" };
@@ -2862,6 +2862,7 @@ export default function App() {
       const batchId = typeof crypto !== "undefined" && crypto.randomUUID
         ? crypto.randomUUID()
         : `batch-${Date.now()}`;
+      const baseCosts = pricingSaveRef.current.polCostO ?? polCostO;
 
       if (parsed.format === "RENTAL") {
         const patch = buildRentalRatesFromBases(parsed.bases, period);
@@ -2870,7 +2871,7 @@ export default function App() {
         await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(merged));
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
       } else if (parsed.format === "DY") {
-        const nextCosts = mergePolCostsCarrier(polCostO, parsed.oceanRows, "DY", period);
+        const nextCosts = mergePolCostsCarrier(baseCosts, parsed.oceanRows, "DY", period);
         const nextDrop = buildDyDropRates(
           JSON.stringify(carrierDropRates),
           parsed.oceanRows,
@@ -2886,7 +2887,7 @@ export default function App() {
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
       } else {
         const cr = parsed.carrier;
-        const nextCosts = mergePolCostsCarrier(polCostO, parsed.netRows, cr, period);
+        const nextCosts = mergePolCostsCarrier(baseCosts, parsed.netRows, cr, period);
         setPolCostO(nextCosts);
         await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
@@ -2894,8 +2895,12 @@ export default function App() {
 
       const rhRaw = buildRateHistoryRowsFromUpload(parsed, period, fData, note);
       if (rhRaw.length) {
-        await postRateHistoryRows(rhRaw.map(r => ({ ...r, batch_id: batchId })));
-        rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+        try {
+          await postRateHistoryRows(rhRaw.map(r => ({ ...r, batch_id: batchId })));
+          rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+        } catch (e) {
+          console.warn("Rate History 기록 생략 (매입 저장은 완료됨):", e);
+        }
       }
 
       writePricingCache({
@@ -3011,9 +3016,11 @@ export default function App() {
       margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture,
     }));
 
-  /** 선사 Admin 단가표: sell 저장값 → POL 마진 → 매입 (전역 150/200 자동 가산 없음) */
+  /** 선사 Admin 단가표: sell 저장값 → POL 마진 → 없으면 null (전역 마진 미적용) */
   const getCarrierAdminSell = (pol, cr, type, period, cost) =>
-    resolveCarrierEffectiveSell(polCostO, pol, cr, type, period, cost, { polM, polMFuture });
+    resolveCarrierEffectiveSell(polCostO, pol, cr, type, period, cost, {
+      polM, polMFuture, adminMode: true,
+    });
 
   /** 게스트·포털: sell 저장값 → POL 마진 → getM() 전체 마진 */
   const getGuestCarrierSell = (pol, cr, type, period, cost, area) =>
@@ -3789,20 +3796,8 @@ export default function App() {
     if (settingBundleHas(s, "rental_rates_json")) setRentalRates(snap.rentalRates);
     if (settingBundleHas(s, "global_margins")) setMargins(snap.margins);
     if (settingBundleHas(s, "area_margins")) setAreaM(snap.areaM);
-    if (settingBundleHas(s, "pol_margins")) {
-      setPolM(prev => {
-        const next = snap.polM;
-        if (countPolMarginOverrides(next) === 0 && countPolMarginOverrides(prev) > 0) return prev;
-        return next;
-      });
-    }
-    if (settingBundleHas(s, "pol_margins_future")) {
-      setPolMFuture(prev => {
-        const next = snap.polMFuture;
-        if (countPolMarginOverrides(next) === 0 && countPolMarginOverrides(prev) > 0) return prev;
-        return next;
-      });
-    }
+    if (settingBundleHas(s, "pol_margins")) setPolM(snap.polM || {});
+    if (settingBundleHas(s, "pol_margins_future")) setPolMFuture(snap.polMFuture || {});
     if (settingBundleHas(s, "margin_timestamps")) setMarginTs(snap.marginTs);
     if (settingBundleHas(s, "area_margin_timestamps")) setAreaTs(snap.areaTs);
     if (settingBundleHas(s, "pol_margin_timestamps")) setPolTs(snap.polTs);
@@ -3815,11 +3810,10 @@ export default function App() {
     if (settingBundleHas(s, "rental_pol_margin_timestamps")) setRentalPolTs(snap.rentalPolTs);
     if (settingBundleHas(s, "pol_costs")) {
       setPolCostO(prev => {
-        const server = snap.polCostO;
+        const server = snap.polCostO || {};
         const cached = readStoredPricingCache()?.polCostO;
-        const merged = mergePolCostODeep(mergePolCostODeep(server, prev), cached);
-        if (countPolCostOverrides(server) === 0 && countPolCostOverrides(merged) > 0) return merged;
-        if (!polCostOHasSellOverrides(server) && polCostOHasSellOverrides(merged)) return merged;
+        let merged = mergePolCostODeep(mergePolCostODeep(server, prev), cached);
+        if (!polCostOHasSellOverrides(server)) merged = stripSellFromPolCosts(merged);
         return merged;
       });
     }
@@ -3965,11 +3959,16 @@ export default function App() {
         const serverCosts = serverSnap.polCostO || {};
         let mergedCosts = mergePolCostODeep(serverCosts, cacheCosts || {});
         const cacheMargins = cached?.polM;
-        const serverMargins = serverSnap.polM;
+        const serverMargins = serverSnap.polM || {};
         const cacheMarginsFuture = cached?.polMFuture;
-        const serverMarginsFuture = serverSnap.polMFuture;
+        const serverMarginsFuture = serverSnap.polMFuture || {};
+        const serverMarginsEmpty = !Object.keys(serverMargins).length;
+        const serverMarginsFutureEmpty = !Object.keys(serverMarginsFuture).length;
+        const cacheWouldRestoreMargins =
+          (serverMarginsEmpty && cacheMargins && Object.keys(cacheMargins).length > 0)
+          || (serverMarginsFutureEmpty && cacheMarginsFuture && Object.keys(cacheMarginsFuture).length > 0);
         const pendingSellPurge = needsSellPurge();
-        if (pendingSellPurge) {
+        if (pendingSellPurge || !polCostOHasSellOverrides(serverCosts)) {
           mergedCosts = stripSellFromPolCosts(mergedCosts);
         }
         const costsDiffer = cacheCosts && JSON.stringify(cacheCosts) !== JSON.stringify(serverCosts);
@@ -3977,30 +3976,37 @@ export default function App() {
         const marginsDiffer = cacheMargins && JSON.stringify(cacheMargins) !== JSON.stringify(serverMargins);
         const marginsFutureDiffer = cacheMarginsFuture && JSON.stringify(cacheMarginsFuture) !== JSON.stringify(serverMarginsFuture);
         const cacheNewer = (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
-        const pendingCostResync = pendingSellPurge || (cacheNewer && (costsDiffer || mergedDiffersFromServer));
-        const pendingMarginResync = !pendingSellPurge && (marginsDiffer || marginsFutureDiffer) && cacheNewer;
+        const pendingCostResync = pendingSellPurge || cacheWouldRestoreMargins
+          || (cacheNewer && (costsDiffer || mergedDiffersFromServer));
+        const pendingMarginResync = !pendingSellPurge && !cacheWouldRestoreMargins
+          && (marginsDiffer || marginsFutureDiffer) && cacheNewer;
 
         priority.pol_costs = serializePolCosts(mergedCosts);
-        if (pendingSellPurge) {
+        if (pendingSellPurge || cacheWouldRestoreMargins || serverMarginsEmpty) {
           priority.pol_margins = "{}";
+        } else if (pendingMarginResync && cacheMargins) {
+          priority.pol_margins = JSON.stringify(cacheMargins);
+        }
+        if (pendingSellPurge || cacheWouldRestoreMargins || serverMarginsFutureEmpty) {
           priority.pol_margins_future = "{}";
+        } else if (pendingMarginResync && cacheMarginsFuture) {
+          priority.pol_margins_future = JSON.stringify(cacheMarginsFuture);
+        }
+        if (pendingSellPurge || cacheWouldRestoreMargins) {
           priority.pol_margin_timestamps = "{}";
           priority.pol_margin_timestamps_future = "{}";
-        } else {
-          if (pendingMarginResync && cacheMargins) priority.pol_margins = JSON.stringify(cacheMargins);
-          if (pendingMarginResync && cacheMarginsFuture) priority.pol_margins_future = JSON.stringify(cacheMarginsFuture);
         }
 
         applySettingsBundle(priority, { markServerSynced: !pendingCostResync && !pendingMarginResync });
 
-        if (pendingCostResync || pendingMarginResync || pendingSellPurge) {
+        if (pendingCostResync || pendingMarginResync || pendingSellPurge || cacheWouldRestoreMargins) {
           skipAutoSaveRef.current = true;
           enqueueNetworkWrite(async () => {
             try {
               if (pendingCostResync || pendingSellPurge) {
                 await saveOneSettingWithRetry("pol_costs", serializePolCosts(mergedCosts));
               }
-              if (pendingSellPurge) {
+              if (pendingSellPurge || cacheWouldRestoreMargins) {
                 await saveSettingsEntries([
                   ["pol_margins", "{}"],
                   ["pol_margins_future", "{}"],
@@ -4019,10 +4025,10 @@ export default function App() {
               writePricingCache({
                 ...(readStoredPricingCache() || {}),
                 polCostO: mergedCosts,
-                polM: pendingSellPurge ? {} : (readStoredPricingCache()?.polM || {}),
-                polMFuture: pendingSellPurge ? {} : (readStoredPricingCache()?.polMFuture || {}),
-                polTs: pendingSellPurge ? {} : (readStoredPricingCache()?.polTs || {}),
-                polTsFuture: pendingSellPurge ? {} : (readStoredPricingCache()?.polTsFuture || {}),
+                polM: (pendingSellPurge || cacheWouldRestoreMargins || serverMarginsEmpty) ? {} : (readStoredPricingCache()?.polM || {}),
+                polMFuture: (pendingSellPurge || cacheWouldRestoreMargins || serverMarginsFutureEmpty) ? {} : (readStoredPricingCache()?.polMFuture || {}),
+                polTs: (pendingSellPurge || cacheWouldRestoreMargins) ? {} : (readStoredPricingCache()?.polTs || {}),
+                polTsFuture: (pendingSellPurge || cacheWouldRestoreMargins) ? {} : (readStoredPricingCache()?.polTsFuture || {}),
                 serverSyncedAt: Date.now(),
                 pricingSavedAt: Date.now(),
               });
@@ -4125,6 +4131,12 @@ export default function App() {
     cost: cost ?? null,
     margin: margin ?? 0,
     sell: cost != null ? cost + (margin ?? 0) : null,
+    cr,
+  });
+  const mkAdminPrice = (cost, sell, cr) => ({
+    cost: cost ?? null,
+    margin: cost != null && sell != null ? sell - cost : null,
+    sell: sell ?? null,
     cr,
   });
   const getCarrierCostOverride = (pol, cr, t, period) => {
@@ -4464,9 +4476,14 @@ export default function App() {
     const cost = b.val;
     const cr = b.cr;
     if (cost != null && cr) {
+      if (isAdmin) {
+        const sell = getCarrierAdminSell(row.pol, cr, t, ratePeriod, cost);
+        return mkAdminPrice(cost, sell, cr);
+      }
       const sell = getGuestCarrierSell(row.pol, cr, t, ratePeriod, cost, row.area);
       return mkPrice(cost, sell - cost, cr);
     }
+    if (isAdmin) return mkAdminPrice(cost, null, cr);
     return mkPrice(cost, getM(row.pol, row.area, t, ratePeriod), cr);
   };
   const doDetail = (row, cityKey, si) => {
@@ -4474,14 +4491,29 @@ export default function App() {
     const b = bDO(row, cityKey, si);
     const cost = getDropCityCost(row, cityKey, si);
     const dropM = b.cr ? getDropM(b.cr, cityKey, si) : 0;
+    if (isAdmin && b.cr) {
+      const oceanCost = getCarrierRate(row, b.cr, t, ratePeriod);
+      const oceanSell = oceanCost != null
+        ? getCarrierAdminSell(row.pol, b.cr, t, ratePeriod, oceanCost)
+        : null;
+      const totalSell = cost != null && oceanSell != null ? oceanSell - oceanCost + cost : null;
+      return mkAdminPrice(cost, totalSell, b.cr);
+    }
     return mkPrice(cost, getM(row.pol, row.area, t, ratePeriod) + dropM, b.cr);
   };
   const dropCarrierDetail = (row, cityKey, cr, si, period = ratePeriod) => {
     const t = si === 0 ? "coc20" : "coc40";
     const cost = getCarrierDropTotalCost(row, cr, cityKey, si, period);
-    if (cost == null) return mkPrice(null, 0, cr);
+    if (cost == null) return isAdmin ? mkAdminPrice(null, null, cr) : mkPrice(null, 0, cr);
     const oceanCost = getCarrierRate(row, cr, t, period);
     const dropM = getDropM(cr, cityKey, si);
+    if (isAdmin) {
+      const oceanSell = oceanCost != null
+        ? getCarrierAdminSell(row.pol, cr, t, period, oceanCost)
+        : null;
+      const totalSell = oceanSell != null && oceanCost != null ? oceanSell - oceanCost + cost : null;
+      return mkAdminPrice(cost, totalSell, cr);
+    }
     if (oceanCost != null) {
       const oceanSell = getGuestCarrierSell(row.pol, cr, t, period, oceanCost, row.area);
       return mkPrice(cost, (oceanSell - oceanCost) + dropM, cr);
