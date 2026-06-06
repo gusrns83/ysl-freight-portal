@@ -1129,6 +1129,18 @@ const postRateHistoryRows = async (rows) => {
   return sent;
 };
 
+/** 재업로드 시 이전 Excel 업로드 기록 제거 (동일 선사·기간·유형) */
+const deleteRateHistoryExcelUpload = async (carrier, period, category = "ocean") => {
+  const q = [
+    "rate_history?",
+    `carrier=eq.${encodeURIComponent(carrier)}`,
+    `period=eq.${encodeURIComponent(period)}`,
+    `category=eq.${encodeURIComponent(category)}`,
+    "source=eq.excel_upload",
+  ].join("&");
+  await api(q, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+};
+
 const buildRateHistoryQuery = (filters) => {
   const parts = ["rate_history?select=*", "order=created_at.desc", "limit=400"];
   if (filters.carrier && filters.carrier !== "ALL") parts.push(`carrier=eq.${encodeURIComponent(filters.carrier)}`);
@@ -2774,6 +2786,12 @@ function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
   return rows;
 }
 
+function rateHistoryScopeFromUpload(parsed, period) {
+  if (parsed.format === "RENTAL") return { carrier: "RENTAL", period, category: "rental" };
+  const carrier = parsed.format === "YSL" ? parsed.carrier : (parsed.carrier || parsed.format);
+  return { carrier, period, category: "ocean" };
+}
+
 
 export default function App() {
   const fData = useMemo(() => FR.map(r => ({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})), []);
@@ -3136,8 +3154,11 @@ export default function App() {
       const rhRaw = buildRateHistoryRowsFromUpload(parsed, period, fData, note);
       if (rhRaw.length) {
         try {
+          const rhScope = rateHistoryScopeFromUpload(parsed, period);
+          await deleteRateHistoryExcelUpload(rhScope.carrier, rhScope.period, rhScope.category);
           await postRateHistoryRows(rhRaw.map(r => ({ ...r, batch_id: batchId })));
           rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+          if (showRateHistoryAdmin) loadRateHistory();
         } catch (e) {
           console.warn("Rate History 기록 생략 (매입 저장은 완료됨):", e);
         }
@@ -3188,6 +3209,7 @@ export default function App() {
         setRentalRates(next);
         await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(next));
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: next };
+        try { await deleteRateHistoryExcelUpload("RENTAL", period, "rental"); } catch (e) { console.warn("rate_history clear skip", e); }
         await recordRateHistory({ source: "excel_delete", note: `렌탈 ${periodLabel} 운임 삭제 (${clearedPols.length} POL)` });
         writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now(), serverSyncedAt: Date.now() });
         setMsg(`✅ 렌탈 ${periodLabel} 운임 ${clearedPols.length}개 POL 삭제 완료`);
@@ -3276,6 +3298,7 @@ export default function App() {
         polCostO: nextCosts,
         carrierDropRates: nextDrop,
       };
+      try { await deleteRateHistoryExcelUpload(carrierKey, period, "ocean"); } catch (e) { console.warn("rate_history clear skip", e); }
       await recordRateHistory({
         source: "excel_delete",
         note: `${carrierLabel} ${periodLabel} 삭제 · 해상 ${clearedPols.length} POL${clearedDrop ? " · Drop off" : ""}`,
