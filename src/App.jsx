@@ -1,11 +1,26 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import {
+  UPLOAD_FORMATS,
+  readExcelFile,
+  parseByFormat,
+  suggestSheet,
+  suggestYslSheet,
+  previewSummary,
+  mergePolCostsCarrier,
+  mergePolCostsWithSells,
+  mergePolMarginsMap,
+  buildDyDropRates,
+  buildRentalRatesFromBases,
+  mergeRentalRatesPatch,
+  buildRateHistoryRowsFromUpload,
+} from "./excelUpload";
 
 const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v22"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v23"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 90000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -1869,6 +1884,16 @@ export default function App() {
   const [showCarrierAdmin, setShowCarrierAdmin] = useState(false);
   const [showRentalAdmin, setShowRentalAdmin] = useState(false);
   const [showRateHistoryAdmin, setShowRateHistoryAdmin] = useState(false);
+  const [showExcelUploadAdmin, setShowExcelUploadAdmin] = useState(false);
+  const [excelFormat, setExcelFormat] = useState("SNK");
+  const [excelPeriod, setExcelPeriod] = useState("current");
+  const [excelSheet, setExcelSheet] = useState("");
+  const [excelYslCarrier, setExcelYslCarrier] = useState("SNK");
+  const [excelWorkbook, setExcelWorkbook] = useState(null);
+  const [excelPreview, setExcelPreview] = useState(null);
+  const [excelUploading, setExcelUploading] = useState(false);
+  const [excelMsg, setExcelMsg] = useState("");
+  const [excelDragOver, setExcelDragOver] = useState(false);
   const rateHistoryBaselineRef = useRef(null);
   const [rhRows, setRhRows] = useState([]);
   const [rhLoading, setRhLoading] = useState(false);
@@ -1972,6 +1997,160 @@ export default function App() {
     } finally {
       setRhLoading(false);
     }
+  };
+
+  const parseExcelWorkbook = (workbook, format, sheetName, period, yslCarrier) => {
+    const sheet = sheetName || suggestSheet(format, workbook.sheetNames);
+    const rows = workbook.sheets[sheet];
+    if (!rows?.length) throw new Error(`시트 "${sheet}" 가 비어 있습니다`);
+    const parsed = parseByFormat(format, rows, { carrier: yslCarrier });
+    return { ...parsed, period, fileName: workbook.fileName, sheet };
+  };
+
+  const handleExcelFile = async (file) => {
+    if (!file) return;
+    setExcelMsg("");
+    setExcelPreview(null);
+    setExcelUploading(true);
+    try {
+      const workbook = await readExcelFile(file);
+      setExcelWorkbook(workbook);
+      const sheet = excelFormat === "YSL"
+        ? suggestYslSheet(excelYslCarrier, excelPeriod, workbook.sheetNames)
+        : (excelSheet && workbook.sheetNames.includes(excelSheet)
+          ? excelSheet
+          : suggestSheet(excelFormat, workbook.sheetNames));
+      setExcelSheet(sheet);
+      const preview = parseExcelWorkbook(workbook, excelFormat, sheet, excelPeriod, excelYslCarrier);
+      setExcelPreview(preview);
+      const sum = previewSummary(preview, excelPeriod);
+      setExcelMsg(`✅ ${sum.title} · ${sum.detail}`);
+    } catch (e) {
+      setExcelWorkbook(null);
+      setExcelMsg("파싱 실패: " + e.message);
+    } finally {
+      setExcelUploading(false);
+    }
+  };
+
+  const refreshExcelPreview = () => {
+    if (!excelWorkbook) return;
+    try {
+      let sheet = excelSheet;
+      if (!sheet || !excelWorkbook.sheetNames.includes(sheet)) {
+        sheet = excelFormat === "YSL"
+          ? suggestYslSheet(excelYslCarrier, excelPeriod, excelWorkbook.sheetNames)
+          : suggestSheet(excelFormat, excelWorkbook.sheetNames);
+        setExcelSheet(sheet);
+      }
+      const preview = parseExcelWorkbook(excelWorkbook, excelFormat, sheet, excelPeriod, excelYslCarrier);
+      setExcelPreview(preview);
+      const sum = previewSummary(preview, excelPeriod);
+      setExcelMsg(`✅ ${sum.title} · ${sum.detail}`);
+    } catch (e) {
+      setExcelPreview(null);
+      setExcelMsg("파싱 실패: " + e.message);
+    }
+  };
+
+  const applyExcelUpload = () => {
+    if (!excelPreview) return;
+    const parsed = excelPreview;
+    const period = excelPeriod;
+    const note = `${parsed.fileName} · ${parsed.sheet}`;
+
+    runSave("Excel 업로드", async () => {
+      clearTimeout(autoSaveTimerRef.current);
+      skipAutoSaveRef.current = true;
+      const batchId = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `batch-${Date.now()}`;
+
+      if (parsed.format === "RENTAL") {
+        const patch = buildRentalRatesFromBases(parsed.bases, period);
+        const merged = mergeRentalRatesPatch(rentalRates, patch);
+        setRentalRates(merged);
+        await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(merged));
+        pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
+      } else if (parsed.format === "DY") {
+        const nextCosts = mergePolCostsCarrier(polCostO, parsed.oceanRows, "DY", period);
+        const nextDrop = buildDyDropRates(
+          JSON.stringify(carrierDropRates),
+          parsed.oceanRows,
+          parsed.dropRows,
+          period,
+        );
+        setPolCostO(nextCosts);
+        setCarrierDropRates(nextDrop);
+        await saveSettingsEntries([
+          ["pol_costs", serializePolCosts(nextCosts)],
+          ["carrier_drop_rates_json", JSON.stringify(nextDrop)],
+        ]);
+        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
+      } else if (parsed.format === "YSL") {
+        const cr = parsed.carrier;
+        let nextCosts = mergePolCostsWithSells(
+          polCostO, parsed.netRows, parsed.sellRows || {}, cr, period,
+        );
+        let nextPolM = polM;
+        if (Object.keys(parsed.marginRows || {}).length) {
+          nextPolM = mergePolMarginsMap(polM, parsed.marginRows);
+          setPolM(nextPolM);
+          const ts = marginNowTs();
+          const nextPolTs = { ...polTs };
+          Object.keys(parsed.marginRows).forEach(pol => {
+            nextPolTs[pol] = { ...(nextPolTs[pol] || {}), ...Object.fromEntries(RATE_TYPES.map(t => [t, ts])) };
+          });
+          setPolTs(nextPolTs);
+          await saveSettingsEntries([
+            ["pol_costs", serializePolCosts(nextCosts)],
+            ["pol_margins", JSON.stringify(nextPolM)],
+            ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
+          ]);
+        } else {
+          await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
+        }
+        setPolCostO(nextCosts);
+        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, polM: nextPolM };
+      } else {
+        const cr = parsed.carrier;
+        const nextCosts = mergePolCostsCarrier(polCostO, parsed.netRows, cr, period);
+        let nextPolM = polM;
+        let nextPolTs = polTs;
+        if (Object.keys(parsed.marginRows || {}).length) {
+          nextPolM = mergePolMarginsMap(polM, parsed.marginRows);
+          const ts = marginNowTs();
+          nextPolTs = { ...polTs };
+          Object.keys(parsed.marginRows).forEach(pol => {
+            nextPolTs[pol] = { ...(nextPolTs[pol] || {}), ...Object.fromEntries(RATE_TYPES.map(t => [t, ts])) };
+          });
+          setPolM(nextPolM);
+          setPolTs(nextPolTs);
+          await saveSettingsEntries([
+            ["pol_costs", serializePolCosts(nextCosts)],
+            ["pol_margins", JSON.stringify(nextPolM)],
+            ["pol_margin_timestamps", JSON.stringify(nextPolTs)],
+          ]);
+        } else {
+          await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
+        }
+        setPolCostO(nextCosts);
+        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, polM: nextPolM, polTs: nextPolTs };
+      }
+
+      const rhRaw = buildRateHistoryRowsFromUpload(parsed, period, fData, note);
+      if (rhRaw.length) {
+        await postRateHistoryRows(rhRaw.map(r => ({ ...r, batch_id: batchId })));
+        rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+      }
+
+      writePricingCache({
+        ...buildPricingCache(),
+        pricingSavedAt: Date.now(),
+        serverSyncedAt: Date.now(),
+      });
+      setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+    });
   };
 
   const doLogin = async () => {
@@ -2756,7 +2935,9 @@ export default function App() {
         serverSyncedAt: Date.now(),
       });
       flashSaveFeedback("success", `✅ ${successLabel} 저장 완료`);
-      recordRateHistory({ source: "admin_save", note: successLabel });
+      if (!String(successLabel).includes("Excel")) {
+        recordRateHistory({ source: "admin_save", note: successLabel });
+      }
     } catch (e) {
       resetSaveQueue();
       flashSaveFeedback("error", `저장 실패: ${e.message}`);
@@ -3674,6 +3855,117 @@ export default function App() {
       </div>
     </div>
   );
+
+  // ── EXCEL UPLOAD ADMIN ──
+  if (showExcelUploadAdmin && isAdmin) {
+    const fmt = UPLOAD_FORMATS.find(f => f.id === excelFormat);
+    const sum = excelPreview ? previewSummary(excelPreview, excelPeriod) : null;
+    return (
+      <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: ff }}>
+        {adminSaveToastEl}
+        <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", zIndex: 30 }}>
+          <button type="button" onClick={() => setShowExcelUploadAdmin(false)} style={{ fontSize: 13, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>← Back</button>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#b45309" }}>Excel 운임 업로드</div>
+          <button type="button" onClick={applyExcelUpload} disabled={!excelPreview || saveBusy || excelUploading}
+            style={{ fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 8, background: !excelPreview || saveBusy ? "#fcd34d" : "#d97706", color: "#fff", border: "none", cursor: !excelPreview || saveBusy ? "not-allowed" : "pointer" }}>
+            {saveBusy ? "저장 중…" : "업로드"}
+          </button>
+        </div>
+        <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 80px" }}>
+          <div style={{ fontSize: 11, color: "#92400e", marginBottom: 12, lineHeight: 1.5 }}>
+            선사 원본 Excel 또는 YSL 관리양식을 업로드하면 Supabase에 반영되고 Rate History에 기록됩니다.
+          </div>
+
+          <div style={{ background: "#fff", border: "1px solid #fde68a", borderRadius: 12, padding: 14, marginBottom: 12 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", marginBottom: 8 }}>양식 선택</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+              {UPLOAD_FORMATS.map(f => (
+                <label key={f.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 10px", borderRadius: 8, background: excelFormat === f.id ? "#fffbeb" : "#fafafa", border: `1px solid ${excelFormat === f.id ? "#fbbf24" : "#e5e7eb"}`, cursor: "pointer" }}>
+                  <input type="radio" name="excelFmt" checked={excelFormat === f.id} onChange={() => { setExcelFormat(f.id); setExcelPreview(null); setExcelMsg(""); if (excelWorkbook) setTimeout(refreshExcelPreview, 0); }} style={{ marginTop: 3 }}/>
+                  <div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e" }}>{f.label}</div>
+                    <div style={{ fontSize: 10, color: "#a16207" }}>{f.hint}</div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+            <label style={{ fontSize: 10, color: "#6b7280" }}>적용 기간
+              <select value={excelPeriod} onChange={e => { setExcelPeriod(e.target.value); if (excelWorkbook) setTimeout(refreshExcelPreview, 0); }}
+                style={{ display: "block", width: "100%", marginTop: 4, padding: "8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }}>
+                <option value="current">현재 운임</option>
+                <option value="future">향후 운임 (GRI)</option>
+              </select>
+            </label>
+            {excelFormat === "YSL" ? (
+              <label style={{ fontSize: 10, color: "#6b7280" }}>선사 시트
+                <select value={excelYslCarrier} onChange={e => { setExcelYslCarrier(e.target.value); if (excelWorkbook) setTimeout(refreshExcelPreview, 0); }}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }}>
+                  {CRS.map(c => <option key={c} value={c}>{CN_KR[c]} ({c})</option>)}
+                </select>
+              </label>
+            ) : (
+              <label style={{ fontSize: 10, color: "#6b7280" }}>시트
+                <select value={excelSheet} onChange={e => { setExcelSheet(e.target.value); if (excelWorkbook) setTimeout(refreshExcelPreview, 0); }} disabled={!excelWorkbook}
+                  style={{ display: "block", width: "100%", marginTop: 4, padding: "8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }}>
+                  {(excelWorkbook?.sheetNames || []).map(s => <option key={s} value={s}>{s}</option>)}
+                  {!excelWorkbook && <option value="">파일 선택 후</option>}
+                </select>
+              </label>
+            )}
+          </div>
+
+          {excelFormat === "YSL" && excelWorkbook && (
+            <label style={{ fontSize: 10, color: "#6b7280", display: "block", marginBottom: 12 }}>시트
+              <select value={excelSheet} onChange={e => { setExcelSheet(e.target.value); setTimeout(refreshExcelPreview, 0); }}
+                style={{ display: "block", width: "100%", marginTop: 4, padding: "8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }}>
+                {excelWorkbook.sheetNames.map(s => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </label>
+          )}
+
+          <label
+            onDragOver={e => { e.preventDefault(); setExcelDragOver(true); }}
+            onDragLeave={() => setExcelDragOver(false)}
+            onDrop={e => { e.preventDefault(); setExcelDragOver(false); const f = e.dataTransfer.files[0]; if (f) handleExcelFile(f); }}
+            style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 8, padding: "28px 16px", background: excelDragOver ? "#fffbeb" : "#fff", border: `2px dashed ${excelDragOver ? "#f59e0b" : "#fcd34d"}`, borderRadius: 12, cursor: "pointer", marginBottom: 12 }}>
+            <span style={{ fontSize: 32 }}>📊</span>
+            <span style={{ fontSize: 13, color: "#b45309", fontWeight: 700 }}>{excelUploading ? "읽는 중…" : "Excel 파일 선택 또는 드래그"}</span>
+            <span style={{ fontSize: 11, color: "#d97706" }}>.xlsx · {fmt?.hint}</span>
+            <input type="file" accept=".xlsx,.xls" style={{ display: "none" }} onChange={e => { if (e.target.files[0]) handleExcelFile(e.target.files[0]); e.target.value = ""; }} disabled={excelUploading}/>
+          </label>
+
+          {excelMsg && (
+            <div style={{ fontSize: 12, marginBottom: 12, padding: 10, borderRadius: 8, color: excelMsg.startsWith("✅") ? "#166534" : "#dc2626", background: excelMsg.startsWith("✅") ? "#f0fdf4" : "#fef2f2", border: `1px solid ${excelMsg.startsWith("✅") ? "#bbf7d0" : "#fecaca"}` }}>{excelMsg}</div>
+          )}
+
+          {sum && excelPreview && (
+            <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 14 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#111", marginBottom: 6 }}>{sum.title}</div>
+              <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 10 }}>{sum.detail}</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#9ca3af", marginBottom: 6 }}>샘플 (최대 3 POL)</div>
+              {sum.sample.map(([pol, rates]) => (
+                <div key={pol} style={{ fontSize: 11, padding: "6px 0", borderBottom: "1px solid #f3f4f6", fontFamily: "monospace" }}>
+                  <strong>{pol}</strong> {JSON.stringify(rates)}
+                </div>
+              ))}
+              {(excelPreview.skipped || []).length > 0 && (
+                <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 10 }}>
+                  스킵: {(excelPreview.skipped || []).slice(0, 8).join(", ")}{(excelPreview.skipped.length > 8 ? " …" : "")}
+                </div>
+              )}
+              <button type="button" onClick={applyExcelUpload} disabled={saveBusy}
+                style={{ width: "100%", marginTop: 14, padding: "12px", fontSize: 13, fontWeight: 700, color: "#fff", background: saveBusy ? "#fcd34d" : "#d97706", border: "none", borderRadius: 8, cursor: saveBusy ? "not-allowed" : "pointer" }}>
+                {saveBusy ? "저장 중…" : "✅ Supabase에 업로드 · Rate History 기록"}
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
 
   // ── RATE HISTORY ADMIN ──
   if (showRateHistoryAdmin && isAdmin) {
@@ -5033,6 +5325,7 @@ export default function App() {
               <>
                 <button onClick={()=>setShowCarrierAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#1e40af",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>선사운임</button>
                 <button onClick={()=>setShowRentalAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#7c3aed",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>렌탈운임</button>
+                <button onClick={()=>setShowExcelUploadAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#d97706",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>Excel</button>
                 <button onClick={()=>{setShowRateHistoryAdmin(true);}} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#0d9488",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>Rate History</button>
                 <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer",whiteSpace:"nowrap"}}>Notice</button>
                 <button onClick={()=>setShowAdAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa",cursor:"pointer",whiteSpace:"nowrap"}}>광고</button>
@@ -5119,6 +5412,10 @@ export default function App() {
           <button type="button" onClick={()=>setShowCarrierAdmin(true)}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#1e40af",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
             선사별 운임 관리 (매입 · 매출 · 마진)
+          </button>
+          <button type="button" onClick={()=>setShowExcelUploadAdmin(true)}
+            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            Excel 운임 업로드 (선사 원본 · YSL 양식)
           </button>
           <button type="button" onClick={()=>setShowRentalAdmin(true)}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
