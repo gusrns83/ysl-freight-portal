@@ -1238,13 +1238,14 @@ const buildCopyCurrentToFutureCosts = (prevCosts, { rows, carrier, carrierRates,
       if (cost == null) return;
       futureBucket[t] = cost;
       hasCost = true;
+      const curSell = curBucket.sell?.[t];
+      if (curSell != null) {
+        if (!futureBucket.sell) futureBucket.sell = {};
+        futureBucket.sell[t] = curSell;
+      }
     });
     if (!hasCost) return;
-    if (curBucket.sell && Object.keys(curBucket.sell).length > 0) {
-      futureBucket.sell = { ...curBucket.sell };
-    } else {
-      delete futureBucket.sell;
-    }
+    if (futureBucket.sell && !Object.keys(futureBucket.sell).length) delete futureBucket.sell;
     const nextCr = { ...prevCr, future: futureBucket };
     RATE_TYPES.forEach(t => delete nextCr[t]);
     next = {
@@ -2910,6 +2911,65 @@ function mergePolCostsWithSells(polCostO, netRows, sellRows, carrier, period) {
   return out;
 }
 
+/** 매입만 있고 매출 없는 셀 보완 — 향후←현재 복사, 동일 POL 마진·전역 마진 적용 */
+function backfillPolCostSells(polCostO, { polM, polMFuture, margins } = {}) {
+  const out = JSON.parse(JSON.stringify(polCostO || {}));
+  let filled = 0;
+
+  const polMargin = (pol, t, period) => {
+    const store = period === "future" ? polMFuture : polM;
+    const val = store?.[pol]?.[t];
+    return val != null && val !== "" ? marginNum(val) : null;
+  };
+  const globalMargin = (t) => marginNum(margins?.[t]);
+
+  Object.entries(out).forEach(([pol, polEntry]) => {
+    Object.entries(polEntry.carrier || {}).forEach(([carrier, cr]) => {
+      ["current", "future"].forEach(period => {
+        const bucket = cr[period];
+        if (!bucket) return;
+
+        const inferred = {};
+        RATE_TYPES.forEach(t => {
+          if (bucket.sell?.[t] != null && bucket[t] != null) inferred[t] = bucket.sell[t] - bucket[t];
+        });
+        const siblingMargin = RATE_TYPES.map(t => inferred[t]).find(m => m != null);
+
+        if (!bucket.sell) bucket.sell = {};
+
+        RATE_TYPES.forEach(t => {
+          if (bucket[t] == null || bucket.sell[t] != null) return;
+
+          if (period === "future") {
+            const fromCur = cr.current?.sell?.[t];
+            if (fromCur != null) {
+              bucket.sell[t] = fromCur;
+              filled++;
+              return;
+            }
+          }
+
+          const m = inferred[t]
+            ?? siblingMargin
+            ?? polMargin(pol, t, period)
+            ?? polMargin(pol, "coc20", period)
+            ?? globalMargin(t)
+            ?? globalMargin("coc20");
+
+          if (m != null) {
+            bucket.sell[t] = bucket[t] + m;
+            filled++;
+          }
+        });
+
+        if (!Object.keys(bucket.sell).length) delete bucket.sell;
+      });
+    });
+  });
+
+  return { polCostO: out, filled };
+}
+
 function mergePolMarginsMap(polM, marginRows) {
   const out = { ...(polM || {}) };
   Object.entries(marginRows || {}).forEach(([pol, margins]) => {
@@ -3432,6 +3492,11 @@ export default function App() {
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
       } else if (parsed.format === "DY") {
         nextCosts = replacePolCostsWithSells(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period);
+        nextCosts = backfillPolCostSells(nextCosts, {
+          polM: pricingSaveRef.current.polM ?? polM,
+          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
+          margins: pricingSaveRef.current.margins ?? margins,
+        }).polCostO;
         const nextDrop = buildDyDropRates(
           JSON.stringify(carrierDropRates),
           parsed.oceanRows,
@@ -3449,6 +3514,11 @@ export default function App() {
         const cr = parsed.carrier;
         const netRows = parsed.netRows || {};
         nextCosts = replacePolCostsWithSells(baseCosts, netRows, parsed.sellRows, cr, period);
+        nextCosts = backfillPolCostSells(nextCosts, {
+          polM: pricingSaveRef.current.polM ?? polM,
+          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
+          margins: pricingSaveRef.current.margins ?? margins,
+        }).polCostO;
         setPolCostO(nextCosts);
         await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
@@ -3494,6 +3564,36 @@ export default function App() {
         pricingSavedAt: Date.now(),
         serverSyncedAt: Date.now(),
       });
+      setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+    });
+  };
+
+  const applyBackfillSells = () => {
+    const base = pricingSaveRef.current;
+    const { polCostO: next, filled } = backfillPolCostSells(base.polCostO ?? polCostO, {
+      polM: base.polM ?? polM,
+      polMFuture: base.polMFuture ?? polMFuture,
+      margins: base.margins ?? margins,
+    });
+    if (!filled) {
+      setRhSelectMsg("보완할 매출이 없습니다.");
+      return;
+    }
+    if (!window.confirm(`매출 없는 ${filled}개 셀을 보완할까요?\n\n· 향후 ← 현재 매출 복사\n· Excel '-' 등 누락분 → POL/전역 마진 적용`)) return;
+    runSave("매출 보완", async () => {
+      clearTimeout(autoSaveTimerRef.current);
+      skipAutoSaveRef.current = true;
+      setPolCostO(next);
+      await saveOneSettingWithRetry("pol_costs", serializePolCosts(next));
+      pricingSaveRef.current = { ...base, polCostO: next };
+      writePricingCache({
+        ...buildPricingCache(),
+        polCostO: next,
+        pricingSavedAt: Date.now(),
+        serverSyncedAt: Date.now(),
+      });
+      setRhSelectMsg(`✅ 매출 ${filled}셀 보완 · pol_costs 저장`);
+      loadRateHistory();
       setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
     });
   };
@@ -4763,12 +4863,22 @@ export default function App() {
         }
 
         const pendingSellPurge = false;
+        const sellBackfill = backfillPolCostSells(mergedCosts, {
+          polM: cacheMargins || serverMargins,
+          polMFuture: cacheMarginsFuture || serverMarginsFuture,
+          margins: serverSnap.margins,
+        });
+        let pendingSellBackfill = false;
+        if (sellBackfill.filled > 0) {
+          mergedCosts = sellBackfill.polCostO;
+          pendingSellBackfill = true;
+        }
         const costsDiffer = cacheCosts && JSON.stringify(cacheCosts) !== JSON.stringify(serverCosts);
         const mergedDiffersFromServer = JSON.stringify(mergedCosts) !== JSON.stringify(serverCosts);
         const marginsDiffer = cacheMargins && JSON.stringify(cacheMargins) !== JSON.stringify(serverMargins);
         const marginsFutureDiffer = cacheMarginsFuture && JSON.stringify(cacheMarginsFuture) !== JSON.stringify(serverMarginsFuture);
         const cacheNewer = (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
-        const pendingCostResync = cacheNewer && (costsDiffer || mergedDiffersFromServer);
+        const pendingCostResync = pendingSellBackfill || (cacheNewer && (costsDiffer || mergedDiffersFromServer));
         const pendingMarginCacheFix = cacheWouldRestoreMargins;
         const pendingMarginResync = !pendingMarginCacheFix
           && (marginsDiffer || marginsFutureDiffer) && cacheNewer;
@@ -5764,7 +5874,15 @@ export default function App() {
             <span style={{ fontSize: 11, color: rhSelectedIds.length ? "#b45309" : "#9ca3af", fontWeight: rhSelectedIds.length ? 700 : 400 }}>
               선택 {rhSelectedIds.length}건
             </span>
-            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={applyBackfillSells}
+                disabled={saveBusy || rhLoading}
+                style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #5eead4", background: "#f0fdfa", color: "#0f766e", cursor: saveBusy ? "not-allowed" : "pointer" }}
+              >
+                매출 보완
+              </button>
               <button
                 type="button"
                 onClick={toggleRhSelectAll}
