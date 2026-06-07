@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v36"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v37"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -5868,8 +5868,8 @@ export default function App() {
     });
   };
 
-  const getCarrierDropAddon = (cr, cityKey, si, period = "current") => {
-    const p = period === "future" ? "future" : "current";
+  const getCarrierDropAddon = (cr, cityKey, si, period) => {
+    const p = period === "future" ? "future" : period === "current" ? "current" : ratePeriod;
     const sk = sz(si);
     const stored = carrierDropRates[cr]?.[p]?.[cityKey]?.[sk];
     if (stored != null && stored !== "") return Number(stored);
@@ -5883,10 +5883,11 @@ export default function App() {
     return v != null && v !== "" ? Number(v) : 0;
   };
 
-  const getCarrierDropTotalCost = (row, cr, cityKey, si, period = "current") => {
+  const getCarrierDropTotalCost = (row, cr, cityKey, si, period) => {
+    const p = period === "future" ? "future" : period === "current" ? "current" : ratePeriod;
     const t = si === 0 ? "coc20" : "coc40";
-    const ocean = getCarrierRate(row, cr, t, period);
-    const addon = getCarrierDropAddon(cr, cityKey, si, period);
+    const ocean = getCarrierRate(row, cr, t, p);
+    const addon = getCarrierDropAddon(cr, cityKey, si, p);
     if (ocean == null || addon == null) return null;
     return ocean + addon;
   };
@@ -6029,11 +6030,11 @@ export default function App() {
     });
     return { val: b, cr };
   };
-  const bDO = (row, city, si) => {
-    const t = si === 0 ? "coc20" : "coc40";
+  const bDO = (row, city, si, period) => {
+    const p = period === "future" ? "future" : period === "current" ? "current" : ratePeriod;
     let b = null, cr = null;
     CRS.forEach(k => {
-      const tot = getCarrierDropTotalCost(row, k, city, si);
+      const tot = getCarrierDropTotalCost(row, k, city, si, p);
       if (tot != null && (b === null || tot < b)) { b = tot; cr = k; }
     });
     return { val: b, cr };
@@ -6117,7 +6118,7 @@ export default function App() {
     return mkPrice(cost, getM(row.pol, row.area, t, ratePeriod), cr);
   };
   const doDetail = (row, cityKey, si) => {
-    const b = bDO(row, cityKey, si);
+    const b = bDO(row, cityKey, si, ratePeriod);
     if (!b.cr) {
       const cost = getDropCityCost(row, cityKey, si);
       return isAdmin ? mkAdminPrice(cost, null, null) : mkPrice(cost, null, null);
@@ -7687,10 +7688,14 @@ export default function App() {
               const cd20=doDetail(row,k,0),cd40=doDetail(row,k,1);
               const cityKey=`${idx}-${k}`,cOpen=doCityOpen===cityKey;
               const carrierRows = CRS.map(cr=>{
-                const cdC20=dropCarrierDetail(row,k,cr,0,"current"),cdC40=dropCarrierDetail(row,k,cr,1,"current");
-                const fdC20=dropCarrierDetail(row,k,cr,0,"future"),fdC40=dropCarrierDetail(row,k,cr,1,"future");
-                return {cr,cdC20,cdC40,fdC20,fdC40};
-              }).filter(x=>x.cdC20.cost!=null||x.cdC40.cost!=null||x.fdC20.cost!=null||x.fdC40.cost!=null);
+                const pd20=dropCarrierDetail(row,k,cr,0,ratePeriod);
+                const pd40=dropCarrierDetail(row,k,cr,1,ratePeriod);
+                const cdC20=dropCarrierDetail(row,k,cr,0,"current");
+                const cdC40=dropCarrierDetail(row,k,cr,1,"current");
+                const fdC20=dropCarrierDetail(row,k,cr,0,"future");
+                const fdC40=dropCarrierDetail(row,k,cr,1,"future");
+                return {cr,pd20,pd40,cdC20,cdC40,fdC20,fdC40};
+              }).filter(x=>x.pd20.cost!=null||x.pd40.cost!=null||x.cdC20.cost!=null||x.cdC40.cost!=null||x.fdC20.cost!=null||x.fdC40.cost!=null);
               return (
                 <div key={k}>
                   <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 12px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
@@ -7746,17 +7751,17 @@ export default function App() {
                               <th className="cvt-price" style={{padding:"6px 0",fontWeight:500}}>40'</th>
                             </tr></thead>
                             <tbody>
-                              {carrierRows.map(({cr,cdC20,cdC40})=>(
+                              {carrierRows.map(({cr,pd20,pd40})=>(
                                 <tr key={cr} style={{borderBottom:"1px solid #e0f2fe"}}>
                                   <td className="cvt-carrier" style={{padding:"8px 0"}}>
                                     <Bg k={cr}/>
                                   </td>
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={cr}/></td>
-                                  <td className="cvt-price" style={{padding:"8px 0",cursor:cdC20.sell?"pointer":"default",color:cdC20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:cdC20.sell?"underline":"none"}} onClick={()=>cdC20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
-                                    {cdC20.sell?`$${n(cdC20.sell)}`:"—"}
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd20.sell?"pointer":"default",color:pd20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd20.sell?"underline":"none"}} onClick={()=>pd20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
+                                    {pd20.sell?`$${n(pd20.sell)}`:"—"}
                                   </td>
-                                  <td className="cvt-price" style={{padding:"8px 0",cursor:cdC40.sell?"pointer":"default",color:cdC40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:cdC40.sell?"underline":"none"}} onClick={()=>cdC40.sell&&openSC(cr,"coc40",row.pol+" > "+l)}>
-                                    {cdC40.sell?`$${n(cdC40.sell)}`:"—"}
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd40.sell?"pointer":"default",color:pd40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd40.sell?"underline":"none"}} onClick={()=>pd40.sell&&openSC(cr,"coc40",row.pol+" > "+l)}>
+                                    {pd40.sell?`$${n(pd40.sell)}`:"—"}
                                   </td>
                                 </tr>
                               ))}
