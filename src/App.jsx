@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v40"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v41"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -794,6 +794,29 @@ const mergeCarrierDropMargins = (saved) => {
     });
   });
   return next;
+};
+
+/** DB 저장용 — 화면에 보이는 모든 Drop off 금액을 carrier_drop_rates_json에 명시적으로 포함 */
+const serializeCarrierDropRatesForSave = (carrierDropRates) => {
+  const out = JSON.parse(JSON.stringify(carrierDropRates || {}));
+  CRS.forEach(cr => {
+    if (!out[cr]) out[cr] = { current: {}, future: {}, byValidity: {} };
+    if (!out[cr].byValidity) out[cr].byValidity = {};
+    ["current", "future"].forEach(period => {
+      if (!out[cr][period]) out[cr][period] = {};
+      DOC.forEach(({ k }) => {
+        const bucket = { ...(out[cr][period][k] || {}) };
+        [0, 1].forEach(si => {
+          const sk = si === 0 ? "c20" : "c40";
+          if (bucket[sk] != null && bucket[sk] !== "") return;
+          const fallback = DO[k]?.[cr]?.[si];
+          if (fallback != null) bucket[sk] = fallback;
+        });
+        if (Object.keys(bucket).length) out[cr][period][k] = bucket;
+      });
+    });
+  });
+  return out;
 };
 const F_TO_R = Object.fromEntries(Object.entries(PM).map(([rental, freight]) => [freight, rental]));
 const DOC_RC = {
@@ -5514,7 +5537,7 @@ export default function App() {
   const getDropOffSaveEntries = () => {
     const s = pricingSaveRef.current;
     return [
-      ["carrier_drop_rates_json", JSON.stringify(s.carrierDropRates)],
+      ["carrier_drop_rates_json", JSON.stringify(serializeCarrierDropRatesForSave(s.carrierDropRates))],
       ["carrier_drop_margins_json", JSON.stringify(s.carrierDropMargins)],
       ["validity_info_json", JSON.stringify(s.validityInfo)],
     ];
@@ -5533,7 +5556,7 @@ export default function App() {
       ["pol_margin_timestamps", JSON.stringify(s.polTs)],
       ["pol_margin_timestamps_future", JSON.stringify(s.polTsFuture)],
       ["carrier_rates_json", JSON.stringify(s.carrierRates)],
-      ["carrier_drop_rates_json", JSON.stringify(s.carrierDropRates)],
+      ["carrier_drop_rates_json", JSON.stringify(serializeCarrierDropRatesForSave(s.carrierDropRates))],
       ["carrier_drop_margins_json", JSON.stringify(s.carrierDropMargins)],
       ["validity_info_json", JSON.stringify(s.validityInfo)],
     ];
@@ -5689,7 +5712,7 @@ export default function App() {
     ["notice_file_url", notices[0].fileUrl],
     ["validity_info_json", JSON.stringify(validityInfo)],
     ["carrier_rates_json", JSON.stringify(carrierRates)],
-    ["carrier_drop_rates_json", JSON.stringify(carrierDropRates)],
+    ["carrier_drop_rates_json", JSON.stringify(serializeCarrierDropRatesForSave(carrierDropRates))],
     ["carrier_drop_margins_json", JSON.stringify(carrierDropMargins)],
     ["rental_rates_json", JSON.stringify(rentalRates)],
     ["validity_snk", legacyValidityCurrent("SNK")],
@@ -5932,6 +5955,8 @@ export default function App() {
           });
           if (!(showFreightAdmin && freightAdminTab === "grid" && carrierAdminMode === "dropoff")) {
             recordRateHistory({ source: "auto_save" });
+          } else {
+            recordRateHistory({ source: "auto_save", note: "Drop off" });
           }
         })
         .catch(err => {
