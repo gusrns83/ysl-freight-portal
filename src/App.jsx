@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v45"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v47"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -1261,6 +1261,54 @@ const RATE_HISTORY_CHUNK = 80;
 
 const rateHistoryEntryKey = (row) =>
   `${row.carrier}|${row.pol}|${row.rate_type}|${row.period}|${row.category}|${row.route || ""}`;
+
+/** 동일 운임값(매입·매출·마진) 중복 판별용 */
+const rateHistoryDuplicateValueKey = (row) =>
+  `${row.carrier}|${row.pol}|${row.rate_type}|${row.period}|${row.category}|${row.cost}|${row.sell ?? ""}|${row.margin ?? ""}`;
+
+const RH_SOURCE_KEEP_RANK = {
+  excel_upload: 100,
+  admin_save: 80,
+  rental_save: 80,
+  admin: 70,
+  import: 60,
+  gri: 50,
+  import_undo: 20,
+  auto_save: 10,
+  excel_delete: 0,
+};
+
+/** 중복 그룹에서 유지 1건 제외, 삭제 후보 id 목록 */
+const pickRateHistoryDuplicatesToRemove = (rows) => {
+  const groups = new Map();
+  rows.forEach(row => {
+    const k = rateHistoryDuplicateValueKey(row);
+    if (!groups.has(k)) groups.set(k, []);
+    groups.get(k).push(row);
+  });
+  const removeIds = [];
+  const keepIds = [];
+  const groupKeys = [];
+  groups.forEach((members, k) => {
+    if (members.length < 2) return;
+    groupKeys.push(k);
+    const sorted = [...members].sort((a, b) => {
+      const ra = RH_SOURCE_KEEP_RANK[a.source] ?? 20;
+      const rb = RH_SOURCE_KEEP_RANK[b.source] ?? 20;
+      if (rb !== ra) return rb - ra;
+      return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+    });
+    keepIds.push(sorted[0].id);
+    sorted.slice(1).forEach(r => removeIds.push(r.id));
+  });
+  return {
+    removeIds,
+    keepIds,
+    groupCount: groupKeys.length,
+    removeCount: removeIds.length,
+    highlightIds: [...removeIds, ...keepIds],
+  };
+};
 
 const flattenRateSnapshot = ({
   fData, rData, polCostO, carrierRates, carrierDropRates, carrierDropMargins, rentalRates, polM, polMFuture,
@@ -4185,6 +4233,8 @@ export default function App() {
   const [rhDateFrom, setRhDateFrom] = useState("");
   const [rhDateTo, setRhDateTo] = useState("");
   const [rhSelectedIds, setRhSelectedIds] = useState([]);
+  const [rhDuplicateIds, setRhDuplicateIds] = useState(() => new Set());
+  const [rhShowDuplicatesOnly, setRhShowDuplicatesOnly] = useState(false);
   const [rhSelectMsg, setRhSelectMsg] = useState("");
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
@@ -4333,6 +4383,8 @@ export default function App() {
         )
         : []);
       setRhSelectedIds([]);
+      setRhDuplicateIds(new Set());
+      setRhShowDuplicatesOnly(false);
     } catch (e) {
       const msg = String(e.message || e);
       setRhRows([]);
@@ -4767,6 +4819,56 @@ export default function App() {
     });
   };
 
+  const applyFindRhDuplicates = () => {
+    setRhSelectMsg("");
+    const { removeIds, keepIds, groupCount, removeCount, highlightIds } = pickRateHistoryDuplicatesToRemove(rhRows);
+    if (!removeCount) {
+      setRhDuplicateIds(new Set());
+      setRhSelectedIds([]);
+      setRhShowDuplicatesOnly(false);
+      setRhSelectMsg("중복 기록 없음 (동일 POL·타입·매입·매출·마진 기준)");
+      return;
+    }
+    setRhDuplicateIds(new Set(highlightIds));
+    setRhSelectedIds(removeIds);
+    setRhShowDuplicatesOnly(true);
+    const keepLabels = keepIds.map(id => {
+      const r = rhRows.find(x => x.id === id);
+      if (!r) return "";
+      const src = { excel_upload: "Excel", auto_save: "자동저장", admin_save: "Admin" }[r.source] || r.source;
+      return `${r.pol} ${r.rate_type}→${src}`;
+    }).slice(0, 3);
+    setRhSelectMsg(
+      `🔍 중복 ${removeCount}건 (${groupCount}그룹) · 삭제 예정 행 선택됨 · 유지 우선: Excel > Admin > 자동저장`
+      + (keepLabels.length ? `\n예: ${keepLabels.join(", ")}${groupCount > 3 ? " …" : ""}` : ""),
+    );
+  };
+
+  const applyDeleteSelectedRhHistoryOnly = async () => {
+    if (!rhSelectedIds.length) {
+      setRhSelectMsg("선택된 항목이 없습니다.");
+      return;
+    }
+    const n = rhSelectedIds.length;
+    if (!window.confirm(
+      `선택한 ${n}건을 Rate History에서만 삭제할까요?\n\n· 운임 DB(pol_costs 등)는 변경하지 않습니다\n· 자동저장·Excel 중복 이력 정리용`,
+    )) return;
+    setRhSelectMsg("이력 삭제 중…");
+    try {
+      await api(`rate_history?id=in.(${rhSelectedIds.join(",")})`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" },
+      });
+      setRhSelectedIds([]);
+      setRhDuplicateIds(new Set());
+      setRhShowDuplicatesOnly(false);
+      setRhSelectMsg(`✅ 이력 ${n}건 삭제 완료 (운임 DB 유지)`);
+      loadRateHistory();
+    } catch (e) {
+      setRhSelectMsg(`이력 삭제 실패: ${e.message}`);
+    }
+  };
+
   const applyDeleteSelectedRhRows = () => {
     if (!rhSelectedIds.length) {
       setRhSelectMsg("선택된 항목이 없습니다.");
@@ -4818,6 +4920,8 @@ export default function App() {
 
       const dbNote = applied.dbCleared ? ` · 운임 DB ${applied.dbCleared}셀` : "";
       setRhSelectedIds([]);
+      setRhDuplicateIds(new Set());
+      setRhShowDuplicatesOnly(false);
       setRhSelectMsg(`✅ ${n}건 삭제 완료${dbNote}`);
       loadRateHistory();
       setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
@@ -6828,7 +6932,10 @@ export default function App() {
       admin_save: "Admin 저장", auto_save: "자동 저장", excel_upload: "Excel 업로드", excel_delete: "운임 삭제",
       gri: "GRI", import: "기존운임 복사", import_undo: "복사 되돌리기", rental_save: "렌탈 저장",
     }[s] || s || "—");
-    const rhAllSelected = rhRows.length > 0 && rhSelectedIds.length === rhRows.length;
+    const rhDisplayRows = rhShowDuplicatesOnly && rhDuplicateIds.size
+      ? rhRows.filter(r => rhDuplicateIds.has(r.id))
+      : rhRows;
+    const rhAllSelected = rhDisplayRows.length > 0 && rhSelectedIds.length === rhDisplayRows.length;
     const rhValidityForRow = (row) => {
       const cr = row.carrier;
       if (!VALIDITY_KEYS.includes(cr)) return "—";
@@ -6841,7 +6948,7 @@ export default function App() {
     };
     const toggleRhSelectAll = () => {
       setRhSelectMsg("");
-      setRhSelectedIds(rhAllSelected ? [] : rhRows.map(r => r.id));
+      setRhSelectedIds(rhAllSelected ? [] : rhDisplayRows.map(r => r.id));
     };
     return (
       <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: ff }}>
@@ -6910,7 +7017,11 @@ export default function App() {
             <div style={{ fontSize: 12, color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: 10, marginBottom: 12 }}>{rhError}</div>
           )}
           <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
-            <span style={{ fontSize: 11, color: "#6b7280" }}>{rhLoading ? "불러오는 중…" : `${rhRows.length}건 (최대 400건)`}</span>
+            <span style={{ fontSize: 11, color: "#6b7280" }}>
+              {rhLoading ? "불러오는 중…" : rhShowDuplicatesOnly
+                ? `중복 ${rhDisplayRows.length}건 / 전체 ${rhRows.length}건`
+                : `${rhRows.length}건 (최대 400건)`}
+            </span>
             <span style={{ fontSize: 11, color: rhSelectedIds.length ? "#b45309" : "#9ca3af", fontWeight: rhSelectedIds.length ? 700 : 400 }}>
               선택 {rhSelectedIds.length}건
             </span>
@@ -6937,11 +7048,40 @@ export default function App() {
               )}
               <button
                 type="button"
+                onClick={applyFindRhDuplicates}
+                disabled={rhLoading || !rhRows.length}
+                style={{ fontSize: 11, fontWeight: 700, padding: "6px 10px", borderRadius: 8, border: "1px solid #93c5fd", background: "#eff6ff", color: "#1d4ed8", cursor: rhLoading || !rhRows.length ? "not-allowed" : "pointer" }}
+              >
+                🔍 중복 찾기
+              </button>
+              {rhShowDuplicatesOnly && (
+                <button
+                  type="button"
+                  onClick={() => { setRhShowDuplicatesOnly(false); setRhSelectMsg(""); }}
+                  style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", color: "#374151", cursor: "pointer" }}
+                >
+                  전체 보기
+                </button>
+              )}
+              <button
+                type="button"
                 onClick={toggleRhSelectAll}
-                disabled={!rhRows.length || rhLoading}
-                style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", cursor: rhRows.length ? "pointer" : "not-allowed" }}
+                disabled={!rhDisplayRows.length || rhLoading}
+                style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", cursor: rhDisplayRows.length ? "pointer" : "not-allowed" }}
               >
                 {rhAllSelected ? "전체 해제" : "전체 선택"}
+              </button>
+              <button
+                type="button"
+                onClick={applyDeleteSelectedRhHistoryOnly}
+                disabled={!rhSelectedIds.length}
+                style={{
+                  fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "1px solid #fdba74",
+                  color: !rhSelectedIds.length ? "#fdba74" : "#c2410c", background: !rhSelectedIds.length ? "#fff7ed" : "#ffedd5",
+                  cursor: !rhSelectedIds.length ? "not-allowed" : "pointer",
+                }}
+              >
+                이력만 삭제 (DB 유지)
               </button>
               <button
                 type="button"
@@ -6958,7 +7098,11 @@ export default function App() {
             </div>
           </div>
           {rhSelectMsg && (
-            <div style={{ fontSize: 11, marginBottom: 8, padding: 8, borderRadius: 6, color: rhSelectMsg.startsWith("✅") ? "#166534" : "#dc2626", background: rhSelectMsg.startsWith("✅") ? "#f0fdf4" : "#fef2f2" }}>{rhSelectMsg}</div>
+            <div style={{
+              fontSize: 11, marginBottom: 8, padding: 8, borderRadius: 6, whiteSpace: "pre-line",
+              color: rhSelectMsg.startsWith("✅") ? "#166534" : rhSelectMsg.startsWith("🔍") ? "#1d4ed8" : "#dc2626",
+              background: rhSelectMsg.startsWith("✅") ? "#f0fdf4" : rhSelectMsg.startsWith("🔍") ? "#eff6ff" : "#fef2f2",
+            }}>{rhSelectMsg}</div>
           )}
           <div style={{ overflowX: "auto", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12 }}>
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 860 }}>
@@ -6972,34 +7116,44 @@ export default function App() {
                       type="checkbox"
                       checked={rhAllSelected}
                       onChange={toggleRhSelectAll}
-                      disabled={!rhRows.length}
+                      disabled={!rhDisplayRows.length}
                       title="전체 선택"
-                      style={{ width: 16, height: 16, cursor: rhRows.length ? "pointer" : "not-allowed" }}
+                      style={{ width: 16, height: 16, cursor: rhDisplayRows.length ? "pointer" : "not-allowed" }}
                     />
                   </th>
                 </tr>
               </thead>
               <tbody>
-                {rhRows.length === 0 && !rhLoading && (
-                  <tr><td colSpan={12} style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>기록 없음 · 저장 후 자동 적재됩니다</td></tr>
+                {rhDisplayRows.length === 0 && !rhLoading && (
+                  <tr><td colSpan={12} style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>
+                    {rhShowDuplicatesOnly ? "중복 기록 없음 · 전체 보기로 돌아가세요" : "기록 없음 · 저장 후 자동 적재됩니다"}
+                  </td></tr>
                 )}
-                {rhRows.map(row => {
+                {rhDisplayRows.map(row => {
                   const selected = rhSelectedIds.includes(row.id);
+                  const dupHighlight = rhDuplicateIds.has(row.id);
+                  const dupRemove = dupHighlight && selected;
+                  const dupKeep = dupHighlight && !selected;
                   return (
                   <tr
                     key={row.id}
                     onClick={() => toggleRhRowSelect(row.id)}
                     onDoubleClick={() => (rhIsRental ? jumpToRentalGridFromRh(row) : jumpToFreightGridFromRh(row))}
                     title={
-                      rhIsRental && row.category === "rental"
-                        ? "더블클릭 → Rental 운임 탭에서 편집"
-                        : row.category === "ocean" && CRS.includes(row.carrier)
-                          ? "더블클릭 → 현재 운임 탭에서 편집"
-                          : undefined
+                      dupRemove ? "중복 · 삭제 예정 (이력만 삭제 권장)"
+                        : dupKeep ? "중복 · 유지 (Excel > Admin > 자동저장 우선)"
+                        : rhIsRental && row.category === "rental"
+                          ? "더블클릭 → Rental 운임 탭에서 편집"
+                          : row.category === "ocean" && CRS.includes(row.carrier)
+                            ? "더블클릭 → 현재 운임 탭에서 편집"
+                            : undefined
                     }
                     style={{
                       borderBottom: "1px solid #f3f4f6",
-                      background: selected ? "#fffbeb" : "#fff",
+                      background: selected && !dupHighlight ? "#fffbeb"
+                        : dupRemove ? "#fee2e2"
+                        : dupKeep ? "#ecfdf5"
+                        : selected ? "#fffbeb" : "#fff",
                       cursor: "pointer",
                     }}
                   >
@@ -7035,9 +7189,9 @@ export default function App() {
           </div>
           <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 12, lineHeight: 1.5 }}>
             {rhIsRental ? (
-              <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → Rental 운임 탭에서 해당 POL·반납지 편집 · <strong>선택 기록 삭제</strong>는 Rate History + Rental DB에서 해당 셀을 제거합니다.</>
+              <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → Rental 운임 탭에서 해당 POL·반납지 편집 · <strong>중복 찾기</strong>는 동일 POL·타입·매입·매출·마진 기록을 묶어 삭제 후보를 선택합니다 · <strong>이력만 삭제</strong>는 Rate History만 지우고 Rental DB는 유지 · <strong>선택 기록 삭제</strong>는 이력 + Rental DB 셀 제거.</>
             ) : (
-              <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → 현재 운임 탭에서 해당 POL 편집 · <strong>선택 기록 삭제</strong>는 Rate History + Supabase 운임 DB(pol_costs)에서 해당 POL·타입을 제거합니다.</>
+              <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → 현재 운임 탭에서 해당 POL 편집 · <strong>중복 찾기</strong>는 자동저장·Excel 등 동일 운임값 기록을 찾아 삭제 후보(분홍)를 선택 · 유지(녹색)는 Excel &gt; Admin &gt; 자동저장 우선 · <strong>이력만 삭제</strong>는 DB 유지 · <strong>선택 기록 삭제</strong>는 이력 + pol_costs 제거.</>
             )}
           </div>
         </div>
