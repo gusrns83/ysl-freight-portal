@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v44"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v45"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -1479,10 +1479,20 @@ const buildRateHistoryQuery = (filters) => {
   const parts = ["rate_history?select=*", "order=created_at.desc", "limit=400"];
   parts.push("source=neq.excel_delete");
   parts.push("cost=gt.0");
+  if (filters.scope === "rental") {
+    parts.push("category=eq.rental");
+  } else if (filters.scope === "freight") {
+    if (filters.category && filters.category !== "ALL") {
+      parts.push(`category=eq.${encodeURIComponent(filters.category)}`);
+    } else {
+      parts.push("category=in.(ocean,dropoff)");
+    }
+  } else if (filters.category && filters.category !== "ALL") {
+    parts.push(`category=eq.${encodeURIComponent(filters.category)}`);
+  }
   if (filters.carrier && filters.carrier !== "ALL") parts.push(`carrier=eq.${encodeURIComponent(filters.carrier)}`);
   if (filters.area && filters.area !== "ALL") parts.push(`area=eq.${encodeURIComponent(filters.area)}`);
   if (filters.period && filters.period !== "ALL") parts.push(`period=eq.${encodeURIComponent(filters.period)}`);
-  if (filters.category && filters.category !== "ALL") parts.push(`category=eq.${encodeURIComponent(filters.category)}`);
   if (filters.pol?.trim()) parts.push(`pol=ilike.*${encodeURIComponent(filters.pol.trim())}*`);
   if (filters.dateFrom) parts.push(`created_at=gte.${filters.dateFrom}T00:00:00`);
   if (filters.dateTo) parts.push(`created_at=lte.${filters.dateTo}T23:59:59.999`);
@@ -4148,6 +4158,7 @@ export default function App() {
   const [showFreightAdmin, setShowFreightAdmin] = useState(false);
   const [freightAdminTab, setFreightAdminTab] = useState("grid");
   const [showRentalAdmin, setShowRentalAdmin] = useState(false);
+  const [rentalAdminTab, setRentalAdminTab] = useState("grid");
   const [excelFormat, setExcelFormat] = useState("SNK");
   const [excelPeriod, setExcelPeriod] = useState("current");
   const [excelSheet, setExcelSheet] = useState("");
@@ -4169,6 +4180,7 @@ export default function App() {
   const [rhArea, setRhArea] = useState("ALL");
   const [rhPeriod, setRhPeriod] = useState("ALL");
   const [rhCategory, setRhCategory] = useState("ALL");
+  const [rhScope, setRhScope] = useState("freight");
   const [rhPol, setRhPol] = useState("");
   const [rhDateFrom, setRhDateFrom] = useState("");
   const [rhDateTo, setRhDateTo] = useState("");
@@ -4303,6 +4315,7 @@ export default function App() {
       }
 
       const data = await api(buildRateHistoryQuery({
+        scope: rhScope,
         carrier: rhCarrier,
         area: rhArea,
         period: rhPeriod,
@@ -4344,6 +4357,19 @@ export default function App() {
     setRhSelectMsg(`→ 현재 운임: ${CN_KR[row.carrier] || row.carrier} · ${row.pol} · ${row.rate_type}`);
   };
 
+  const jumpToRentalGridFromRh = (row) => {
+    if (row.category !== "rental") return;
+    setRentalAdminTab("grid");
+    setRentalAdminPeriod(row.period === "future" ? "future" : "current");
+    setRentalMarginTab("pol");
+    setRentalSelPol(row.pol || "");
+    setRentalEditCell(null);
+    const city = row.route?.includes(" > ") ? row.route.split(" > ").slice(1).join(" > ").trim() : "";
+    if (city && RENT_CITY_ORDER.includes(city)) setSelReturnCity(city);
+    else setSelReturnCity("");
+    setRhSelectMsg(`→ Rental 운임: ${row.pol} · ${row.rate_type}${city ? ` · ${city}` : ""}`);
+  };
+
   const ensurePolCostSellsBackfill = async (opts = {}) => {
     if (!isAdmin || saveBusy) return 0;
     const base = pricingSaveRef.current;
@@ -4375,7 +4401,10 @@ export default function App() {
         }).catch(e => console.warn("pol_costs 매출 보완 skip", e));
       }
     }
-    if (tab === "history") loadRateHistory();
+    if (tab === "history") {
+      setRhScope("freight");
+      loadRateHistory();
+    }
   };
 
   const freightAdminTabBar = (
@@ -4386,7 +4415,10 @@ export default function App() {
           type="button"
           onClick={() => {
             setFreightAdminTab(id);
-            if (id === "history") loadRateHistory();
+            if (id === "history") {
+              setRhScope("freight");
+              loadRateHistory();
+            }
             if (id === "grid" && !saveBusy) {
               ensurePolCostSellsBackfill().then(filled => {
                 if (filled > 0) setRhSelectMsg(`✅ 매출 ${filled}셀 자동 보완 · 현재 운임 반영`);
@@ -4398,6 +4430,33 @@ export default function App() {
             background: freightAdminTab === id ? color : "#f3f4f6",
             color: freightAdminTab === id ? "#fff" : "#6b7280",
             boxShadow: freightAdminTab === id ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
+  const rentalAdminTabBar = (
+    <div style={{ display: "flex", gap: 6, padding: "10px 16px 12px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
+      {[["grid", "현재 운임", "#7c3aed"], ["history", "변경 이력", "#6d28d9"]].map(([id, label, color]) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => {
+            setRentalAdminTab(id);
+            if (id === "history") {
+              setRhScope("rental");
+              setRhCarrier("RENTAL");
+              loadRateHistory();
+            }
+          }}
+          style={{
+            flex: 1, padding: "10px 8px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "none", cursor: "pointer",
+            background: rentalAdminTab === id ? color : "#f3f4f6",
+            color: rentalAdminTab === id ? "#fff" : "#6b7280",
+            boxShadow: rentalAdminTab === id ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
           }}
         >
           {label}
@@ -6756,8 +6815,9 @@ export default function App() {
     );
   }
 
-  // ── RATE HISTORY (운임 관리 · 이력 탭) ──
-  if (showFreightAdmin && freightAdminTab === "history" && isAdmin) {
+  // ── RATE HISTORY (운임 관리 · Rental 관리 · 이력 탭) ──
+  if (isAdmin && ((showFreightAdmin && freightAdminTab === "history") || (showRentalAdmin && rentalAdminTab === "history"))) {
+    const rhIsRental = rhScope === "rental";
     const fmtRhDate = (iso) => {
       if (!iso) return "—";
       try {
@@ -6788,17 +6848,21 @@ export default function App() {
         {adminSaveToastEl}
         <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e5e7eb", zIndex: 30 }}>
           <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-            <button type="button" onClick={closeFreightAdmin} style={{ fontSize: 13, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>← Back</button>
-            <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>운임 관리</div>
-            <button type="button" onClick={loadRateHistory} disabled={rhLoading} style={{ fontSize: 11, fontWeight: 700, padding: "6px 10px", borderRadius: 8, background: rhLoading ? "#99f6e4" : "#0d9488", color: "#fff", border: "none", cursor: rhLoading ? "not-allowed" : "pointer" }}>
+            <button type="button" onClick={rhIsRental ? () => setShowRentalAdmin(false) : closeFreightAdmin} style={{ fontSize: 13, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>← Back</button>
+            <div style={{ fontSize: 14, fontWeight: 700, color: rhIsRental ? "#7c3aed" : "#111" }}>
+              {rhIsRental ? "컨테이너 Rental · 변경 이력" : "운임 관리"}
+            </div>
+            <button type="button" onClick={loadRateHistory} disabled={rhLoading} style={{ fontSize: 11, fontWeight: 700, padding: "6px 10px", borderRadius: 8, background: rhLoading ? (rhIsRental ? "#c4b5fd" : "#99f6e4") : (rhIsRental ? "#7c3aed" : "#0d9488"), color: "#fff", border: "none", cursor: rhLoading ? "not-allowed" : "pointer" }}>
               {rhLoading ? "…" : "검색"}
             </button>
           </div>
-          {freightAdminTabBar}
+          {rhIsRental ? rentalAdminTabBar : freightAdminTabBar}
         </div>
         <div style={{ maxWidth: 960, margin: "0 auto", padding: "16px 16px 80px" }}>
           <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#0f766e", marginBottom: 10 }}>검색 조건</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: rhIsRental ? "#6d28d9" : "#0f766e", marginBottom: 10 }}>
+              {rhIsRental ? "Rental 운임 변경 이력" : "검색 조건"}
+            </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 8, marginBottom: 8 }}>
               <label style={{ fontSize: 10, color: "#6b7280" }}>시작일
                 <input type="date" value={rhDateFrom} onChange={e => setRhDateFrom(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }} />
@@ -6806,16 +6870,18 @@ export default function App() {
               <label style={{ fontSize: 10, color: "#6b7280" }}>종료일
                 <input type="date" value={rhDateTo} onChange={e => setRhDateTo(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }} />
               </label>
-              <label style={{ fontSize: 10, color: "#6b7280" }}>선사
-                <select value={rhCarrier} onChange={e => setRhCarrier(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
-                  {["ALL", ...CRS, "RENTAL"].map(c => <option key={c} value={c}>{c === "ALL" ? "전체" : (CN_KR[c] || c)}</option>)}
-                </select>
-              </label>
+              {!rhIsRental && (
+                <label style={{ fontSize: 10, color: "#6b7280" }}>선사
+                  <select value={rhCarrier} onChange={e => setRhCarrier(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
+                    {["ALL", ...CRS].map(c => <option key={c} value={c}>{c === "ALL" ? "전체" : (CN_KR[c] || c)}</option>)}
+                  </select>
+                </label>
+              )}
               <label style={{ fontSize: 10, color: "#6b7280" }}>구간(Area)
                 <select value={rhArea} onChange={e => setRhArea(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
                   <option value="ALL">전체</option>
                   {areas.map(a => <option key={a} value={a}>{a}</option>)}
-                  <option value="DROP">DROP</option>
+                  {!rhIsRental && <option value="DROP">DROP</option>}
                 </select>
               </label>
               <label style={{ fontSize: 10, color: "#6b7280" }}>기간
@@ -6825,17 +6891,18 @@ export default function App() {
                   <option value="future">향후</option>
                 </select>
               </label>
-              <label style={{ fontSize: 10, color: "#6b7280" }}>유형
-                <select value={rhCategory} onChange={e => setRhCategory(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
-                  <option value="ALL">전체</option>
-                  <option value="ocean">해상</option>
-                  <option value="dropoff">Drop off</option>
-                  <option value="rental">Rental</option>
-                </select>
-              </label>
+              {!rhIsRental && (
+                <label style={{ fontSize: 10, color: "#6b7280" }}>유형
+                  <select value={rhCategory} onChange={e => setRhCategory(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
+                    <option value="ALL">전체 (해상+Drop)</option>
+                    <option value="ocean">해상</option>
+                    <option value="dropoff">Drop off</option>
+                  </select>
+                </label>
+              )}
             </div>
-            <label style={{ fontSize: 10, color: "#6b7280", display: "block" }}>POL / 구간 검색
-              <input type="text" value={rhPol} onChange={e => setRhPol(e.target.value)} placeholder="BUSAN, SHANGHAI, Moscow…" style={{ display: "block", width: "100%", marginTop: 4, padding: "8px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }} />
+            <label style={{ fontSize: 10, color: "#6b7280", display: "block" }}>{rhIsRental ? "POL / 반납지 검색" : "POL / 구간 검색"}
+              <input type="text" value={rhPol} onChange={e => setRhPol(e.target.value)} placeholder={rhIsRental ? "BUSAN, Moscow, Shanghai…" : "BUSAN, SHANGHAI, Moscow…"} style={{ display: "block", width: "100%", marginTop: 4, padding: "8px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }} />
             </label>
           </div>
 
@@ -6848,22 +6915,26 @@ export default function App() {
               선택 {rhSelectedIds.length}건
             </span>
             <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={applyPruneNoServiceRates}
-                disabled={saveBusy || rhLoading}
-                style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #fcd34d", background: "#fffbeb", color: "#b45309", cursor: saveBusy ? "not-allowed" : "pointer" }}
-              >
-                서비스外 정리
-              </button>
-              <button
-                type="button"
-                onClick={applyBackfillSells}
-                disabled={saveBusy || rhLoading}
-                style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #5eead4", background: "#f0fdfa", color: "#0f766e", cursor: saveBusy ? "not-allowed" : "pointer" }}
-              >
-                매출 보완
-              </button>
+              {!rhIsRental && (
+                <>
+                  <button
+                    type="button"
+                    onClick={applyPruneNoServiceRates}
+                    disabled={saveBusy || rhLoading}
+                    style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #fcd34d", background: "#fffbeb", color: "#b45309", cursor: saveBusy ? "not-allowed" : "pointer" }}
+                  >
+                    서비스外 정리
+                  </button>
+                  <button
+                    type="button"
+                    onClick={applyBackfillSells}
+                    disabled={saveBusy || rhLoading}
+                    style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #5eead4", background: "#f0fdfa", color: "#0f766e", cursor: saveBusy ? "not-allowed" : "pointer" }}
+                  >
+                    매출 보완
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 onClick={toggleRhSelectAll}
@@ -6918,8 +6989,14 @@ export default function App() {
                   <tr
                     key={row.id}
                     onClick={() => toggleRhRowSelect(row.id)}
-                    onDoubleClick={() => jumpToFreightGridFromRh(row)}
-                    title={row.category === "ocean" && CRS.includes(row.carrier) ? "더블클릭 → 현재 운임 탭에서 편집" : undefined}
+                    onDoubleClick={() => (rhIsRental ? jumpToRentalGridFromRh(row) : jumpToFreightGridFromRh(row))}
+                    title={
+                      rhIsRental && row.category === "rental"
+                        ? "더블클릭 → Rental 운임 탭에서 편집"
+                        : row.category === "ocean" && CRS.includes(row.carrier)
+                          ? "더블클릭 → 현재 운임 탭에서 편집"
+                          : undefined
+                    }
                     style={{
                       borderBottom: "1px solid #f3f4f6",
                       background: selected ? "#fffbeb" : "#fff",
@@ -6957,7 +7034,11 @@ export default function App() {
             </table>
           </div>
           <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 12, lineHeight: 1.5 }}>
-            행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → 현재 운임 탭에서 해당 POL 편집 · <strong>선택 기록 삭제</strong>는 Rate History + Supabase 운임 DB(pol_costs)에서 해당 POL·타입을 제거합니다.
+            {rhIsRental ? (
+              <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → Rental 운임 탭에서 해당 POL·반납지 편집 · <strong>선택 기록 삭제</strong>는 Rate History + Rental DB에서 해당 셀을 제거합니다.</>
+            ) : (
+              <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → 현재 운임 탭에서 해당 POL 편집 · <strong>선택 기록 삭제</strong>는 Rate History + Supabase 운임 DB(pol_costs)에서 해당 POL·타입을 제거합니다.</>
+            )}
           </div>
         </div>
       </div>
@@ -7190,8 +7271,8 @@ export default function App() {
   const GuestRentTriple = ({d20, d40dv, d40hc, prefix = ""}) => (
     <div className="guest-price-pair guest-rent-triple">
       {[d20, d40dv, d40hc].map((d, i) => (
-        <div key={i} className="guest-price-col">
-          <div style={{fontSize:10,color:"#9ca3af"}}>{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
+        <div key={RENT_COMBO_SHORT[i]} className="guest-price-col guest-rent-col">
+          <div className="guest-rent-size">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
           <div className={`guest-price-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
           {d.cr && <Bg k={d.cr}/>}
         </div>
@@ -7422,16 +7503,22 @@ export default function App() {
         {adminSaveToastEl}
         <div className="portal-sticky-top admin-sticky-top">
           <div style={{padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <button onClick={()=>setShowRentalAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+            <button onClick={()=>{setShowRentalAdmin(false);setRentalAdminTab("grid");}} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
             <div style={{textAlign:"center"}}>
               <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
               <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV} · {DB_LABEL[DB_RENTAL]}</div>
             </div>
-            <button type="button" onClick={saveRentalPricing} disabled={saveBusy}
-              style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#c4b5fd":"#7c3aed",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
-              {saveBusy ? "저장 중…" : "💾 저장"}
-            </button>
+            {rentalAdminTab === "grid" ? (
+              <button type="button" onClick={saveRentalPricing} disabled={saveBusy}
+                style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#c4b5fd":"#7c3aed",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
+                {saveBusy ? "저장 중…" : "💾 저장"}
+              </button>
+            ) : (
+              <div style={{width:48}}/>
+            )}
           </div>
+          {rentalAdminTabBar}
+          {rentalAdminTab === "grid" && (
           <div className="carrier-admin-page rental-admin-page" onClick={e => e.stopPropagation()}>
             <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3}}>
               {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
@@ -7444,6 +7531,7 @@ export default function App() {
               ))}
             </div>
           </div>
+          )}
         </div>
         <div className="carrier-admin-page rental-admin-page" onClick={e => e.stopPropagation()}>
           <div style={{marginBottom:10,background:"#fff",border:"1px solid #ddd6fe",borderRadius:10,padding:10}}>
@@ -8162,7 +8250,7 @@ export default function App() {
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
         <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
-          <div className={isAdmin?"admin-card-top":"route-card-head"}>
+          <div className={isAdmin?"admin-card-top":`route-card-head route-card-head--rent${!isAdmin?" route-card-head--guest":""}`}>
             <RouteCardLabel area={row.area} pol={row.displayPol || row.pol}/>
             {!isAdmin && <GuestRentTriple d20={d20} d40dv={d40dv} d40hc={d40hc} prefix="MOW"/>}
             <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
@@ -8194,11 +8282,11 @@ export default function App() {
               const fp=PM[row.pol],fr=fp?fMap[fp]:null;
               return (
                 <div key={city}>
-                  <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"8px 12px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
-                    <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
-                      <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
+                  <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":"rent-city-row-btn"} style={{width:"100%",display:"flex",alignItems:"center",padding:"8px 12px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
+                    <div className={isAdmin?"admin-card-top":`rent-city-row-head${!isAdmin?" rent-city-row-head--guest":""}`} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
+                      <span className="rent-city-label">{cityLabel}</span>
                       {!isAdmin && <GuestRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc}/>}
-                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+                      <span className="route-card-chevron" style={{transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
                     </div>
                     {isAdmin && (
                       <div className="admin-card-prices">
@@ -8322,7 +8410,7 @@ export default function App() {
             {isAdmin && (
               <>
                 <button onClick={() => openFreightAdmin("grid")} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#1e40af",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>운임관리</button>
-                <button onClick={()=>setShowRentalAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#7c3aed",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>렌탈운임</button>
+                <button onClick={()=>{setShowRentalAdmin(true);setRentalAdminTab("grid");}} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#7c3aed",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>렌탈운임</button>
                 <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer",whiteSpace:"nowrap"}}>Notice</button>
                 <button onClick={()=>setShowAdAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa",cursor:"pointer",whiteSpace:"nowrap"}}>광고</button>
                 <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer",whiteSpace:"nowrap"}}>Clients</button>
@@ -8409,9 +8497,9 @@ export default function App() {
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#1e40af",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
             운임 관리 (현재 · 변경 이력 · Excel)
           </button>
-          <button type="button" onClick={()=>setShowRentalAdmin(true)}
+          <button type="button" onClick={()=>{setShowRentalAdmin(true);setRentalAdminTab("grid");}}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            컨테이너 Rental 운임 관리 (매입 · 매출 · 마진)
+            컨테이너 Rental 운임 (현재 · 변경 이력)
           </button>
           <button type="button" onClick={()=>setShowAdAdmin(true)}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#ea580c",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
