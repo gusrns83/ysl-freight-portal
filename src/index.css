@@ -327,6 +327,11 @@
     column-gap: 8px;
     align-items: center;
   }
+  .carrier-rent-table--triple thead tr,
+  .carrier-rent-table--triple tbody tr {
+    grid-template-columns: 44px minmax(0, 1fr) minmax(52px, 17%) minmax(52px, 17%) minmax(52px, 17%);
+    column-gap: 4px;
+  }
   .carrier-rent-table thead tr,
   .carrier-rent-table tbody tr {
     grid-template-columns: 44px minmax(0, 1fr) minmax(64px, 22%) minmax(64px, 22%);
@@ -1039,6 +1044,27 @@
   gap: 10px;
   flex-shrink: 0;
   white-space: nowrap;
+}
+.guest-rent-triple {
+  gap: 6px;
+}
+.guest-rent-triple .guest-price-col {
+  min-width: 52px;
+}
+.guest-rent-triple .guest-price-val {
+  font-size: clamp(10px, 2.8vw, 13px);
+}
+.admin-rent-triple {
+  gap: 6px;
+}
+.admin-rent-triple .apc-col {
+  min-width: 72px;
+}
+.carrier-rent-table--triple col.cvt-col-validity {
+  width: 38%;
+}
+.carrier-rent-table--triple col.cvt-col-price {
+  width: 14%;
 }
 .guest-price-col {
   text-align: right;
