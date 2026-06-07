@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v39"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v40"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -467,7 +467,9 @@ const postSettingsRows = async (rows, label) => enqueueNetworkWrite(async () => 
       }
     }
   }
-  throw new Error(`Supabase 연결 실패 (${label}) — ${lastErr?.message || "Failed to fetch"}`);
+  for (const row of rows) {
+    await saveSettingDirect(row.key, row.value);
+  }
 });
 
 const saveSettingsEntries = async (entries) => {
@@ -3686,6 +3688,31 @@ function mergeRentalRatesPatch(existing, patch) {
   return out;
 }
 
+function compactRentalRates(rentalRates) {
+  if (!rentalRates || typeof rentalRates !== "object") return {};
+  const out = {};
+  Object.entries(rentalRates).forEach(([pol, periods]) => {
+    if (!periods || typeof periods !== "object") return;
+    const polOut = {};
+    ["current", "future"].forEach(p => {
+      const bucket = periods[p];
+      if (!bucket || typeof bucket !== "object") return;
+      const cityOut = {};
+      Object.entries(bucket).forEach(([city, vals]) => {
+        const b = normalizeRentalCityBucket(vals);
+        const entry = {};
+        if (b.c20 != null && b.c20 !== "") entry.c20 = b.c20;
+        if (b.c40dv != null && b.c40dv !== "") entry.c40dv = b.c40dv;
+        if (b.c40hc != null && b.c40hc !== "") entry.c40hc = b.c40hc;
+        if (Object.keys(entry).length) cityOut[city] = entry;
+      });
+      if (Object.keys(cityOut).length) polOut[p] = cityOut;
+    });
+    if (Object.keys(polOut).length) out[pol] = polOut;
+  });
+  return out;
+}
+
 function previewSummary(parsed, period) {
   if (parsed.format === "RENTAL") {
     const polN = parsed.cityRates ? Object.keys(parsed.cityRates).length : Object.keys(parsed.bases || {}).length;
@@ -4386,14 +4413,16 @@ export default function App() {
       let nextCosts = baseCosts;
 
       if (parsed.format === "RENTAL") {
-        const { rentalRates: clearedRental } = clearRentalPeriodRates(rentalRates, period);
+        const baseRental = pricingSaveRef.current.rentalRates ?? rentalRates;
+        const { rentalRates: clearedRental } = clearRentalPeriodRates(baseRental, period);
         const patch = parsed.cityRates
           ? buildRentalRatesFromCityRates(parsed.cityRates, period)
           : buildRentalRatesFromBases(parsed.bases, period);
-        const merged = mergeRentalRatesPatch(clearedRental, patch);
-        setRentalRates(merged);
-        await saveSettingDirect("rental_rates_json", JSON.stringify(merged));
+        const merged = compactRentalRates(mergeRentalRatesPatch(clearedRental, patch));
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
+        setRentalRates(merged);
+        setExcelMsg("Rental 운임 DB 저장 중…");
+        await saveSettingDirect("rental_rates_json", JSON.stringify(merged));
       } else if (parsed.format === "DY") {
         nextCosts = mergePolCostsUploadByValidity(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period, excelValidityDraft);
         nextCosts = backfillPolCostSells(nextCosts, {
@@ -4475,11 +4504,13 @@ export default function App() {
       });
 
       const archiveCarrier = parsed.format === "DY" ? "DY" : (parsed.carrier || parsed.format);
-      const archiveN = parsed.format !== "RENTAL" ? countCarrierValidityArchive(nextCosts, archiveCarrier) : 0;
       const slotLabel = period === "future" ? "향후" : "현재";
+      const archiveN = parsed.format !== "RENTAL" ? countCarrierValidityArchive(nextCosts, archiveCarrier) : 0;
       finishUpload(
         true,
-        `✅ 저장 완료 · ${validityLabel} (${slotLabel} 탭) · DB에 validity ${archiveN}구간 누적`,
+        parsed.format === "RENTAL"
+          ? `✅ Rental 저장 완료 · ${validityLabel} (${slotLabel}) · ${Object.keys(parsed.cityRates || parsed.bases || {}).length} POL`
+          : `✅ 저장 완료 · ${validityLabel} (${slotLabel} 탭) · DB에 validity ${archiveN}구간 누적`,
       );
 
       if (parsed.format !== "RENTAL") {
@@ -5480,6 +5511,15 @@ export default function App() {
     ? createPortal(<AdminSaveToast busy={saveBusy} feedback={saveFeedback} onDismiss={dismissSaveFeedback} />, document.body)
     : null;
 
+  const getDropOffSaveEntries = () => {
+    const s = pricingSaveRef.current;
+    return [
+      ["carrier_drop_rates_json", JSON.stringify(s.carrierDropRates)],
+      ["carrier_drop_margins_json", JSON.stringify(s.carrierDropMargins)],
+      ["validity_info_json", JSON.stringify(s.validityInfo)],
+    ];
+  };
+
   const getCarrierSaveEntries = () => {
     const s = pricingSaveRef.current;
     return [
@@ -5869,18 +5909,20 @@ export default function App() {
     writePricingCache(buildPricingCache());
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
-      const task = showFreightAdmin && freightAdminTab === "grid"
-        ? () => saveSettingsEntries(getCarrierSaveEntries())
-        : showRentalAdmin
-          ? () => saveSettingsEntries(getRentalSaveEntries())
-          : async () => {
-              await saveSettingsEntries(getCarrierSaveEntries());
-              try {
-                await saveSettingsEntries(getRentalSaveEntries());
-              } catch (e) {
-                console.warn("rental auto-save deferred", e);
-              }
-            };
+      const task = showRentalAdmin
+        ? () => saveSettingsEntries(getRentalSaveEntries())
+        : showFreightAdmin && freightAdminTab === "grid" && carrierAdminMode === "dropoff"
+          ? () => saveSettingsEntriesDirect(getDropOffSaveEntries())
+          : showFreightAdmin && freightAdminTab === "grid"
+            ? () => saveSettingsEntries(getCarrierSaveEntries())
+            : async () => {
+                await saveSettingsEntries(getCarrierSaveEntries());
+                try {
+                  await saveSettingsEntries(getRentalSaveEntries());
+                } catch (e) {
+                  console.warn("rental auto-save deferred", e);
+                }
+              };
       enqueueSave(task)
         .then(() => {
           writePricingCache({
@@ -5888,11 +5930,16 @@ export default function App() {
             pricingSavedAt: Date.now(),
             serverSyncedAt: Date.now(),
           });
-          recordRateHistory({ source: "auto_save" });
+          if (!(showFreightAdmin && freightAdminTab === "grid" && carrierAdminMode === "dropoff")) {
+            recordRateHistory({ source: "auto_save" });
+          }
         })
         .catch(err => {
           console.error("auto-save failed", err);
           writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now() });
+          if (showFreightAdmin && freightAdminTab === "grid" && carrierAdminMode === "dropoff") {
+            flashSaveFeedback("error", `Drop off 자동 저장 실패: ${err.message}`);
+          }
         });
     }, 2500);
     return () => clearTimeout(autoSaveTimerRef.current);
@@ -5902,6 +5949,7 @@ export default function App() {
     showFreightAdmin,
     freightAdminTab,
     showRentalAdmin,
+    carrierAdminMode,
     polCostO,
     margins,
     areaM,
@@ -6384,18 +6432,23 @@ export default function App() {
 
   const saveNoticesOnly = () => runSave("공지", () => saveNoticeSettings());
 
-  const saveCarrierPricing = () => runSave("선사 운임", async () => {
-    clearTimeout(autoSaveTimerRef.current);
-    const entries = getCarrierSaveEntries();
-    const light = entries.filter(([k]) => !HEAVY_SETTING_KEYS.has(k));
-    const heavy = entries.filter(([k]) => HEAVY_SETTING_KEYS.has(k));
-    for (const [key, value] of heavy) {
-      await saveOneSettingWithRetry(key, value);
+  const saveCarrierPricing = () => {
+    if (carrierAdminMode === "dropoff") {
+      return runSave("Drop off", () => saveSettingsEntriesDirect(getDropOffSaveEntries()));
     }
-    if (light.length) {
-      await postSettingsRows(light.map(([key, value]) => ({ key, value: String(value) })), "carrier settings");
-    }
-  });
+    return runSave("선사 운임", async () => {
+      clearTimeout(autoSaveTimerRef.current);
+      const entries = getCarrierSaveEntries();
+      const light = entries.filter(([k]) => !HEAVY_SETTING_KEYS.has(k));
+      const heavy = entries.filter(([k]) => HEAVY_SETTING_KEYS.has(k));
+      for (const [key, value] of heavy) {
+        await saveOneSettingWithRetry(key, value);
+      }
+      if (light.length) {
+        await postSettingsRows(light.map(([key, value]) => ({ key, value: String(value) })), "carrier settings");
+      }
+    });
+  };
 
   const saveRentalPricing = () => runSave("렌탈 운임", async () => {
     clearTimeout(autoSaveTimerRef.current);
