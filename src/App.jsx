@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v42"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v43"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -223,6 +223,9 @@ const RENTAL_DB_KEYS = [
   "rental_rates_json", "rental_global_margins", "rental_area_margins", "rental_pol_margins",
   "rental_margin_timestamps", "rental_area_margin_timestamps", "rental_pol_margin_timestamps",
   "validity_rental",
+];
+const MISC_SETTINGS_KEYS = [
+  "notices_json", "notice_text", "notice_on", "notice_file_url", "ad_banners_json", "ad_banner_json",
 ];
 const ALL_PRICING_DB_KEYS = [...new Set([...OCEAN_DB_KEYS, ...DROP_DB_KEYS, ...RENTAL_DB_KEYS])];
 
@@ -5914,7 +5917,7 @@ export default function App() {
           enqueueNetworkWrite(async () => {
             try {
               if (pendingCostResync) {
-        await saveOceanPolCostsBundle(mergedCosts);
+                await saveOceanPolCostsBundle(mergedCosts);
               }
               if (pendingMarginCacheFix) {
                 await saveSettingsEntries([
@@ -5954,15 +5957,17 @@ export default function App() {
         setSettingsLoaded(true);
         setTimeout(() => syncRateHistoryBaseline(), 500);
 
-        const [dropRows, rentalRows] = await Promise.all([
+        const [dropRows, rentalRows, miscRows] = await Promise.all([
           fetchSettingsInKeys(DROP_DB_KEYS),
           fetchSettingsInKeys(RENTAL_DB_KEYS),
+          fetchSettingsInKeys(MISC_SETTINGS_KEYS),
         ]);
         if (cancelled) return;
 
         applySettingsBundle({
           ...settingsMapFromRows(dropRows),
           ...settingsMapFromRows(rentalRows),
+          ...settingsMapFromRows(miscRows),
         });
       } catch (err) {
         console.error("settings load failed", err);
