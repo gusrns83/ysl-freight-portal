@@ -3705,11 +3705,6 @@ export default function App() {
   const [rhPol, setRhPol] = useState("");
   const [rhDateFrom, setRhDateFrom] = useState("");
   const [rhDateTo, setRhDateTo] = useState("");
-  const [rhDeleteCarrier, setRhDeleteCarrier] = useState("SNK");
-  const [rhDeletePeriod, setRhDeletePeriod] = useState("current");
-  const [rhDeleteCategory, setRhDeleteCategory] = useState("ocean");
-  const [rhDeleteIncludeDyDrop, setRhDeleteIncludeDyDrop] = useState(true);
-  const [rhDeleteMsg, setRhDeleteMsg] = useState("");
   const [rhSelectedIds, setRhSelectedIds] = useState([]);
   const [rhSelectMsg, setRhSelectMsg] = useState("");
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
@@ -4283,120 +4278,6 @@ export default function App() {
       const dbNote = applied.dbCleared ? ` · 운임 DB ${applied.dbCleared}셀` : "";
       setRhSelectedIds([]);
       setRhSelectMsg(`✅ ${n}건 삭제 완료${dbNote}`);
-      loadRateHistory();
-      setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
-    });
-  };
-
-  const applyDeleteStoredRates = () => {
-    const period = rhDeletePeriod;
-    const periodLabel = period === "future" ? "향후" : "현재";
-    const carrierKey = rhDeleteCarrier;
-    const carrierLabel = CN_KR[carrierKey] || carrierKey;
-    const category = carrierKey === "RENTAL" ? "rental" : rhDeleteCategory;
-    const setMsg = setRhDeleteMsg;
-
-    if (category === "rental") {
-      const n = countRentalPeriodPols(rentalRates, period);
-      if (!n) {
-        setMsg("삭제할 렌탈 운임이 없습니다.");
-        return;
-      }
-      if (!window.confirm(`렌탈 ${periodLabel} 운임 (${n}개 POL)을 Supabase에서 삭제할까요?\n되돌리려면 Excel을 다시 업로드하세요.`)) return;
-      runSave("운임 삭제", async () => {
-        clearTimeout(autoSaveTimerRef.current);
-        skipAutoSaveRef.current = true;
-        const { rentalRates: next, clearedPols } = clearRentalPeriodRates(rentalRates, period);
-        setRentalRates(next);
-        await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(next));
-        pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: next };
-        try { await deleteRateHistoryExcelUpload("RENTAL", period, "rental"); } catch (e) { console.warn("rate_history clear skip", e); }
-        writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now(), serverSyncedAt: Date.now() });
-        setMsg(`✅ 렌탈 ${periodLabel} 운임 ${clearedPols.length}개 POL 삭제 완료`);
-        loadRateHistory();
-        setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
-      });
-      return;
-    }
-
-    if (category === "dropoff") {
-      const dropN = countCarrierDropCities(carrierDropRates, carrierKey, period);
-      if (!dropN) {
-        setMsg(`삭제할 ${carrierLabel} Drop off 운임이 없습니다.`);
-        return;
-      }
-      if (!window.confirm(`${carrierLabel} ${periodLabel} Drop off (${dropN}개 도시)를 Supabase에서 삭제할까요?`)) return;
-      runSave("운임 삭제", async () => {
-        clearTimeout(autoSaveTimerRef.current);
-        skipAutoSaveRef.current = true;
-        const dropCleared = clearCarrierDropPeriod(carrierDropRates, carrierKey, period);
-        const nextDrop = dropCleared.carrierDropRates;
-        setCarrierDropRates(nextDrop);
-        await saveOneSettingWithRetry("carrier_drop_rates_json", JSON.stringify(nextDrop));
-        pricingSaveRef.current = { ...pricingSaveRef.current, carrierDropRates: nextDrop };
-        writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now(), serverSyncedAt: Date.now() });
-        setMsg(`✅ ${carrierLabel} ${periodLabel} Drop off ${dropN}개 도시 삭제 완료`);
-        loadRateHistory();
-        setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
-      });
-      return;
-    }
-
-    const oceanN = countCarrierPeriodPols(polCostO, carrierKey, period);
-    const dropN = carrierKey === "DY" && rhDeleteIncludeDyDrop
-      ? countCarrierDropCities(carrierDropRates, "DY", period)
-      : 0;
-    if (!oceanN && !dropN) {
-      setMsg(`삭제할 ${carrierLabel} ${periodLabel} 해상 운임이 없습니다.`);
-      return;
-    }
-    const parts = [];
-    if (oceanN) parts.push(`해상 ${oceanN}개 POL`);
-    if (dropN) parts.push(`Drop off ${dropN}개 도시`);
-    if (!window.confirm(
-      `${carrierLabel} ${periodLabel} 운임을 삭제할까요?\n\n· ${parts.join("\n· ")}\n\nSupabase DB에서 제거됩니다.`,
-    )) return;
-
-    runSave("운임 삭제", async () => {
-      clearTimeout(autoSaveTimerRef.current);
-      skipAutoSaveRef.current = true;
-      let nextCosts = polCostO;
-      let nextDrop = carrierDropRates;
-      let clearedPols = [];
-      let clearedDrop = false;
-
-      if (oceanN) {
-        const cleared = clearPolCostsCarrier(polCostO, carrierKey, period);
-        nextCosts = cleared.polCostO;
-        clearedPols = cleared.clearedPols;
-        setPolCostO(nextCosts);
-      }
-      if (dropN) {
-        const dropCleared = clearCarrierDropPeriod(carrierDropRates, "DY", period);
-        nextDrop = dropCleared.carrierDropRates;
-        clearedDrop = dropCleared.cleared;
-        setCarrierDropRates(nextDrop);
-      }
-
-      if (oceanN && dropN) {
-        await saveSettingsEntries([
-          ["pol_costs", serializePolCosts(nextCosts)],
-          ["carrier_drop_rates_json", JSON.stringify(nextDrop)],
-        ]);
-      } else if (oceanN) {
-        await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
-      } else {
-        await saveOneSettingWithRetry("carrier_drop_rates_json", JSON.stringify(nextDrop));
-      }
-
-      pricingSaveRef.current = {
-        ...pricingSaveRef.current,
-        polCostO: nextCosts,
-        carrierDropRates: nextDrop,
-      };
-      try { await deleteRateHistoryExcelUpload(carrierKey, period, "ocean"); } catch (e) { console.warn("rate_history clear skip", e); }
-      writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now(), serverSyncedAt: Date.now() });
-      setMsg(`✅ ${carrierLabel} ${periodLabel} · ${parts.join(", ")} 삭제 완료`);
       loadRateHistory();
       setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
     });
@@ -6377,22 +6258,6 @@ export default function App() {
       admin_save: "Admin 저장", auto_save: "자동 저장", excel_upload: "Excel 업로드", excel_delete: "운임 삭제",
       gri: "GRI", import: "기존운임 복사", import_undo: "복사 되돌리기", rental_save: "렌탈 저장",
     }[s] || s || "—");
-    const rhDeleteCat = rhDeleteCarrier === "RENTAL" ? "rental" : rhDeleteCategory;
-    const rhDeleteOceanN = rhDeleteCat === "rental"
-      ? countRentalPeriodPols(rentalRates, rhDeletePeriod)
-      : rhDeleteCat === "ocean"
-        ? countCarrierPeriodPols(polCostO, rhDeleteCarrier, rhDeletePeriod)
-        : 0;
-    const rhDeleteDropN = rhDeleteCat === "dropoff"
-      ? countCarrierDropCities(carrierDropRates, rhDeleteCarrier, rhDeletePeriod)
-      : rhDeleteCat === "ocean" && rhDeleteCarrier === "DY" && rhDeleteIncludeDyDrop
-        ? countCarrierDropCities(carrierDropRates, "DY", rhDeletePeriod)
-        : 0;
-    const rhDeleteCanRun = rhDeleteCat === "ocean"
-      ? rhDeleteOceanN > 0 || rhDeleteDropN > 0
-      : rhDeleteCat === "dropoff"
-        ? rhDeleteDropN > 0
-        : rhDeleteOceanN > 0;
     const rhAllSelected = rhRows.length > 0 && rhSelectedIds.length === rhRows.length;
     const rhValidityForRow = (row) => {
       const cr = row.carrier;
@@ -6462,69 +6327,6 @@ export default function App() {
             <label style={{ fontSize: 10, color: "#6b7280", display: "block" }}>POL / 구간 검색
               <input type="text" value={rhPol} onChange={e => setRhPol(e.target.value)} placeholder="BUSAN, SHANGHAI, Moscow…" style={{ display: "block", width: "100%", marginTop: 4, padding: "8px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }} />
             </label>
-          </div>
-
-          <div style={{ background: "#fff", border: "1px solid #fecaca", borderRadius: 12, padding: 14, marginBottom: 12 }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: "#b91c1c", marginBottom: 10 }}>운임 삭제 (DB)</div>
-            <div style={{ fontSize: 10, color: "#6b7280", lineHeight: 1.5, marginBottom: 10 }}>
-              Supabase에 저장된 운임을 삭제합니다. 삭제 이력은 아래 Rate History에 <strong>운임 삭제</strong>로 기록됩니다.
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))", gap: 8, marginBottom: 10 }}>
-              <label style={{ fontSize: 10, color: "#6b7280" }}>선사
-                <select value={rhDeleteCarrier} onChange={e => {
-                  const v = e.target.value;
-                  setRhDeleteCarrier(v);
-                  if (v === "RENTAL") setRhDeleteCategory("rental");
-                  else if (rhDeleteCategory === "rental") setRhDeleteCategory("ocean");
-                }} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
-                  {[...CRS, "RENTAL"].map(c => <option key={c} value={c}>{CN_KR[c] || c}</option>)}
-                </select>
-              </label>
-              <label style={{ fontSize: 10, color: "#6b7280" }}>기간
-                <select value={rhDeletePeriod} onChange={e => setRhDeletePeriod(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
-                  <option value="current">현재</option>
-                  <option value="future">향후</option>
-                </select>
-              </label>
-              {rhDeleteCarrier !== "RENTAL" && (
-                <label style={{ fontSize: 10, color: "#6b7280" }}>유형
-                  <select value={rhDeleteCategory} onChange={e => setRhDeleteCategory(e.target.value)} style={{ display: "block", width: "100%", marginTop: 4, padding: "6px 8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 6, boxSizing: "border-box" }}>
-                    <option value="ocean">해상</option>
-                    <option value="dropoff">Drop off</option>
-                  </select>
-                </label>
-              )}
-            </div>
-            <div style={{ fontSize: 11, color: "#374151", marginBottom: 10, padding: "8px 10px", background: "#fef2f2", borderRadius: 8 }}>
-              {rhDeleteCat === "rental" && <div>렌탈 POL <strong>{rhDeleteOceanN}</strong>개</div>}
-              {rhDeleteCat === "ocean" && (
-                <>
-                  <div>해상 POL <strong>{rhDeleteOceanN}</strong>개</div>
-                  {rhDeleteCarrier === "DY" && (
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 6, cursor: "pointer" }}>
-                      <input type="checkbox" checked={rhDeleteIncludeDyDrop} onChange={e => setRhDeleteIncludeDyDrop(e.target.checked)} />
-                      Drop off도 함께 삭제 ({countCarrierDropCities(carrierDropRates, "DY", rhDeletePeriod)}개 도시)
-                    </label>
-                  )}
-                </>
-              )}
-              {rhDeleteCat === "dropoff" && <div>Drop off 도시 <strong>{rhDeleteDropN}</strong>개</div>}
-            </div>
-            {rhDeleteMsg && (
-              <div style={{ fontSize: 11, marginBottom: 8, padding: 8, borderRadius: 6, color: rhDeleteMsg.startsWith("✅") ? "#166534" : "#dc2626", background: rhDeleteMsg.startsWith("✅") ? "#f0fdf4" : "#fef2f2" }}>{rhDeleteMsg}</div>
-            )}
-            <button
-              type="button"
-              onClick={applyDeleteStoredRates}
-              disabled={saveBusy || !rhDeleteCanRun}
-              style={{
-                width: "100%", padding: "10px", fontSize: 12, fontWeight: 700,
-                color: "#fff", background: saveBusy || !rhDeleteCanRun ? "#fca5a5" : "#dc2626",
-                border: "none", borderRadius: 8, cursor: saveBusy || !rhDeleteCanRun ? "not-allowed" : "pointer",
-              }}
-            >
-              {saveBusy ? "처리 중…" : "🗑 선택 조건 운임 삭제"}
-            </button>
           </div>
 
           {rhError && (
