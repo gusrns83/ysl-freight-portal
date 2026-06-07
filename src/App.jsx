@@ -1133,6 +1133,32 @@ const deleteRateHistoryExcelUpload = async (carrier, period, category = "ocean")
   await api(q, { method: "DELETE", headers: { Prefer: "return=minimal" } });
 };
 
+const fetchRateHistoryExcelUploadOcean = async () => {
+  const rows = [];
+  let offset = 0;
+  const limit = 1000;
+  while (true) {
+    const batch = await api(
+      `rate_history?source=eq.excel_upload&category=eq.ocean&select=*&order=created_at.desc&limit=${limit}&offset=${offset}`,
+    );
+    if (!batch?.length) break;
+    rows.push(...batch);
+    if (batch.length < limit) break;
+    offset += limit;
+  }
+  return rows;
+};
+
+const deleteRateHistoryByIds = async (ids) => {
+  for (let i = 0; i < ids.length; i += RATE_HISTORY_CHUNK) {
+    const chunk = ids.slice(i, i + RATE_HISTORY_CHUNK);
+    await api(`rate_history?id=in.(${chunk.join(",")})`, {
+      method: "DELETE",
+      headers: { Prefer: "return=minimal" },
+    });
+  }
+};
+
 const buildRateHistoryQuery = (filters) => {
   const parts = ["rate_history?select=*", "order=created_at.desc", "limit=400"];
   parts.push("source=neq.excel_delete");
@@ -1838,7 +1864,10 @@ const APP_POLS = new Set([
 
 const JAPAN_PORTS = [
   "TOKYO", "YOKOHAMA", "NAGOYA", "OSAKA", "KOBE", "HAKATA", "MOJI", "NIIGATA", "TOMAKOMAI", "SHIMIZU",
+  "YOKKACHI", "AKITA", "CHIBA", "HIROSHIMA", "IYOMISHIMA", "KANAZAWA", "MAIZURU", "MIZUSHIMA",
+  "NAOETSU", "SAKAIMINATO", "TAKAMATSU", "TOYOHASHI", "TOYAMASHINKO", "TSURUGA", "WAKAYAMA",
 ];
+const JAPAN_POL_SET = new Set(JAPAN_PORTS);
 
 const SNK_POL_EXPAND = {
   "JAPAN ALL PORTS": JAPAN_PORTS,
@@ -1905,6 +1934,7 @@ const DY_POL_MAP = {
 const CK_POL_MAP = {
   SHANGHAI: "SHANGHAI",
   "CHONGQING via SHA Barge": "CHONGQING",
+  "CHONGQING via SHA Barg": "CHONGQING",
   "CHONGQING via QZH Rail": null,
   NINGBO: "NINGBO",
   TAICANG: "TAICANG",
@@ -2047,6 +2077,7 @@ const ciPolMap = (obj) => Object.fromEntries(
 );
 const DY_POL_MAP_CI = ciPolMap(DY_POL_MAP);
 const CK_POL_MAP_CI = ciPolMap(CK_POL_MAP);
+const CK_SERVICE_POLS = new Set(Object.values(CK_POL_MAP).filter(v => typeof v === "string"));
 
 /** Excel POL명 → 포털 POL 목록 (선사별 별칭·그룹 확장 포함) */
 function resolveExcelPolList(rawName, carrier) {
@@ -2690,6 +2721,127 @@ function replacePolCostsWithSells(polCostO, netRows, sellRows, carrier, period) 
   );
 }
 
+/** FR 운임표 기준 — 해당 POL·선사·타입에 기본 운임이 있는지 */
+const freightTemplateServesRate = (fData, carrier, pol, rateType) => {
+  const row = (fData || []).find(d => d.pol === pol);
+  if (!row) return false;
+  return row.rates?.[carrier]?.[rateType] != null;
+};
+
+/**
+ * Excel 업로드·pol_costs 서비스 판정
+ * - SNK: 일본 전항 (FR null이어도 장금상선 서비스)
+ * - CK: CK Line 양식 POL 맵 기준 (Chongqing via SHA Barge 등)
+ * - 그 외: FR 운임표 기본값
+ */
+const carrierUploadServesRate = (fData, carrier, pol, rateType) => {
+  if (carrier === "SNK" && JAPAN_POL_SET.has(pol)) return true;
+  if (carrier === "CK" && CK_SERVICE_POLS.has(pol)) return true;
+  return freightTemplateServesRate(fData, carrier, pol, rateType);
+};
+
+/** Excel 업로드 NET/SELL — 포털에 서비스 없는 POL·타입 제외 */
+function filterOceanUploadByFreightService(fData, carrier, netRows, sellRows = {}) {
+  const filteredNet = {};
+  const filteredSell = {};
+  const skippedService = [];
+  const pols = new Set([...Object.keys(netRows || {}), ...Object.keys(sellRows || {})]);
+
+  pols.forEach(pol => {
+    const costs = netRows?.[pol] || {};
+    const sells = sellRows?.[pol] || {};
+    const nextCosts = {};
+    const nextSells = {};
+
+    RATE_TYPES.forEach(t => {
+      const hasCost = costs[t] != null;
+      const hasSell = sells[t] != null;
+      if (!hasCost && !hasSell) return;
+      if (carrierUploadServesRate(fData, carrier, pol, t)) {
+        if (hasCost) nextCosts[t] = costs[t];
+        if (hasSell) nextSells[t] = sells[t];
+      } else {
+        skippedService.push({ pol, rateType: t, cost: costs[t] ?? null, sell: sells[t] ?? null });
+      }
+    });
+
+    if (Object.keys(nextCosts).length) filteredNet[pol] = nextCosts;
+    if (Object.keys(nextSells).length) filteredSell[pol] = nextSells;
+  });
+
+  return { netRows: filteredNet, sellRows: filteredSell, skippedService };
+}
+
+function applyFreightServiceFilterToUpload(parsed, fData) {
+  if (!parsed || parsed.format === "RENTAL") return { parsed, skippedService: [] };
+
+  const carrier = parsed.format === "DY"
+    ? "DY"
+    : parsed.format === "YSL"
+      ? parsed.carrier
+      : (parsed.carrier || parsed.format);
+  const netKey = parsed.format === "DY" ? "oceanRows" : "netRows";
+  const srcNet = parsed[netKey] || parsed.netRows || {};
+  const { netRows, sellRows, skippedService } = filterOceanUploadByFreightService(
+    fData, carrier, srcNet, parsed.sellRows || {},
+  );
+
+  const next = { ...parsed, sellRows, skippedService };
+  if (parsed.format === "DY") next.oceanRows = netRows;
+  else next.netRows = netRows;
+  return { parsed: next, skippedService };
+}
+
+/** pol_costs — FR에 서비스 없는 POL·선사·타입 매입·매출 제거 */
+function stripPolCostsOutsideFreightService(polCostO, fData) {
+  const out = JSON.parse(JSON.stringify(polCostO || {}));
+  let cleared = 0;
+
+  Object.entries(out).forEach(([pol, polEntry]) => {
+    const carriers = polEntry?.carrier;
+    if (!carriers) return;
+
+    Object.entries(carriers).forEach(([carrier, cr]) => {
+      if (!CRS.includes(carrier)) return;
+
+      ["current", "future"].forEach(period => {
+        const bucket = cr[period];
+        if (!bucket) return;
+
+        RATE_TYPES.forEach(t => {
+          if (carrierUploadServesRate(fData, carrier, pol, t)) return;
+          if (bucket[t] != null) {
+            delete bucket[t];
+            cleared++;
+          }
+          if (bucket.sell?.[t] != null) {
+            const sell = { ...bucket.sell };
+            delete sell[t];
+            if (Object.keys(sell).length) bucket.sell = sell;
+            else delete bucket.sell;
+            cleared++;
+          }
+        });
+
+        const bucketLive = RATE_TYPES.some(rt => bucket[rt] != null)
+          || (bucket.sell && Object.values(bucket.sell).some(v => v != null));
+        if (bucketLive) cr[period] = bucket;
+        else delete cr[period];
+      });
+
+      if (carrierBucketHasData(cr)) polEntry.carrier[carrier] = cr;
+      else {
+        delete polEntry.carrier[carrier];
+        if (!Object.keys(polEntry.carrier).length) delete polEntry.carrier;
+      }
+    });
+
+    if (!polEntry.carrier || !Object.keys(polEntry.carrier).length) delete out[pol];
+  });
+
+  return { polCostO: out, cleared };
+}
+
 const carrierBucketHasData = (cr) => {
   if (!cr || typeof cr !== "object") return false;
   if (["current", "future"].some(p => {
@@ -3034,9 +3186,11 @@ function previewSummary(parsed, period) {
     };
   }
   if (parsed.format === "DY") {
+    const svcSkip = (parsed.skippedService || []).length;
+    const svcNote = svcSkip ? ` · 서비스外 ${svcSkip}셀 제외` : "";
     return {
       title: `동영 · 해상 ${Object.keys(parsed.oceanRows).length} POL · Drop ${Object.keys(parsed.dropRows).length} POL`,
-      detail: `기간: ${period === "future" ? "향후" : "현재"} · 스킵 ${parsed.skipped.length}건`,
+      detail: `기간: ${period === "future" ? "향후" : "현재"} · 스킵 ${parsed.skipped.length}건${svcNote}`,
       sample: Object.entries(parsed.oceanRows).slice(0, 3),
     };
   }
@@ -3045,9 +3199,11 @@ function previewSummary(parsed, period) {
   const sellN = Object.keys(sellRows).length;
   const scanNote = parsed.polScan ? " · POL 스캔 (양식 확인)" : (sellN ? " · NET+SELL" : " · NET 컬럼");
   const sellNote = sellN ? ` · 매출 ${sellN} POL` : "";
+  const svcSkip = (parsed.skippedService || []).length;
+  const svcNote = svcSkip ? ` · 서비스外 ${svcSkip}셀 제외` : "";
   return {
     title: `${parsed.carrier} · ${Object.keys(netRows).length} POL`,
-    detail: `POL 기준 매입${sellNote}${scanNote} · 스킵 ${(parsed.skipped || []).length}건`,
+    detail: `POL 기준 매입${sellNote}${scanNote} · 스킵 ${(parsed.skipped || []).length}건${svcNote}`,
     sample: Object.entries(netRows).slice(0, 3).map(([pol, rates]) => {
       const sell = sellRows[pol];
       return [pol, sell ? { ...rates, sell } : rates];
@@ -3091,6 +3247,7 @@ function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
       const sells = sellRows[pol] || {};
       RATE_TYPES.forEach(t => {
         if (rates[t] == null) return;
+        if (!carrierUploadServesRate(fData, carrier, pol, t)) return;
         const sell = sells[t] ?? null;
         rows.push({
           carrier, area: areaMap[pol] || "", pol, route: pol, rate_type: t, period,
@@ -3412,12 +3569,13 @@ export default function App() {
     const rows = workbook.sheets[sheet];
     if (!rows?.length) throw new Error(`시트 "${sheet}" 가 비어 있습니다`);
     const parsed = parseByFormat(format, rows, { carrier: yslCarrier });
-    const polCount = Object.keys(parsed.netRows || parsed.oceanRows || parsed.bases || {}).length;
+    const { parsed: serviceFiltered } = applyFreightServiceFilterToUpload(parsed, fData);
+    const polCount = Object.keys(serviceFiltered.netRows || serviceFiltered.oceanRows || serviceFiltered.bases || {}).length;
     if (format !== "RENTAL" && polCount === 0) {
-      const skipped = (parsed.skipped || []).slice(0, 5).join(", ");
+      const skipped = (serviceFiltered.skipped || []).slice(0, 5).join(", ");
       throw new Error(`포털 POL과 매칭된 행이 없습니다${skipped ? ` · 예: ${skipped}` : ""}`);
     }
-    return { ...parsed, period, fileName: workbook.fileName, sheet };
+    return { ...serviceFiltered, period, fileName: workbook.fileName, sheet };
   };
 
   const handleExcelFile = async (file) => {
@@ -3564,6 +3722,59 @@ export default function App() {
         pricingSavedAt: Date.now(),
         serverSyncedAt: Date.now(),
       });
+      setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+    });
+  };
+
+  const applyPruneNoServiceRates = () => {
+    runSave("서비스外 정리", async () => {
+      setRhSelectMsg("");
+      const all = await fetchRateHistoryExcelUploadOcean();
+      const invalid = all.filter(row => !carrierUploadServesRate(fData, row.carrier, row.pol, row.rate_type));
+      if (!invalid.length) {
+        setRhSelectMsg("서비스外 기록이 없습니다.");
+        return;
+      }
+      const sample = invalid.slice(0, 5).map(r => `${r.carrier} ${r.pol} ${r.rate_type}`).join("\n");
+      if (!window.confirm(
+        `포털 서비스 구간 밖 Excel 업로드 기록 ${invalid.length}건을 삭제할까요?\n\n(SNK 일본·CK 양식 POL은 서비스로 인정)\n\n예:\n${sample}${invalid.length > 5 ? "\n…" : ""}\n\n· Rate History에서 제거\n· pol_costs에 남아 있으면 함께 제거`,
+      )) return;
+
+      clearTimeout(autoSaveTimerRef.current);
+      skipAutoSaveRef.current = true;
+      const base = pricingSaveRef.current;
+      const applied = applyRateHistoryDeletesToStores(invalid, base, rData);
+
+      if (applied.polCostsChanged) {
+        setPolCostO(applied.polCostO);
+        await saveOneSettingWithRetry("pol_costs", serializePolCosts(applied.polCostO));
+      }
+      if (applied.dropChanged) {
+        setCarrierDropRates(applied.carrierDropRates);
+        await saveOneSettingWithRetry("carrier_drop_rates_json", JSON.stringify(applied.carrierDropRates));
+      }
+      if (applied.rentalChanged) {
+        setRentalRates(applied.rentalRates);
+        await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(applied.rentalRates));
+      }
+      pricingSaveRef.current = {
+        ...base,
+        polCostO: applied.polCostO,
+        carrierDropRates: applied.carrierDropRates,
+        rentalRates: applied.rentalRates,
+      };
+
+      await deleteRateHistoryByIds(invalid.map(r => r.id));
+      writePricingCache({
+        ...buildPricingCache(),
+        polCostO: applied.polCostO,
+        pricingSavedAt: Date.now(),
+        serverSyncedAt: Date.now(),
+      });
+      setRhSelectedIds([]);
+      const dbNote = applied.dbCleared ? ` · 운임 DB ${applied.dbCleared}셀` : "";
+      setRhSelectMsg(`✅ 서비스外 ${invalid.length}건 정리${dbNote}`);
+      loadRateHistory();
       setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
     });
   };
@@ -4873,12 +5084,19 @@ export default function App() {
           mergedCosts = sellBackfill.polCostO;
           pendingSellBackfill = true;
         }
+        const servicePurge = stripPolCostsOutsideFreightService(mergedCosts, fData);
+        let pendingServicePurge = false;
+        if (servicePurge.cleared > 0) {
+          mergedCosts = servicePurge.polCostO;
+          pendingServicePurge = true;
+          console.info(`pol_costs: 서비스外 매입·매출 ${servicePurge.cleared}셀 정리`);
+        }
         const costsDiffer = cacheCosts && JSON.stringify(cacheCosts) !== JSON.stringify(serverCosts);
         const mergedDiffersFromServer = JSON.stringify(mergedCosts) !== JSON.stringify(serverCosts);
         const marginsDiffer = cacheMargins && JSON.stringify(cacheMargins) !== JSON.stringify(serverMargins);
         const marginsFutureDiffer = cacheMarginsFuture && JSON.stringify(cacheMarginsFuture) !== JSON.stringify(serverMarginsFuture);
         const cacheNewer = (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
-        const pendingCostResync = pendingSellBackfill || (cacheNewer && (costsDiffer || mergedDiffersFromServer));
+        const pendingCostResync = pendingSellBackfill || pendingServicePurge || (cacheNewer && (costsDiffer || mergedDiffersFromServer));
         const pendingMarginCacheFix = cacheWouldRestoreMargins;
         const pendingMarginResync = !pendingMarginCacheFix
           && (marginsDiffer || marginsFutureDiffer) && cacheNewer;
@@ -5875,6 +6093,14 @@ export default function App() {
               선택 {rhSelectedIds.length}건
             </span>
             <div style={{ marginLeft: "auto", display: "flex", gap: 6, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                onClick={applyPruneNoServiceRates}
+                disabled={saveBusy || rhLoading}
+                style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #fcd34d", background: "#fffbeb", color: "#b45309", cursor: saveBusy ? "not-allowed" : "pointer" }}
+              >
+                서비스外 정리
+              </button>
               <button
                 type="button"
                 onClick={applyBackfillSells}
