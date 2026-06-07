@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v32"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v33"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -301,13 +301,65 @@ const needsSellPurge = () => false;
 const serializePolCosts = (polCostO) => JSON.stringify(compactPolCostO(polCostO));
 
 const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json", "carrier_rates_json"]);
+const EXCEL_UPLOAD_MAX_MS = 90000;
 
 /** Supabase settings 쓰기 — 동시 요청 방지 (Failed to fetch 원인) */
 let networkWriteQueue = Promise.resolve();
+const resetNetworkWriteQueue = () => {
+  networkWriteQueue = Promise.resolve();
+};
 const enqueueNetworkWrite = (task) => {
   const job = networkWriteQueue.then(task);
   networkWriteQueue = job.catch(() => {});
   return job;
+};
+
+/** Excel 업로드 등 — 저장 큐 대기 없이 직접 POST */
+const saveSettingDirect = async (key, value) => {
+  const strVal = String(value);
+  const isHeavy = HEAVY_SETTING_KEYS.has(key);
+  const attempts = isHeavy ? SAVE_HEAVY_ATTEMPTS : 3;
+  const timeoutMs = isHeavy ? SAVE_HEAVY_TIMEOUT_MS : SAVE_LIGHT_TIMEOUT_MS;
+  let lastErr;
+
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await new Promise(r => setTimeout(r, 1200 * attempt));
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(`${SB_URL}/rest/v1/settings`, {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: {
+          apikey: SB_KEY,
+          Authorization: `Bearer ${SB_KEY}`,
+          "Content-Type": "application/json",
+          Prefer: "resolution=merge-duplicates,return=minimal",
+        },
+        body: JSON.stringify({ key, value: strVal }),
+      });
+      clearTimeout(timer);
+      if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
+      return;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+      const msg = String(e.message || e);
+      const retryable = /fetch|Failed|abort|network/i.test(msg);
+      if (!retryable) throw new Error(`${key}: ${msg}`);
+    }
+  }
+  const hint = /fetch|Failed|abort|network/i.test(String(lastErr?.message || ""))
+    ? " · 네트워크 확인 후 다시 시도"
+    : "";
+  throw new Error(`Supabase 저장 실패 (${key}) — ${lastErr?.message || "Failed to fetch"}${hint}`);
+};
+
+const saveSettingsEntriesDirect = async (entries) => {
+  for (const [key, value] of entries) {
+    await saveSettingDirect(key, value);
+    if (HEAVY_SETTING_KEYS.has(key)) await new Promise(r => setTimeout(r, 200));
+  }
 };
 
 const saveSettingValue = async (key, value) => enqueueNetworkWrite(async () => {
@@ -3636,6 +3688,7 @@ export default function App() {
   const [excelWorkbook, setExcelWorkbook] = useState(null);
   const [excelPreview, setExcelPreview] = useState(null);
   const [excelUploading, setExcelUploading] = useState(false);
+  const [excelUploadStep, setExcelUploadStep] = useState("idle");
   const [excelMsg, setExcelMsg] = useState("");
   const [excelDragOver, setExcelDragOver] = useState(false);
   const [excelValidityDraft, setExcelValidityDraft] = useState(defaultValiditySlot);
@@ -3956,7 +4009,7 @@ export default function App() {
   const applyExcelUpload = () => {
     if (!excelPreview) return;
     if (saveBusy) {
-      flashSaveFeedback("error", "다른 저장이 진행 중입니다. 완료 후 다시 시도하세요.");
+      setExcelMsg("다른 저장이 진행 중입니다. 잠시 후 다시 시도하세요.");
       return;
     }
 
@@ -3968,109 +4021,131 @@ export default function App() {
       : `batch-${Date.now()}`;
 
     resetSaveQueue();
+    resetNetworkWriteQueue();
     clearTimeout(autoSaveTimerRef.current);
     skipAutoSaveRef.current = true;
     setSaveBusy(true);
-    setSaveFeedback({ type: null, message: "운임 DB(pol_costs) 저장 중…" });
+    setExcelUploadStep("costs");
+    setExcelMsg("운임 DB 저장 중…");
 
-    (async () => {
-      try {
-        const baseCosts = pricingSaveRef.current.polCostO ?? polCostO;
-        let nextCosts = baseCosts;
+    const finishUpload = (ok, msg) => {
+      setSaveBusy(false);
+      setExcelUploadStep(ok ? "done" : "error");
+      setExcelMsg(msg);
+      setTimeout(() => { skipAutoSaveRef.current = false; }, 2500);
+    };
 
-        if (parsed.format === "RENTAL") {
-          const { rentalRates: clearedRental } = clearRentalPeriodRates(rentalRates, period);
-          const patch = buildRentalRatesFromBases(parsed.bases, period);
-          const merged = mergeRentalRatesPatch(clearedRental, patch);
-          setRentalRates(merged);
-          await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(merged));
-          pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
-        } else if (parsed.format === "DY") {
-          nextCosts = replacePolCostsWithSells(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period);
-          nextCosts = backfillPolCostSells(nextCosts, {
-            polM: pricingSaveRef.current.polM ?? polM,
-            polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
-            margins: pricingSaveRef.current.margins ?? margins,
-          }).polCostO;
-          const nextDrop = buildDyDropRates(
-            JSON.stringify(carrierDropRates),
-            parsed.oceanRows,
-            parsed.dropRows,
-            period,
-          );
-          setPolCostO(nextCosts);
-          setCarrierDropRates(nextDrop);
-          await saveSettingsEntries([
-            ["pol_costs", serializePolCosts(nextCosts)],
-            ["carrier_drop_rates_json", JSON.stringify(nextDrop)],
-          ]);
-          pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
-        } else {
-          const cr = parsed.carrier;
-          const netRows = parsed.netRows || {};
-          nextCosts = replacePolCostsWithSells(baseCosts, netRows, parsed.sellRows, cr, period);
-          nextCosts = backfillPolCostSells(nextCosts, {
-            polM: pricingSaveRef.current.polM ?? polM,
-            polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
-            margins: pricingSaveRef.current.margins ?? margins,
-          }).polCostO;
-          setPolCostO(nextCosts);
-          await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
-          pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
-        }
+    withTimeout((async () => {
+      const baseCosts = pricingSaveRef.current.polCostO ?? polCostO;
+      let nextCosts = baseCosts;
 
-        if (excelSaveValidity) {
-          setSaveFeedback({ type: null, message: "Validity 저장 중…" });
-          const carrierKey = excelUploadCarrierKey(excelFormat, excelYslCarrier, parsed);
-          const baseValidity = pricingSaveRef.current.validityInfo ?? validityInfo;
-          const nextValidityInfo = mergeUploadValidity(baseValidity, carrierKey, period, excelValidityDraft);
-          setValidityInfo(nextValidityInfo);
-          pricingSaveRef.current = { ...pricingSaveRef.current, validityInfo: nextValidityInfo };
-          const validitySaves = [["validity_info_json", JSON.stringify(nextValidityInfo)]];
-          const legacyKey = LEGACY_VALIDITY_KEY[carrierKey];
-          if (legacyKey) {
-            validitySaves.push([legacyKey, formatValiditySlotLabel(nextValidityInfo[carrierKey]?.current)]);
-          }
-          await saveSettingsEntries(validitySaves);
-        }
-
-        writePricingCache({
-          ...buildPricingCache(),
-          polCostO: nextCosts,
-          pricingSavedAt: Date.now(),
-          serverSyncedAt: Date.now(),
-        });
-
-        flashSaveFeedback("success", "✅ Excel 업로드 저장 완료");
-        setExcelMsg("✅ Supabase 저장 완료 · 「현재 운임」 탭에서 확인하세요.");
-
-        if (parsed.format !== "RENTAL") {
-          const rhParsed = parsed;
-          const rhCosts = nextCosts;
-          uploadExcelRateHistory(rhParsed, period, fData, note, batchId, rhCosts)
-            .then(rhResult => {
-              if (rhResult.sent > 0) {
-                rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
-              }
-              if (rhResult.error) {
-                setExcelMsg(`✅ 운임 DB 저장됨 · Rate History 실패: ${rhResult.error}`);
-              } else if (rhResult.total > 0 && rhResult.sent < rhResult.total) {
-                setExcelMsg(`✅ 운임 DB 저장됨 · Rate History ${rhResult.sent}/${rhResult.total}건`);
-              } else if (rhResult.sent > 0) {
-                setExcelMsg(`✅ 저장 완료 · Rate History ${rhResult.sent}건 기록`);
-              }
-            })
-            .catch(e => console.warn("Rate History background skip", e));
-        }
-      } catch (e) {
-        resetSaveQueue();
-        flashSaveFeedback("error", `저장 실패: ${e.message}`);
-        setExcelMsg(`저장 실패: ${e.message}`);
-      } finally {
-        setSaveBusy(false);
-        setTimeout(() => { skipAutoSaveRef.current = false; }, 2500);
+      if (parsed.format === "RENTAL") {
+        const { rentalRates: clearedRental } = clearRentalPeriodRates(rentalRates, period);
+        const patch = buildRentalRatesFromBases(parsed.bases, period);
+        const merged = mergeRentalRatesPatch(clearedRental, patch);
+        setRentalRates(merged);
+        await saveSettingDirect("rental_rates_json", JSON.stringify(merged));
+        pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
+      } else if (parsed.format === "DY") {
+        nextCosts = replacePolCostsWithSells(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period);
+        nextCosts = backfillPolCostSells(nextCosts, {
+          polM: pricingSaveRef.current.polM ?? polM,
+          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
+          margins: pricingSaveRef.current.margins ?? margins,
+        }).polCostO;
+        const nextDrop = buildDyDropRates(
+          JSON.stringify(carrierDropRates),
+          parsed.oceanRows,
+          parsed.dropRows,
+          period,
+        );
+        setPolCostO(nextCosts);
+        setCarrierDropRates(nextDrop);
+        await saveSettingsEntriesDirect([
+          ["pol_costs", serializePolCosts(nextCosts)],
+          ["carrier_drop_rates_json", JSON.stringify(nextDrop)],
+        ]);
+        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
+      } else {
+        const cr = parsed.carrier || parsed.format;
+        const netRows = parsed.netRows || {};
+        nextCosts = replacePolCostsWithSells(baseCosts, netRows, parsed.sellRows || {}, cr, period);
+        nextCosts = backfillPolCostSells(nextCosts, {
+          polM: pricingSaveRef.current.polM ?? polM,
+          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
+          margins: pricingSaveRef.current.margins ?? margins,
+        }).polCostO;
+        setPolCostO(nextCosts);
+        await saveSettingDirect("pol_costs", serializePolCosts(nextCosts));
+        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
       }
-    })();
+
+      if (excelSaveValidity) {
+        setExcelUploadStep("validity");
+        setExcelMsg("Validity 저장 중…");
+        const carrierKey = excelUploadCarrierKey(excelFormat, excelYslCarrier, parsed);
+        const baseValidity = pricingSaveRef.current.validityInfo ?? validityInfo;
+        const nextValidityInfo = mergeUploadValidity(baseValidity, carrierKey, period, excelValidityDraft);
+        setValidityInfo(nextValidityInfo);
+        pricingSaveRef.current = { ...pricingSaveRef.current, validityInfo: nextValidityInfo };
+        const validitySaves = [["validity_info_json", JSON.stringify(nextValidityInfo)]];
+        const legacyKey = LEGACY_VALIDITY_KEY[carrierKey];
+        if (legacyKey) {
+          validitySaves.push([legacyKey, formatValiditySlotLabel(nextValidityInfo[carrierKey]?.current)]);
+        }
+        try {
+          await saveSettingsEntriesDirect(validitySaves);
+        } catch (validityErr) {
+          console.warn("validity save skip", validityErr);
+        }
+      }
+
+      writePricingCache({
+        v: 1,
+        polCostO: nextCosts,
+        margins: pricingSaveRef.current.margins,
+        areaM: pricingSaveRef.current.areaM,
+        polM: pricingSaveRef.current.polM,
+        polMFuture: pricingSaveRef.current.polMFuture,
+        marginTs: pricingSaveRef.current.marginTs,
+        areaTs: pricingSaveRef.current.areaTs,
+        polTs: pricingSaveRef.current.polTs,
+        polTsFuture: pricingSaveRef.current.polTsFuture,
+        carrierRates: pricingSaveRef.current.carrierRates,
+        carrierDropRates: pricingSaveRef.current.carrierDropRates,
+        carrierDropMargins: pricingSaveRef.current.carrierDropMargins,
+        validityInfo: pricingSaveRef.current.validityInfo,
+        rentalRates: pricingSaveRef.current.rentalRates,
+        rentalMargins: pricingSaveRef.current.rentalMargins,
+        rentalAreaM: pricingSaveRef.current.rentalAreaM,
+        rentalPolM: pricingSaveRef.current.rentalPolM,
+        rentalMarginTs: pricingSaveRef.current.rentalMarginTs,
+        rentalAreaTs: pricingSaveRef.current.rentalAreaTs,
+        rentalPolTs: pricingSaveRef.current.rentalPolTs,
+        pricingSavedAt: Date.now(),
+        serverSyncedAt: Date.now(),
+      });
+
+      finishUpload(true, "✅ Supabase 저장 완료 · 「현재 운임」 탭에서 확인하세요.");
+
+      if (parsed.format !== "RENTAL") {
+        uploadExcelRateHistory(parsed, period, fData, note, batchId, nextCosts)
+          .then(rhResult => {
+            if (rhResult.sent > 0) {
+              rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+              setExcelMsg(`✅ 저장 완료 · Rate History ${rhResult.sent}건`);
+            } else if (rhResult.error) {
+              setExcelMsg(`✅ 운임 DB 저장됨 · Rate History: ${rhResult.error}`);
+            }
+          })
+          .catch(e => console.warn("Rate History background skip", e));
+      }
+    })(), EXCEL_UPLOAD_MAX_MS, "업로드 시간 초과 (90초) · 네트워크 확인 후 다시 시도")
+      .catch(e => {
+        resetSaveQueue();
+        resetNetworkWriteQueue();
+        finishUpload(false, `저장 실패: ${e.message}`);
+      });
   };
 
   const applyPruneNoServiceRates = () => {
@@ -6168,6 +6243,7 @@ export default function App() {
         <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 80px" }}>
           <div style={{ fontSize: 11, color: "#92400e", marginBottom: 12, lineHeight: 1.5 }}>
             선사 원본 Excel **「업로드용」** 시트 기준 · POL 자동 매칭 · **NET(매입)+매출** 함께 저장 (Drop off는 DY Import 원본 시트).
+            <span style={{ display: "block", marginTop: 4, fontSize: 10, color: "#9ca3af" }}>저장 엔진 {ADMIN_SAVE_REV}</span>
           </div>
 
           <div style={{ background: "#fff", border: "1px solid #fde68a", borderRadius: 12, padding: 14, marginBottom: 12 }}>
@@ -6278,7 +6354,9 @@ export default function App() {
               )}
               <button type="button" onClick={applyExcelUpload} disabled={saveBusy}
                 style={{ width: "100%", marginTop: 14, padding: "12px", fontSize: 13, fontWeight: 700, color: "#fff", background: saveBusy ? "#fcd34d" : "#d97706", border: "none", borderRadius: 8, cursor: saveBusy ? "not-allowed" : "pointer" }}>
-                {saveBusy ? "저장 중…" : "✅ Supabase에 업로드 · Rate History 기록"}
+                {saveBusy
+                  ? (excelUploadStep === "validity" ? "Validity 저장 중…" : "운임 DB 저장 중…")
+                  : "✅ Supabase에 업로드"}
               </button>
             </div>
           )}
