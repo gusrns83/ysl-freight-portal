@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v31"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v32"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -3830,7 +3830,7 @@ export default function App() {
   };
 
   const ensurePolCostSellsBackfill = async (opts = {}) => {
-    if (!isAdmin) return 0;
+    if (!isAdmin || saveBusy) return 0;
     const base = pricingSaveRef.current;
     const { polCostO: next, filled } = backfillPolCostSells(base?.polCostO ?? polCostO, {
       polM: base?.polM ?? polM,
@@ -3854,9 +3854,11 @@ export default function App() {
     if (tab === "grid") {
       setCarrierAdminPolFilter("");
       setCarrierEditCell(null);
-      ensurePolCostSellsBackfill().then(filled => {
-        if (filled > 0) setRhSelectMsg(`✅ 매출 ${filled}셀 자동 보완 · 현재 운임 반영`);
-      }).catch(e => console.warn("pol_costs 매출 보완 skip", e));
+      if (!saveBusy) {
+        ensurePolCostSellsBackfill().then(filled => {
+          if (filled > 0) setRhSelectMsg(`✅ 매출 ${filled}셀 자동 보완 · 현재 운임 반영`);
+        }).catch(e => console.warn("pol_costs 매출 보완 skip", e));
+      }
     }
     if (tab === "history") loadRateHistory();
   };
@@ -3870,7 +3872,7 @@ export default function App() {
           onClick={() => {
             setFreightAdminTab(id);
             if (id === "history") loadRateHistory();
-            if (id === "grid") {
+            if (id === "grid" && !saveBusy) {
               ensurePolCostSellsBackfill().then(filled => {
                 if (filled > 0) setRhSelectMsg(`✅ 매출 ${filled}셀 자동 보완 · 현재 운임 반영`);
               }).catch(e => console.warn("pol_costs 매출 보완 skip", e));
@@ -3953,105 +3955,122 @@ export default function App() {
 
   const applyExcelUpload = () => {
     if (!excelPreview) return;
+    if (saveBusy) {
+      flashSaveFeedback("error", "다른 저장이 진행 중입니다. 완료 후 다시 시도하세요.");
+      return;
+    }
+
     const parsed = excelPreview;
     const period = excelPeriod;
     const note = `${parsed.fileName} · ${parsed.sheet}`;
+    const batchId = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `batch-${Date.now()}`;
 
-    runSave("Excel 업로드", async () => {
-      clearTimeout(autoSaveTimerRef.current);
-      skipAutoSaveRef.current = true;
-      const batchId = typeof crypto !== "undefined" && crypto.randomUUID
-        ? crypto.randomUUID()
-        : `batch-${Date.now()}`;
-      const baseCosts = pricingSaveRef.current.polCostO ?? polCostO;
-      let nextCosts = baseCosts;
+    resetSaveQueue();
+    clearTimeout(autoSaveTimerRef.current);
+    skipAutoSaveRef.current = true;
+    setSaveBusy(true);
+    setSaveFeedback({ type: null, message: "운임 DB(pol_costs) 저장 중…" });
 
-      setSaveFeedback({ type: null, message: "운임 DB(pol_costs) 저장 중…" });
+    (async () => {
+      try {
+        const baseCosts = pricingSaveRef.current.polCostO ?? polCostO;
+        let nextCosts = baseCosts;
 
-      if (parsed.format === "RENTAL") {
-        const { rentalRates: clearedRental } = clearRentalPeriodRates(rentalRates, period);
-        const patch = buildRentalRatesFromBases(parsed.bases, period);
-        const merged = mergeRentalRatesPatch(clearedRental, patch);
-        setRentalRates(merged);
-        await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(merged));
-        pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
-      } else if (parsed.format === "DY") {
-        nextCosts = replacePolCostsWithSells(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period);
-        nextCosts = backfillPolCostSells(nextCosts, {
-          polM: pricingSaveRef.current.polM ?? polM,
-          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
-          margins: pricingSaveRef.current.margins ?? margins,
-        }).polCostO;
-        const nextDrop = buildDyDropRates(
-          JSON.stringify(carrierDropRates),
-          parsed.oceanRows,
-          parsed.dropRows,
-          period,
-        );
-        setPolCostO(nextCosts);
-        setCarrierDropRates(nextDrop);
-        await saveSettingsEntries([
-          ["pol_costs", serializePolCosts(nextCosts)],
-          ["carrier_drop_rates_json", JSON.stringify(nextDrop)],
-        ]);
-        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
-      } else {
-        const cr = parsed.carrier;
-        const netRows = parsed.netRows || {};
-        nextCosts = replacePolCostsWithSells(baseCosts, netRows, parsed.sellRows, cr, period);
-        nextCosts = backfillPolCostSells(nextCosts, {
-          polM: pricingSaveRef.current.polM ?? polM,
-          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
-          margins: pricingSaveRef.current.margins ?? margins,
-        }).polCostO;
-        setPolCostO(nextCosts);
-        await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
-        pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
-      }
-
-      if (excelSaveValidity) {
-        setSaveFeedback({ type: null, message: "Validity 저장 중…" });
-        const carrierKey = excelUploadCarrierKey(excelFormat, excelYslCarrier, parsed);
-        const baseValidity = pricingSaveRef.current.validityInfo ?? validityInfo;
-        const nextValidityInfo = mergeUploadValidity(baseValidity, carrierKey, period, excelValidityDraft);
-        setValidityInfo(nextValidityInfo);
-        pricingSaveRef.current = { ...pricingSaveRef.current, validityInfo: nextValidityInfo };
-        const validitySaves = [["validity_info_json", JSON.stringify(nextValidityInfo)]];
-        const legacyKey = LEGACY_VALIDITY_KEY[carrierKey];
-        if (legacyKey) {
-          validitySaves.push([legacyKey, formatValiditySlotLabel(nextValidityInfo[carrierKey]?.current)]);
+        if (parsed.format === "RENTAL") {
+          const { rentalRates: clearedRental } = clearRentalPeriodRates(rentalRates, period);
+          const patch = buildRentalRatesFromBases(parsed.bases, period);
+          const merged = mergeRentalRatesPatch(clearedRental, patch);
+          setRentalRates(merged);
+          await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(merged));
+          pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
+        } else if (parsed.format === "DY") {
+          nextCosts = replacePolCostsWithSells(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period);
+          nextCosts = backfillPolCostSells(nextCosts, {
+            polM: pricingSaveRef.current.polM ?? polM,
+            polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
+            margins: pricingSaveRef.current.margins ?? margins,
+          }).polCostO;
+          const nextDrop = buildDyDropRates(
+            JSON.stringify(carrierDropRates),
+            parsed.oceanRows,
+            parsed.dropRows,
+            period,
+          );
+          setPolCostO(nextCosts);
+          setCarrierDropRates(nextDrop);
+          await saveSettingsEntries([
+            ["pol_costs", serializePolCosts(nextCosts)],
+            ["carrier_drop_rates_json", JSON.stringify(nextDrop)],
+          ]);
+          pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
+        } else {
+          const cr = parsed.carrier;
+          const netRows = parsed.netRows || {};
+          nextCosts = replacePolCostsWithSells(baseCosts, netRows, parsed.sellRows, cr, period);
+          nextCosts = backfillPolCostSells(nextCosts, {
+            polM: pricingSaveRef.current.polM ?? polM,
+            polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
+            margins: pricingSaveRef.current.margins ?? margins,
+          }).polCostO;
+          setPolCostO(nextCosts);
+          await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
+          pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
         }
-        await saveSettingsEntries(validitySaves);
-      }
 
-      writePricingCache({
-        ...buildPricingCache(),
-        polCostO: nextCosts,
-        pricingSavedAt: Date.now(),
-        serverSyncedAt: Date.now(),
-      });
-
-      let rhResult = { sent: 0, total: 0 };
-      if (parsed.format !== "RENTAL") {
-        setSaveFeedback({ type: null, message: "Rate History 기록 중…" });
-        rhResult = await uploadExcelRateHistory(parsed, period, fData, note, batchId, nextCosts);
-        if (rhResult.sent > 0) {
-          rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+        if (excelSaveValidity) {
+          setSaveFeedback({ type: null, message: "Validity 저장 중…" });
+          const carrierKey = excelUploadCarrierKey(excelFormat, excelYslCarrier, parsed);
+          const baseValidity = pricingSaveRef.current.validityInfo ?? validityInfo;
+          const nextValidityInfo = mergeUploadValidity(baseValidity, carrierKey, period, excelValidityDraft);
+          setValidityInfo(nextValidityInfo);
+          pricingSaveRef.current = { ...pricingSaveRef.current, validityInfo: nextValidityInfo };
+          const validitySaves = [["validity_info_json", JSON.stringify(nextValidityInfo)]];
+          const legacyKey = LEGACY_VALIDITY_KEY[carrierKey];
+          if (legacyKey) {
+            validitySaves.push([legacyKey, formatValiditySlotLabel(nextValidityInfo[carrierKey]?.current)]);
+          }
+          await saveSettingsEntries(validitySaves);
         }
-      }
 
-      setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+        writePricingCache({
+          ...buildPricingCache(),
+          polCostO: nextCosts,
+          pricingSavedAt: Date.now(),
+          serverSyncedAt: Date.now(),
+        });
 
-      if (parsed.format !== "RENTAL") {
-        setFreightAdminTab("history");
-        setTimeout(() => loadRateHistory(), 800);
-        if (rhResult.error) {
-          setRhSelectMsg(`⚠️ 운임 DB 저장 완료 · Rate History 실패: ${rhResult.error}`);
-        } else if (rhResult.total > 0 && rhResult.sent < rhResult.total) {
-          setRhSelectMsg(`⚠️ Rate History ${rhResult.sent}/${rhResult.total}건만 기록됨 · 운임 DB는 저장됨`);
+        flashSaveFeedback("success", "✅ Excel 업로드 저장 완료");
+        setExcelMsg("✅ Supabase 저장 완료 · 「현재 운임」 탭에서 확인하세요.");
+
+        if (parsed.format !== "RENTAL") {
+          const rhParsed = parsed;
+          const rhCosts = nextCosts;
+          uploadExcelRateHistory(rhParsed, period, fData, note, batchId, rhCosts)
+            .then(rhResult => {
+              if (rhResult.sent > 0) {
+                rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+              }
+              if (rhResult.error) {
+                setExcelMsg(`✅ 운임 DB 저장됨 · Rate History 실패: ${rhResult.error}`);
+              } else if (rhResult.total > 0 && rhResult.sent < rhResult.total) {
+                setExcelMsg(`✅ 운임 DB 저장됨 · Rate History ${rhResult.sent}/${rhResult.total}건`);
+              } else if (rhResult.sent > 0) {
+                setExcelMsg(`✅ 저장 완료 · Rate History ${rhResult.sent}건 기록`);
+              }
+            })
+            .catch(e => console.warn("Rate History background skip", e));
         }
+      } catch (e) {
+        resetSaveQueue();
+        flashSaveFeedback("error", `저장 실패: ${e.message}`);
+        setExcelMsg(`저장 실패: ${e.message}`);
+      } finally {
+        setSaveBusy(false);
+        setTimeout(() => { skipAutoSaveRef.current = false; }, 2500);
       }
-    });
+    })();
   };
 
   const applyPruneNoServiceRates = () => {
@@ -5527,6 +5546,7 @@ export default function App() {
 
   useEffect(() => {
     if (skipAutoSaveRef.current || !isAdmin || saveBusy) return;
+    if (showFreightAdmin && freightAdminTab !== "grid") return;
     writePricingCache(buildPricingCache());
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
