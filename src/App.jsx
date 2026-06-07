@@ -8669,8 +8669,8 @@ export default function App() {
               const fp=PM[row.pol],fr=fp?fMap[fp]:null;
               return (
                 <div key={city}>
-                  <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":"rent-city-row-btn"} style={{width:"100%",display:"flex",alignItems:"center",padding:"8px 12px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
-                    <div className={isAdmin?"admin-card-top":`rent-city-row-head${!isAdmin?" rent-city-row-head--guest":""}`} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
+                  <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":"rent-city-row-btn"} style={{background:cOpen?"#faf5ff":"none",borderBottom:"1px solid #f9fafb"}}>
+                    <div className={isAdmin?"admin-card-top":`rent-city-row-head${!isAdmin?" rent-city-row-head--guest":""}`}>
                       <span className="rent-city-label">{cityLabel}</span>
                       {!isAdmin && <GuestRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc}/>}
                       <span className="route-card-chevron" style={{transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
