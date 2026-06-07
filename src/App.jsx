@@ -1547,6 +1547,30 @@ const buildRateHistoryQuery = (filters) => {
   return parts.join("&");
 };
 
+/** 변경 이력 표시 — 도시(POL) → 타입 → 기간 → 최신 일시 */
+const rateHistoryCitySortKey = (row) => {
+  if (row.route?.includes(" > ")) return row.route.split(" > ").slice(1).join(" > ").trim();
+  return row.pol || "";
+};
+
+const sortRateHistoryRowsByCity = (rows) => {
+  const periodRank = (p) => (p === "current" ? 0 : p === "future" ? 1 : 2);
+  const typeRank = (t) => {
+    const order = ["drop20", "drop40", "coc20", "coc40", "soc20", "soc40", "r20", "r40dv", "r40hc"];
+    const i = order.indexOf(t);
+    return i >= 0 ? i : 99;
+  };
+  return [...rows].sort((a, b) => {
+    const cityCmp = rateHistoryCitySortKey(a).localeCompare(rateHistoryCitySortKey(b), "ko", { sensitivity: "base" });
+    if (cityCmp !== 0) return cityCmp;
+    const typeCmp = typeRank(a.rate_type) - typeRank(b.rate_type);
+    if (typeCmp !== 0) return typeCmp;
+    const periodCmp = periodRank(a.period) - periodRank(b.period);
+    if (periodCmp !== 0) return periodCmp;
+    return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+  });
+};
+
 const buildBuyingGriCosts = (prevCosts, { deltas, rows, carrier, period, carrierRates, fData }) => {
   let next = { ...prevCosts };
   rows.forEach(row => {
@@ -4374,14 +4398,14 @@ export default function App() {
         dateFrom: rhDateFrom,
         dateTo: rhDateTo,
       }));
-      setRhRows(Array.isArray(data)
+      setRhRows(sortRateHistoryRowsByCity(Array.isArray(data)
         ? hydrateRateHistoryRowSells(
           data.filter(row => row.cost != null && row.cost > 0 && row.source !== "excel_delete"),
           hydrateCosts,
           pricingSaveRef.current?.polM ?? polM,
           pricingSaveRef.current?.polMFuture ?? polMFuture,
         )
-        : []);
+        : []));
       setRhSelectedIds([]);
       setRhDuplicateIds(new Set());
       setRhShowDuplicatesOnly(false);
@@ -6977,9 +7001,11 @@ export default function App() {
       admin_save: "Admin 저장", auto_save: "자동 저장", excel_upload: "Excel 업로드", excel_delete: "운임 삭제",
       gri: "GRI", import: "기존운임 복사", import_undo: "복사 되돌리기", rental_save: "렌탈 저장",
     }[s] || s || "—");
-    const rhDisplayRows = rhShowDuplicatesOnly && rhDuplicateIds.size
-      ? rhRows.filter(r => rhDuplicateIds.has(r.id))
-      : rhRows;
+    const rhDisplayRows = sortRateHistoryRowsByCity(
+      rhShowDuplicatesOnly && rhDuplicateIds.size
+        ? rhRows.filter(r => rhDuplicateIds.has(r.id))
+        : rhRows,
+    );
     const rhAllSelected = rhDisplayRows.length > 0 && rhSelectedIds.length === rhDisplayRows.length;
     const rhValidityForRow = (row) => {
       const cr = row.carrier;
