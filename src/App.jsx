@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v43"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v44"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -4120,6 +4120,7 @@ export default function App() {
   const saveFeedbackTimerRef = useRef(null);
   const skipAutoSaveRef = useRef(true);
   const autoSaveTimerRef = useRef(null);
+  const autoSaveInFlightRef = useRef(false);
   const saveQueueRef = useRef(Promise.resolve());
   const pricingSaveRef = useRef({});
   const [dragOverSlot, setDragOverSlot] = useState(null);
@@ -5551,6 +5552,7 @@ export default function App() {
   const dismissSaveFeedback = () => {
     if (saveFeedbackTimerRef.current) clearTimeout(saveFeedbackTimerRef.current);
     setSaveFeedback({ type: null, message: "" });
+    autoSaveInFlightRef.current = false;
     setSaveBusy(false);
   };
 
@@ -5569,11 +5571,13 @@ export default function App() {
       flashSaveFeedback("error", "다른 저장이 진행 중입니다. 완료 후 다시 시도하세요.");
       return;
     }
+    cancelPendingPricingSave();
+    resetSaveQueue();
     setSaveBusy(true);
     setSaveFeedback({ type: null, message: "" });
     try {
       await withTimeout(
-        enqueueSave(fn),
+        Promise.resolve().then(fn),
         SAVE_UI_MAX_MS,
         "저장 시간 초과 (3분) · 네트워크 확인 후 💾 저장 재시도",
       );
@@ -5649,7 +5653,10 @@ export default function App() {
   ];
 
   const saveOceanDb = () => saveSettingsEntriesDirect(getOceanSaveEntries());
-  const saveDropDb = () => saveSettingsEntriesDirect(getDropOffSaveEntries());
+  const saveDropDb = async () => {
+    const rows = getDropOffSaveEntries().map(([key, value]) => ({ key, value: String(value) }));
+    await postSettingsRows(rows, DB_LABEL[DB_DROP]);
+  };
   const saveRentalDb = () => saveSettingsEntriesDirect(getRentalSaveEntries());
   const saveAllPricingDbs = async () => {
     await saveOceanDb();
@@ -5986,6 +5993,7 @@ export default function App() {
     writePricingCache(buildPricingCache());
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
+      if (autoSaveInFlightRef.current || saveBusy) return;
       const task = showRentalAdmin
         ? () => saveRentalDb()
         : showFreightAdmin && freightAdminTab === "grid" && carrierAdminMode === "dropoff"
@@ -5993,6 +6001,7 @@ export default function App() {
           : showFreightAdmin && freightAdminTab === "grid"
             ? () => saveOceanDb()
             : () => saveAllPricingDbs();
+      autoSaveInFlightRef.current = true;
       enqueueSave(task)
         .then(() => {
           writePricingCache({
@@ -6009,10 +6018,10 @@ export default function App() {
         .catch(err => {
           console.error("auto-save failed", err);
           writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now() });
-          if (showFreightAdmin && freightAdminTab === "grid" && carrierAdminMode === "dropoff") {
-            flashSaveFeedback("error", `Drop off 자동 저장 실패: ${err.message}`);
-          }
-        });
+          const dropAuto = showFreightAdmin && freightAdminTab === "grid" && carrierAdminMode === "dropoff";
+          flashSaveFeedback("error", `${dropAuto ? "Drop off" : "운임"} 자동 저장 실패: ${err.message}`);
+        })
+        .finally(() => { autoSaveInFlightRef.current = false; });
     }, 2500);
     return () => clearTimeout(autoSaveTimerRef.current);
   }, [
