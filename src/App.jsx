@@ -7547,12 +7547,12 @@ export default function App() {
   const GuestPricePair = ({d20,d40,prefix=""}) => (
     <div className="guest-price-pair">
       <div className="guest-price-col">
-        <div style={{fontSize:10,color:"#9ca3af"}}>{prefix?`${prefix} 20'`:"20'"}</div>
+        <div className="guest-price-lbl">{prefix?`${prefix} 20'`:"20'"}</div>
         <div className={`guest-price-val${ratePeriod==="future"?" guest-price-val--future":""}`}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>
         {d20.cr&&<Bg k={d20.cr}/>}
       </div>
       <div className="guest-price-col">
-        <div style={{fontSize:10,color:"#9ca3af"}}>40'</div>
+        <div className="guest-price-lbl">40'</div>
         <div className={`guest-price-val${ratePeriod==="future"?" guest-price-val--future":""}`}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>
         {d40.cr&&<Bg k={d40.cr}/>}
       </div>
@@ -7563,7 +7563,7 @@ export default function App() {
     <div className="guest-price-pair guest-rent-triple">
       {[d20, d40dv, d40hc].map((d, i) => (
         <div key={RENT_COMBO_SHORT[i]} className="guest-price-col guest-rent-col">
-          <div className="guest-rent-size">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
+          <div className="guest-price-lbl guest-rent-size">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
           <div className={`guest-price-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
           {d.cr && <Bg k={d.cr}/>}
         </div>
@@ -8543,7 +8543,7 @@ export default function App() {
         <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
           <div className={isAdmin?"admin-card-top":`route-card-head route-card-head--rent${!isAdmin?" route-card-head--guest":""}`}>
             <RouteCardLabel area={row.area} pol={row.displayPol || row.pol}/>
-            {!isAdmin && <GuestRentTriple d20={d20} d40dv={d40dv} d40hc={d40hc} prefix="MOW"/>}
+            {!isAdmin && <GuestRentTriple d20={d20} d40dv={d40dv} d40hc={d40hc}/>}
             <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
           </div>
           {isAdmin && (
