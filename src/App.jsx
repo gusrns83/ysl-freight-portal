@@ -2078,6 +2078,7 @@ const ciPolMap = (obj) => Object.fromEntries(
 const DY_POL_MAP_CI = ciPolMap(DY_POL_MAP);
 const CK_POL_MAP_CI = ciPolMap(CK_POL_MAP);
 const CK_SERVICE_POLS = new Set(Object.values(CK_POL_MAP).filter(v => typeof v === "string"));
+const DY_SERVICE_POLS = new Set(Object.values(DY_POL_MAP).filter(v => typeof v === "string"));
 
 /** Excel POL명 → 포털 POL 목록 (선사별 별칭·그룹 확장 포함) */
 function resolveExcelPolList(rawName, carrier) {
@@ -2092,8 +2093,14 @@ function resolveExcelPolList(rawName, carrier) {
   };
 
   if (carrier === "SNK" && SNK_POL_EXPAND[key]) return fromMap(SNK_POL_EXPAND[key]);
-  if (carrier === "DY" && DY_POL_MAP_CI[key] !== undefined) return fromMap(DY_POL_MAP_CI[key]);
-  if (carrier === "CK" && CK_POL_MAP_CI[key] !== undefined) return fromMap(CK_POL_MAP_CI[key]);
+  if (carrier === "DY") {
+    if (DY_POL_MAP_CI[key] !== undefined) return fromMap(DY_POL_MAP_CI[key]);
+    return [];
+  }
+  if (carrier === "CK") {
+    if (CK_POL_MAP_CI[key] !== undefined) return fromMap(CK_POL_MAP_CI[key]);
+    return [];
+  }
 
   if (SNK_POL_EXPAND[key]) return fromMap(SNK_POL_EXPAND[key]);
   if (APP_POLS.has(key)) return [key];
@@ -2730,13 +2737,17 @@ const freightTemplateServesRate = (fData, carrier, pol, rateType) => {
 
 /**
  * Excel 업로드·pol_costs 서비스 판정
- * - SNK: 일본 전항 (FR null이어도 장금상선 서비스)
- * - CK: CK Line 양식 POL 맵 기준 (Chongqing via SHA Barge 등)
- * - 그 외: FR 운임표 기본값
+ * - SNK: 일본 전항 + FR 운임표
+ * - CK: CK Line 양식 POL 맵에 있는 POL만 (NANJING·YANGZHOU 등 제외)
+ * - DY: 동영 POL 맵 + FR 타입별
  */
 const carrierUploadServesRate = (fData, carrier, pol, rateType) => {
   if (carrier === "SNK" && JAPAN_POL_SET.has(pol)) return true;
-  if (carrier === "CK" && CK_SERVICE_POLS.has(pol)) return true;
+  if (carrier === "CK") return CK_SERVICE_POLS.has(pol);
+  if (carrier === "DY") {
+    if (!DY_SERVICE_POLS.has(pol)) return false;
+    return freightTemplateServesRate(fData, carrier, pol, rateType);
+  }
   return freightTemplateServesRate(fData, carrier, pol, rateType);
 };
 
