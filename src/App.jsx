@@ -167,9 +167,16 @@ function FooterAdSlot({ ads, dismissed, onDismiss }) {
 }
 
 const api = async (path, opts = {}) => {
+  const { headers: optHeaders, ...rest } = opts;
   const r = await fetch(`${SB_URL}/rest/v1/${path}`, {
-    headers: { "apikey": SB_KEY, "Authorization": `Bearer ${SB_KEY}`, "Content-Type": "application/json", "Prefer": "return=representation", ...opts.headers },
-    ...opts,
+    ...rest,
+    headers: {
+      apikey: SB_KEY,
+      Authorization: `Bearer ${SB_KEY}`,
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+      ...optHeaders,
+    },
   });
   const t = await r.text();
   if (!r.ok) throw new Error(t || `HTTP ${r.status}`);
@@ -2727,6 +2734,144 @@ function clearPolCostsCarrier(polCostO, carrier, period) {
   return { polCostO: out, clearedPols };
 }
 
+/** Rate History 선택 행 → pol_costs 개별 셀(매입·매출) 제거 */
+function clearPolCostRateCells(polCostO, entries) {
+  const out = JSON.parse(JSON.stringify(polCostO || {}));
+  let cleared = 0;
+  entries.forEach(({ carrier, pol, period, rate_type: t }) => {
+    const polEntry = out[pol];
+    const bucket = polEntry?.carrier?.[carrier]?.[period];
+    if (!bucket) return;
+    const hasCost = bucket[t] != null;
+    const hasSell = bucket.sell?.[t] != null;
+    if (!hasCost && !hasSell) return;
+
+    const cr = { ...polEntry.carrier[carrier] };
+    const nextBucket = { ...bucket };
+    delete nextBucket[t];
+    if (nextBucket.sell) {
+      const sell = { ...nextBucket.sell };
+      delete sell[t];
+      if (Object.keys(sell).length) nextBucket.sell = sell;
+      else delete nextBucket.sell;
+    }
+    cleared++;
+
+    const bucketLive = RATE_TYPES.some(rt => nextBucket[rt] != null)
+      || (nextBucket.sell && Object.values(nextBucket.sell).some(v => v != null));
+    if (bucketLive) cr[period] = nextBucket;
+    else delete cr[period];
+
+    if (carrierBucketHasData(cr)) {
+      polEntry.carrier = { ...polEntry.carrier, [carrier]: cr };
+    } else {
+      const carriers = { ...polEntry.carrier };
+      delete carriers[carrier];
+      if (Object.keys(carriers).length) polEntry.carrier = carriers;
+      else delete out[pol];
+    }
+  });
+  return { polCostO: out, cleared };
+}
+
+const dropCityKeyFromRhLabel = (label) => {
+  const hit = Object.entries(DOC_RC).find(([, v]) => v === label);
+  if (hit) return hit[0];
+  const hit2 = Object.entries(DROP_CITY_LABELS).find(([, v]) => v === label);
+  return hit2?.[0] || label;
+};
+
+function clearCarrierDropRateCells(carrierDropRates, entries) {
+  const out = JSON.parse(JSON.stringify(carrierDropRates || {}));
+  let cleared = 0;
+  entries.forEach(({ carrier, period, cityLabel, rate_type }) => {
+    const sk = rate_type === "drop40" ? "c40" : "c20";
+    const cityKey = dropCityKeyFromRhLabel(cityLabel);
+    const city = out[carrier]?.[period]?.[cityKey];
+    if (!city || city[sk] == null) return;
+    if (!out[carrier]) out[carrier] = { current: {}, future: {} };
+    if (!out[carrier][period]) out[carrier][period] = {};
+    const nextCity = { ...city };
+    delete nextCity[sk];
+    if (nextCity.c20 == null && nextCity.c40 == null) delete out[carrier][period][cityKey];
+    else out[carrier][period][cityKey] = nextCity;
+    cleared++;
+  });
+  return { carrierDropRates: out, cleared };
+}
+
+function clearRentalRateCells(rentalRates, entries, rData) {
+  const out = JSON.parse(JSON.stringify(rentalRates || {}));
+  let cleared = 0;
+  entries.forEach(({ pol, route, rate_type, period }) => {
+    const sk = rate_type === "r40" ? "c40" : "c20";
+    const city = (route && route.includes(" > ")) ? route.split(" > ").slice(1).join(" > ").trim() : "";
+    if (!city) return;
+    const rentalPol = rData.find(r => (PM[r.pol] || r.pol.toUpperCase()) === pol)?.pol || pol;
+    const bucket = out[rentalPol]?.[period]?.[city];
+    if (!bucket || bucket[sk] == null) return;
+    if (!out[rentalPol]) out[rentalPol] = { current: {}, future: {} };
+    if (!out[rentalPol][period]) out[rentalPol][period] = {};
+    const next = { ...bucket };
+    delete next[sk];
+    if (next.c20 == null && next.c40 == null) delete out[rentalPol][period][city];
+    else out[rentalPol][period][city] = next;
+    cleared++;
+  });
+  return { rentalRates: out, cleared };
+}
+
+function applyRateHistoryDeletesToStores(selectedRows, stores, rData) {
+  const oceanEntries = [];
+  const dropEntries = [];
+  const rentalEntries = [];
+
+  selectedRows.forEach(row => {
+    if (row.category === "ocean" && RATE_TYPES.includes(row.rate_type)) {
+      oceanEntries.push({
+        carrier: row.carrier, pol: row.pol, period: row.period, rate_type: row.rate_type,
+      });
+    } else if (row.category === "dropoff") {
+      dropEntries.push({
+        carrier: row.carrier, period: row.period, cityLabel: row.pol, rate_type: row.rate_type,
+      });
+    } else if (row.category === "rental") {
+      rentalEntries.push({
+        pol: row.pol, route: row.route, rate_type: row.rate_type, period: row.period,
+      });
+    }
+  });
+
+  let polCostO = stores.polCostO;
+  let carrierDropRates = stores.carrierDropRates;
+  let rentalRates = stores.rentalRates;
+  let polCostsChanged = false;
+  let dropChanged = false;
+  let rentalChanged = false;
+  let dbCleared = 0;
+
+  if (oceanEntries.length) {
+    const r = clearPolCostRateCells(polCostO, oceanEntries);
+    polCostO = r.polCostO;
+    polCostsChanged = r.cleared > 0;
+    dbCleared += r.cleared;
+  }
+  if (dropEntries.length) {
+    const r = clearCarrierDropRateCells(carrierDropRates, dropEntries);
+    carrierDropRates = r.carrierDropRates;
+    dropChanged = r.cleared > 0;
+    dbCleared += r.cleared;
+  }
+  if (rentalEntries.length) {
+    const r = clearRentalRateCells(rentalRates, rentalEntries, rData);
+    rentalRates = r.rentalRates;
+    rentalChanged = r.cleared > 0;
+    dbCleared += r.cleared;
+  }
+
+  return { polCostO, carrierDropRates, rentalRates, polCostsChanged, dropChanged, rentalChanged, dbCleared };
+}
+
 function clearCarrierDropPeriod(carrierDropRates, carrier, period) {
   const out = JSON.parse(JSON.stringify(carrierDropRates || {}));
   const bucket = out[carrier]?.[period];
@@ -3358,17 +3503,55 @@ export default function App() {
       setRhSelectMsg("선택된 항목이 없습니다.");
       return;
     }
-    const n = rhSelectedIds.length;
-    if (!window.confirm(`선택한 ${n}건의 Rate History 기록을 삭제할까요?\n\n목록에서만 제거됩니다 (운임 DB는 유지).`)) return;
-    runSave("기록 삭제", async () => {
+    const selected = rhRows.filter(r => rhSelectedIds.includes(r.id));
+    const n = selected.length;
+    if (!window.confirm(
+      `선택한 ${n}건을 삭제할까요?\n\n· Rate History 기록 제거\n· Supabase 운임 DB(pol_costs 등)에서 해당 요율 제거`,
+    )) return;
+    runSave("운임 삭제", async () => {
+      clearTimeout(autoSaveTimerRef.current);
+      skipAutoSaveRef.current = true;
       setRhSelectMsg("");
+
+      const base = pricingSaveRef.current;
+      const applied = applyRateHistoryDeletesToStores(selected, base, rData);
+
+      if (applied.polCostsChanged) {
+        setPolCostO(applied.polCostO);
+        await saveOneSettingWithRetry("pol_costs", serializePolCosts(applied.polCostO));
+      }
+      if (applied.dropChanged) {
+        setCarrierDropRates(applied.carrierDropRates);
+        await saveOneSettingWithRetry("carrier_drop_rates_json", JSON.stringify(applied.carrierDropRates));
+      }
+      if (applied.rentalChanged) {
+        setRentalRates(applied.rentalRates);
+        await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(applied.rentalRates));
+      }
+
+      pricingSaveRef.current = {
+        ...base,
+        polCostO: applied.polCostO,
+        carrierDropRates: applied.carrierDropRates,
+        rentalRates: applied.rentalRates,
+      };
+
       await api(`rate_history?id=in.(${rhSelectedIds.join(",")})`, {
         method: "DELETE",
         headers: { Prefer: "return=minimal" },
       });
+
+      writePricingCache({
+        ...buildPricingCache(),
+        pricingSavedAt: Date.now(),
+        serverSyncedAt: Date.now(),
+      });
+
+      const dbNote = applied.dbCleared ? ` · 운임 DB ${applied.dbCleared}셀` : "";
       setRhSelectedIds([]);
-      setRhSelectMsg(`✅ ${n}건 삭제 완료`);
+      setRhSelectMsg(`✅ ${n}건 삭제 완료${dbNote}`);
       loadRateHistory();
+      setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
     });
   };
 
@@ -5673,7 +5856,7 @@ export default function App() {
             </table>
           </div>
           <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 12, lineHeight: 1.5 }}>
-            행 클릭 또는 오른쪽 체크박스로 선택 · <strong>선택 기록 삭제</strong>는 Rate History 목록만 제거합니다. Validity는 선사·기간(현재/향후)별 저장값입니다.
+            행 클릭 또는 오른쪽 체크박스로 선택 · <strong>선택 기록 삭제</strong>는 Rate History + Supabase 운임 DB(pol_costs)에서 해당 POL·타입을 제거합니다. Validity는 선사·기간별 저장값입니다.
           </div>
         </div>
       </div>
