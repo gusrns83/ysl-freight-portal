@@ -2079,7 +2079,7 @@ const mergeUploadValidity = (validityInfo, carrierKey, period, draft) => {
 
 const num = (v) => {
   if (v == null || v === "" || v === "-") return null;
-  const s = String(v).trim().replace(/,/g, "");
+  const s = String(v).trim().replace(/,/g, "").replace(/^\$+/, "");
   if (!s || s.toLowerCase() === "x") return null;
   const n = Number(s);
   if (!Number.isFinite(n)) return null;
@@ -2416,6 +2416,7 @@ async function readExcelFile(file) {
 function inferSnkSellStart(rows, dataStart, netStart) {
   for (let sr = dataStart - 2; sr <= dataStart - 1 && sr >= 0; sr++) {
     const c20s = (rows[sr] || []).map((c, i) => (is20SizeToken(c) ? i : -1)).filter(i => i >= 0);
+    if (c20s.length >= 4) return c20s[2];
     if (c20s.length >= 2) return c20s[1];
   }
   return netStart != null ? netStart + 5 : undefined;
@@ -2466,7 +2467,7 @@ function detectSnkColumns(rows) {
 
   for (let r = 0; r < 10; r++) {
     const rawVals = [];
-    for (let c = 0; c < 14; c++) rawVals.push(String(cell(rows, r, c) ?? "").trim());
+    for (let c = 0; c < 22; c++) rawVals.push(String(cell(rows, r, c) ?? "").trim());
     const vals = rawVals.map(v => v.toUpperCase());
     if (!vals.includes("NET") || vals.includes("PROFIT")) continue;
     if (vals.includes("SELL") && vals.includes("PROFIT")) continue;
@@ -2506,6 +2507,13 @@ const isSnkLegacyTransitSheet = (rows) => {
 
 function parseSnkSheet(rows) {
   try {
+    const dual = detectDualNetSellGrid(rows);
+    if (dual) {
+      const dualParsed = parsePolNetSellGrid(rows, dual, "SNK");
+      if (Object.keys(dualParsed.netRows).length || Object.keys(dualParsed.sellRows).length) {
+        return { ...dualParsed, marginRows: {} };
+      }
+    }
     const cols = detectSnkColumns(rows);
     const parsed = parseOceanNetSellRows(rows, cols, "SNK");
     if (Object.keys(parsed.netRows).length || Object.keys(parsed.sellRows).length) {
@@ -3301,8 +3309,37 @@ function previewSummary(parsed, period) {
   };
 }
 
+function polCostSiblingMargin(polCostO, pol, carrier, period, rateType) {
+  const bucket = polCostO?.[pol]?.carrier?.[carrier]?.[period];
+  if (!bucket) return null;
+  const inferred = {};
+  RATE_TYPES.forEach(t => {
+    if (bucket[t] != null && bucket.sell?.[t] != null) {
+      inferred[t] = bucket.sell[t] - bucket[t];
+    }
+  });
+  if (inferred[rateType] != null) return inferred[rateType];
+  return RATE_TYPES.map(t => inferred[t]).find(m => m != null) ?? null;
+}
+
+function rateHistoryBatchSiblingMargin(rows, row) {
+  const margins = (rows || [])
+    .filter(r => r.category === "ocean"
+      && r.pol === row.pol
+      && r.carrier === row.carrier
+      && r.period === row.period
+      && r.id !== row.id
+      && r.sell != null
+      && r.cost != null
+      && r.cost > 0)
+    .map(r => r.sell - r.cost)
+    .filter(m => Number.isFinite(m));
+  return margins[0] ?? null;
+}
+
 function enrichRateHistoryRowsWithCosts(rows, polCostO, period) {
-  return (rows || []).map(row => {
+  const list = rows || [];
+  return list.map(row => {
     if (row.category !== "ocean") return row;
     let sell = row.sell;
     if (sell == null) {
@@ -3312,14 +3349,20 @@ function enrichRateHistoryRowsWithCosts(rows, polCostO, period) {
       const m = snkJapanReferenceMargins(polCostO, period)[row.rate_type];
       if (m != null) sell = row.cost + m;
     }
+    if (sell == null && row.cost > 0) {
+      const m = polCostSiblingMargin(polCostO, row.pol, row.carrier, period, row.rate_type)
+        ?? rateHistoryBatchSiblingMargin(list, row);
+      if (m != null) sell = row.cost + m;
+    }
     if (sell == null) return row;
     return { ...row, sell, margin: sell - row.cost };
   });
 }
 
-/** Rate History 표시 · DB에 매출 없을 때 pol_costs·SNK 일본 마진에서 보완 */
+/** Rate History 표시 · DB에 매출 없을 때 pol_costs·동일 POL 마진·SNK 일본에서 보완 */
 function hydrateRateHistoryRowSells(rows, polCostO, polM, polMFuture) {
-  return (rows || []).map(row => {
+  const list = rows || [];
+  return list.map(row => {
     if (row.category !== "ocean" || row.cost == null || row.cost <= 0) return row;
     const explicit = resolveCarrierExplicitSell(polCostO, row.pol, row.carrier, row.rate_type, row.period);
     if (explicit != null && (row.sell == null || row.sell === 0)) {
@@ -3331,6 +3374,11 @@ function hydrateRateHistoryRowSells(rows, polCostO, polM, polMFuture) {
     });
     if (sell == null && row.carrier === "SNK" && JAPAN_POL_SET.has(row.pol)) {
       const m = snkJapanReferenceMargins(polCostO, row.period)[row.rate_type];
+      if (m != null) sell = row.cost + m;
+    }
+    if (sell == null) {
+      const m = polCostSiblingMargin(polCostO, row.pol, row.carrier, row.period, row.rate_type)
+        ?? rateHistoryBatchSiblingMargin(list, row);
       if (m != null) sell = row.cost + m;
     }
     if (sell == null) return row;
