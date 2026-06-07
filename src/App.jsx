@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v33"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v34"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -257,6 +257,31 @@ const compactPolCostO = (polCostO) => {
         RATE_TYPES.forEach(t => {
           if (crData[t] != null && crData[t] !== "") nextCr[t] = crData[t];
         });
+        if (crData.byValidity && typeof crData.byValidity === "object") {
+          const byValidity = {};
+          Object.entries(crData.byValidity).forEach(([vKey, vEntry]) => {
+            if (!vEntry || typeof vEntry !== "object") return;
+            const archived = {};
+            if (vEntry.slot) archived.slot = vEntry.slot;
+            if (vEntry.from) archived.from = vEntry.from;
+            if (vEntry.till) archived.till = vEntry.till;
+            if (vEntry.label) archived.label = vEntry.label;
+            if (vEntry.furtherNotice) archived.furtherNotice = true;
+            RATE_TYPES.forEach(t => {
+              if (vEntry[t] != null && vEntry[t] !== "") archived[t] = vEntry[t];
+            });
+            if (vEntry.sell) {
+              const sell = {};
+              RATE_TYPES.forEach(t => {
+                const v = vEntry.sell[t];
+                if (v != null && v !== "") sell[t] = v;
+              });
+              if (Object.keys(sell).length) archived.sell = sell;
+            }
+            if (Object.keys(archived).length) byValidity[vKey] = archived;
+          });
+          if (Object.keys(byValidity).length) nextCr.byValidity = byValidity;
+        }
         if (Object.keys(nextCr).length) carrier[cr] = nextCr;
       });
       if (Object.keys(carrier).length) next.carrier = carrier;
@@ -2177,6 +2202,75 @@ const mergeUploadValidity = (validityInfo, carrierKey, period, draft) => {
   return { ...validityInfo, [carrierKey]: updated };
 };
 
+/** Validity 구간 저장 키 — pol_costs.carrier[].byValidity 아카이브용 */
+const validityStorageKey = (slot) => {
+  const s = normalizeValiditySlot(slot);
+  const from = parseValidityToISO(s.from) || "open";
+  const till = s.furtherNotice ? "fn" : (parseValidityToISO(s.till) || "open");
+  return `${from}_${till}`;
+};
+
+const buildPolCostBucket = (costs, sells) => {
+  const bucket = {};
+  RATE_TYPES.forEach(t => {
+    if (costs?.[t] != null) bucket[t] = costs[t];
+  });
+  const sell = {};
+  RATE_TYPES.forEach(t => {
+    if (sells?.[t] != null) sell[t] = sells[t];
+  });
+  if (Object.keys(sell).length) bucket.sell = sell;
+  return bucket;
+};
+
+const polCostBucketHasRates = (bucket) =>
+  bucket && (RATE_TYPES.some(t => bucket[t] != null) || (bucket.sell && Object.keys(bucket.sell).length));
+
+/** Validity별 누적 저장 + 선택한 current/future 슬롯 동기화 (기존 구간 삭제 없음) */
+function mergePolCostsUploadByValidity(polCostO, netRows, sellRows, carrier, slotPeriod, validityDraft) {
+  const out = JSON.parse(JSON.stringify(polCostO || {}));
+  const slot = normalizeValiditySlot(validityDraft);
+  const vKey = validityStorageKey(slot);
+  const period = slotPeriod === "future" ? "future" : "current";
+  const label = formatValiditySlotLabel(slot) || vKey;
+
+  Object.entries(netRows || {}).forEach(([pol, costs]) => {
+    const sells = sellRows?.[pol] || {};
+    const bucket = buildPolCostBucket(costs, sells);
+    if (!polCostBucketHasRates(bucket)) return;
+
+    const polEntry = { ...(out[pol] || {}) };
+    const carriers = { ...(polEntry.carrier || {}) };
+    const cr = { ...(carriers[carrier] || {}) };
+    const byValidity = { ...(cr.byValidity || {}) };
+
+    byValidity[vKey] = {
+      slot: period,
+      from: slot.from ?? "",
+      till: slot.till ?? "",
+      furtherNotice: !!slot.furtherNotice,
+      label,
+      ...bucket,
+    };
+
+    cr[period] = { ...bucket };
+    cr.byValidity = byValidity;
+    carriers[carrier] = cr;
+    polEntry.carrier = carriers;
+    out[pol] = polEntry;
+  });
+
+  return out;
+}
+
+const countCarrierValidityArchive = (polCostO, carrier) => {
+  const keys = new Set();
+  Object.values(polCostO || {}).forEach(pol => {
+    Object.keys(pol?.carrier?.[carrier]?.byValidity || {}).forEach(k => keys.add(k));
+  });
+  return keys.size;
+};
+
 const num = (v) => {
   if (v == null || v === "" || v === "-") return null;
   const s = String(v).trim().replace(/,/g, "").replace(/^\$+/, "");
@@ -2999,6 +3093,9 @@ const carrierBucketHasData = (cr) => {
     const b = cr[p];
     return b && (RATE_TYPES.some(t => b[t] != null) || (b.sell && Object.keys(b.sell).length));
   })) return true;
+  if (cr.byValidity && typeof cr.byValidity === "object") {
+    return Object.values(cr.byValidity).some(v => polCostBucketHasRates(v));
+  }
   return RATE_TYPES.some(t => cr[t] != null);
 };
 
@@ -4010,7 +4107,8 @@ export default function App() {
 
     const parsed = excelPreview;
     const period = excelPeriod;
-    const note = `${parsed.fileName} · ${parsed.sheet}`;
+    const validityLabel = formatValiditySlotLabel(excelValidityDraft) || validityStorageKey(excelValidityDraft);
+    const note = `${parsed.fileName} · ${parsed.sheet} · ${validityLabel}`;
     const batchId = typeof crypto !== "undefined" && crypto.randomUUID
       ? crypto.randomUUID()
       : `batch-${Date.now()}`;
@@ -4042,7 +4140,7 @@ export default function App() {
         await saveSettingDirect("rental_rates_json", JSON.stringify(merged));
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
       } else if (parsed.format === "DY") {
-        nextCosts = replacePolCostsWithSells(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period);
+        nextCosts = mergePolCostsUploadByValidity(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period, excelValidityDraft);
         nextCosts = backfillPolCostSells(nextCosts, {
           polM: pricingSaveRef.current.polM ?? polM,
           polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
@@ -4064,7 +4162,7 @@ export default function App() {
       } else {
         const cr = parsed.carrier || parsed.format;
         const netRows = parsed.netRows || {};
-        nextCosts = replacePolCostsWithSells(baseCosts, netRows, parsed.sellRows || {}, cr, period);
+        nextCosts = mergePolCostsUploadByValidity(baseCosts, netRows, parsed.sellRows || {}, cr, period, excelValidityDraft);
         nextCosts = backfillPolCostSells(nextCosts, {
           polM: pricingSaveRef.current.polM ?? polM,
           polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
@@ -4121,7 +4219,13 @@ export default function App() {
         serverSyncedAt: Date.now(),
       });
 
-      finishUpload(true, "✅ Supabase 저장 완료 · 「현재 운임」 탭에서 확인하세요.");
+      const archiveCarrier = parsed.format === "DY" ? "DY" : (parsed.carrier || parsed.format);
+      const archiveN = parsed.format !== "RENTAL" ? countCarrierValidityArchive(nextCosts, archiveCarrier) : 0;
+      const slotLabel = period === "future" ? "향후" : "현재";
+      finishUpload(
+        true,
+        `✅ 저장 완료 · ${validityLabel} (${slotLabel} 탭) · DB에 validity ${archiveN}구간 누적`,
+      );
 
       if (parsed.format !== "RENTAL") {
         uploadExcelRateHistory(parsed, period, fData, note, batchId, nextCosts)
@@ -6124,6 +6228,7 @@ export default function App() {
         <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 80px" }}>
           <div style={{ fontSize: 11, color: "#92400e", marginBottom: 12, lineHeight: 1.5 }}>
             선사 원본 Excel **「업로드용」** 시트 기준 · POL 자동 매칭 · **NET(매입)+매출** 함께 저장 (Drop off는 DY Import 원본 시트).
+            <span style={{ display: "block", marginTop: 4 }}>Validity 날짜별로 DB에 **누적** 저장 · **적용 기간**은 포털 **현재/향후** 탭 지정 (이전 validity 구간은 삭제되지 않음)</span>
             <span style={{ display: "block", marginTop: 4, fontSize: 10, color: "#9ca3af" }}>저장 엔진 {ADMIN_SAVE_REV}</span>
           </div>
 
@@ -6143,7 +6248,7 @@ export default function App() {
           </div>
 
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
-            <label style={{ fontSize: 10, color: "#6b7280" }}>적용 기간
+            <label style={{ fontSize: 10, color: "#6b7280" }}>적용 기간 (포털 탭)
               <select value={excelPeriod} onChange={e => { setExcelPeriod(e.target.value); if (excelWorkbook) setTimeout(refreshExcelPreview, 0); }}
                 style={{ display: "block", width: "100%", marginTop: 4, padding: "8px", fontSize: 12, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" }}>
                 <option value="current">현재 운임</option>
@@ -6189,7 +6294,7 @@ export default function App() {
             />
             {uploadValidityPreview && (
               <div style={{ fontSize: 10, color: "#6b7280", marginTop: 4 }}>
-                표시: {uploadValidityPreview}
+                저장 키: {validityStorageKey(excelValidityDraft)} · 표시: {uploadValidityPreview}
               </div>
             )}
           </div>
