@@ -2335,6 +2335,14 @@ async function readExcelFile(file) {
   return { sheetNames: wb.SheetNames, sheets, fileName: file.name };
 }
 
+function inferSnkSellStart(rows, dataStart, netStart) {
+  for (let sr = dataStart - 2; sr <= dataStart - 1 && sr >= 0; sr++) {
+    const c20s = (rows[sr] || []).map((c, i) => (is20SizeToken(c) ? i : -1)).filter(i => i >= 0);
+    if (c20s.length >= 2) return c20s[1];
+  }
+  return netStart != null ? netStart + 5 : undefined;
+}
+
 function detectSnkColumns(rows) {
   const pickDataStart = (headerRow, netI) => {
     const nextRow = cell(rows, headerRow + 1, netI);
@@ -2386,11 +2394,12 @@ function detectSnkColumns(rows) {
     if (vals.includes("SELL") && vals.includes("PROFIT")) continue;
     const netI = vals.indexOf("NET");
     const sellI = vals.indexOf("SELL");
-    const sellK = rawVals.findIndex(v => v.includes("매출"));
-    const sellStart = sellI >= 0 ? sellI : (sellK >= 0 ? sellK : undefined);
+    const sellK = rawVals.findIndex(v => /매출|SELL/i.test(v));
+    let sellStart = sellI >= 0 ? sellI : (sellK >= 0 ? sellK : undefined);
     const ap = findAreaPolRow(r + 1, Math.min(r + 5, rows.length));
     if (ap) {
-      return sellStart != null ? { ...ap, netStart: netI, sellStart } : { ...ap, netStart: netI };
+      if (sellStart == null) sellStart = inferSnkSellStart(rows, ap.dataStart, netI);
+      return { ...ap, netStart: netI, sellStart };
     }
   }
 
@@ -2850,6 +2859,23 @@ function enrichRateHistoryRowsWithCosts(rows, polCostO, period) {
   });
 }
 
+/** Rate History 표시 · DB에 매출 없을 때 pol_costs에서 보완 */
+function hydrateRateHistoryRowSells(rows, polCostO, polM, polMFuture) {
+  return (rows || []).map(row => {
+    if (row.category !== "ocean" || row.cost == null) return row;
+    const explicit = resolveCarrierExplicitSell(polCostO, row.pol, row.carrier, row.rate_type, row.period);
+    if (explicit != null && (row.sell == null || row.sell === 0)) {
+      return { ...row, sell: explicit, margin: explicit - row.cost, sellHydrated: true };
+    }
+    if (row.sell != null) return row;
+    const sell = resolveCarrierEffectiveSell(polCostO, row.pol, row.carrier, row.rate_type, row.period, row.cost, {
+      polM, polMFuture, adminMode: true,
+    });
+    if (sell == null) return row;
+    return { ...row, sell, margin: sell - row.cost, sellHydrated: true };
+  });
+}
+
 function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
   const rows = [];
   const areaMap = Object.fromEntries((fData || []).map(r => [r.pol, r.area]));
@@ -3072,6 +3098,8 @@ export default function App() {
   const [rhDeleteCategory, setRhDeleteCategory] = useState("ocean");
   const [rhDeleteIncludeDyDrop, setRhDeleteIncludeDyDrop] = useState(true);
   const [rhDeleteMsg, setRhDeleteMsg] = useState("");
+  const [rhSelectedIds, setRhSelectedIds] = useState([]);
+  const [rhSelectMsg, setRhSelectMsg] = useState("");
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
   const [carrierAdminMode, setCarrierAdminMode] = useState("ocean");
@@ -3155,8 +3183,14 @@ export default function App() {
         dateTo: rhDateTo,
       }));
       setRhRows(Array.isArray(data)
-        ? data.filter(row => row.cost != null && row.source !== "excel_delete")
+        ? hydrateRateHistoryRowSells(
+          data.filter(row => row.cost != null && row.source !== "excel_delete"),
+          pricingSaveRef.current?.polCostO ?? polCostO,
+          pricingSaveRef.current?.polM ?? polM,
+          pricingSaveRef.current?.polMFuture ?? polMFuture,
+        )
         : []);
+      setRhSelectedIds([]);
     } catch (e) {
       const msg = String(e.message || e);
       setRhRows([]);
@@ -3283,7 +3317,11 @@ export default function App() {
       if (rhRaw.length) {
         try {
           const rhScope = rateHistoryScopeFromUpload(parsed, period);
-          await deleteRateHistoryExcelUpload(rhScope.carrier, rhScope.period, rhScope.category);
+          try {
+            await deleteRateHistoryExcelUpload(rhScope.carrier, rhScope.period, rhScope.category);
+          } catch (delErr) {
+            console.warn("rate_history delete skip (DELETE policy 확인):", delErr);
+          }
           await postRateHistoryRows(rhRaw.map(r => ({ ...r, batch_id: batchId })));
           rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
           if (showRateHistoryAdmin) loadRateHistory();
@@ -3312,6 +3350,25 @@ export default function App() {
         serverSyncedAt: Date.now(),
       });
       setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+    });
+  };
+
+  const applyDeleteSelectedRhRows = () => {
+    if (!rhSelectedIds.length) {
+      setRhSelectMsg("선택된 항목이 없습니다.");
+      return;
+    }
+    const n = rhSelectedIds.length;
+    if (!window.confirm(`선택한 ${n}건의 Rate History 기록을 삭제할까요?\n\n목록에서만 제거됩니다 (운임 DB는 유지).`)) return;
+    runSave("기록 삭제", async () => {
+      setRhSelectMsg("");
+      await api(`rate_history?id=in.(${rhSelectedIds.join(",")})`, {
+        method: "DELETE",
+        headers: { Prefer: "return=minimal" },
+      });
+      setRhSelectedIds([]);
+      setRhSelectMsg(`✅ ${n}건 삭제 완료`);
+      loadRateHistory();
     });
   };
 
@@ -5385,6 +5442,21 @@ export default function App() {
       : rhDeleteCat === "dropoff"
         ? rhDeleteDropN > 0
         : rhDeleteOceanN > 0;
+    const rhAllSelected = rhRows.length > 0 && rhSelectedIds.length === rhRows.length;
+    const rhValidityForRow = (row) => {
+      const cr = row.carrier;
+      if (!VALIDITY_KEYS.includes(cr)) return "—";
+      const slot = validityInfo[cr]?.[row.period === "future" ? "future" : "current"];
+      return formatValidityCompact(slot) || formatValiditySlotLabel(slot) || "—";
+    };
+    const toggleRhRowSelect = (id) => {
+      setRhSelectMsg("");
+      setRhSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
+    };
+    const toggleRhSelectAll = () => {
+      setRhSelectMsg("");
+      setRhSelectedIds(rhAllSelected ? [] : rhRows.map(r => r.id));
+    };
     return (
       <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: ff }}>
         {adminSaveToastEl}
@@ -5504,22 +5576,72 @@ export default function App() {
           {rhError && (
             <div style={{ fontSize: 12, color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 8, padding: 10, marginBottom: 12 }}>{rhError}</div>
           )}
-          <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8 }}>{rhLoading ? "불러오는 중…" : `${rhRows.length}건 (최대 400건)`}</div>
+          <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
+            <span style={{ fontSize: 11, color: "#6b7280" }}>{rhLoading ? "불러오는 중…" : `${rhRows.length}건 (최대 400건)`}</span>
+            <span style={{ fontSize: 11, color: rhSelectedIds.length ? "#b45309" : "#9ca3af", fontWeight: rhSelectedIds.length ? 700 : 400 }}>
+              선택 {rhSelectedIds.length}건
+            </span>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+              <button
+                type="button"
+                onClick={toggleRhSelectAll}
+                disabled={!rhRows.length || rhLoading}
+                style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #d1d5db", background: "#fff", cursor: rhRows.length ? "pointer" : "not-allowed" }}
+              >
+                {rhAllSelected ? "전체 해제" : "전체 선택"}
+              </button>
+              <button
+                type="button"
+                onClick={applyDeleteSelectedRhRows}
+                disabled={saveBusy || !rhSelectedIds.length}
+                style={{
+                  fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 8, border: "none",
+                  color: "#fff", background: saveBusy || !rhSelectedIds.length ? "#fca5a5" : "#dc2626",
+                  cursor: saveBusy || !rhSelectedIds.length ? "not-allowed" : "pointer",
+                }}
+              >
+                {saveBusy ? "처리 중…" : "🗑 선택 기록 삭제"}
+              </button>
+            </div>
+          </div>
+          {rhSelectMsg && (
+            <div style={{ fontSize: 11, marginBottom: 8, padding: 8, borderRadius: 6, color: rhSelectMsg.startsWith("✅") ? "#166534" : "#dc2626", background: rhSelectMsg.startsWith("✅") ? "#f0fdf4" : "#fef2f2" }}>{rhSelectMsg}</div>
+          )}
           <div style={{ overflowX: "auto", background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12 }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 720 }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 860 }}>
               <thead>
                 <tr style={{ background: "#f0fdfa", borderBottom: "1px solid #e5e7eb" }}>
-                  {["일시", "선사", "Area", "POL/구간", "타입", "기간", "매입", "매출", "마진", "출처"].map(h => (
-                    <th key={h} style={{ padding: "8px 6px", textAlign: "left", fontWeight: 700, color: "#0f766e", whiteSpace: "nowrap" }}>{h}</th>
+                  {["일시", "선사", "Area", "POL/구간", "타입", "기간", "Validity", "매입", "매출", "마진", "출처"].map(h => (
+                    <th key={h} style={{ padding: "8px 6px", textAlign: h === "Validity" ? "center" : "left", fontWeight: 700, color: "#0f766e", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
+                  <th style={{ padding: "8px 6px", textAlign: "center", fontWeight: 700, color: "#0f766e", width: 44 }}>
+                    <input
+                      type="checkbox"
+                      checked={rhAllSelected}
+                      onChange={toggleRhSelectAll}
+                      disabled={!rhRows.length}
+                      title="전체 선택"
+                      style={{ width: 16, height: 16, cursor: rhRows.length ? "pointer" : "not-allowed" }}
+                    />
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {rhRows.length === 0 && !rhLoading && (
-                  <tr><td colSpan={10} style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>기록 없음 · 저장 후 자동 적재됩니다</td></tr>
+                  <tr><td colSpan={12} style={{ padding: 24, textAlign: "center", color: "#9ca3af" }}>기록 없음 · 저장 후 자동 적재됩니다</td></tr>
                 )}
-                {rhRows.map(row => (
-                  <tr key={row.id} style={{ borderBottom: "1px solid #f3f4f6" }}>
+                {rhRows.map(row => {
+                  const selected = rhSelectedIds.includes(row.id);
+                  return (
+                  <tr
+                    key={row.id}
+                    onClick={() => toggleRhRowSelect(row.id)}
+                    style={{
+                      borderBottom: "1px solid #f3f4f6",
+                      background: selected ? "#fffbeb" : "#fff",
+                      cursor: "pointer",
+                    }}
+                  >
                     <td style={{ padding: "7px 6px", whiteSpace: "nowrap", color: "#374151" }}>{fmtRhDate(row.created_at)}</td>
                     <td style={{ padding: "7px 6px", fontWeight: 600 }}>{CN_KR[row.carrier] || row.carrier}</td>
                     <td style={{ padding: "7px 6px", color: "#6b7280" }}>{row.area || "—"}</td>
@@ -5529,17 +5651,29 @@ export default function App() {
                     </td>
                     <td style={{ padding: "7px 6px" }}>{row.rate_type}</td>
                     <td style={{ padding: "7px 6px" }}>{row.period === "future" ? "향후" : "현재"}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "center", whiteSpace: "nowrap", fontSize: 10, color: "#0f766e", fontWeight: 600 }} title={formatValiditySlotLabel(validityInfo[row.carrier]?.[row.period === "future" ? "future" : "current"])}>
+                      {rhValidityForRow(row)}
+                    </td>
                     <td style={{ padding: "7px 6px", textAlign: "right" }}>{row.cost != null ? n(row.cost) : "—"}</td>
                     <td style={{ padding: "7px 6px", textAlign: "right" }}>{row.sell != null ? n(row.sell) : "—"}</td>
                     <td style={{ padding: "7px 6px", textAlign: "right", color: "#059669" }}>{row.margin != null ? n(row.margin) : "—"}</td>
                     <td style={{ padding: "7px 6px", fontSize: 10, color: "#6b7280" }} title={row.note || ""}>{rhSourceLabel(row.source)}</td>
+                    <td style={{ padding: "7px 6px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleRhRowSelect(row.id)}
+                        style={{ width: 16, height: 16, cursor: "pointer" }}
+                      />
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
           <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 12, lineHeight: 1.5 }}>
-            변경·업로드 시 Rate History에 기록됩니다. 삭제된 운임은 목록에 표시하지 않습니다.
+            행 클릭 또는 오른쪽 체크박스로 선택 · <strong>선택 기록 삭제</strong>는 Rate History 목록만 제거합니다. Validity는 선사·기간(현재/향후)별 저장값입니다.
           </div>
         </div>
       </div>
