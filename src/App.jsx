@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v35"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v36"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -6046,15 +6046,22 @@ export default function App() {
     return CRS.map(k => {
       const s20 = getCarrierRate(fr, k, "soc20");
       const s40 = getCarrierRate(fr, k, "soc40");
-      const m20 = getM(fp, fr.area, "soc20", ratePeriod) + getRentalM(fp, fr.area, "r20");
-      const m40 = getM(fp, fr.area, "soc40", ratePeriod) + getRentalM(fp, fr.area, "r40");
       const cost20 = s20 != null && r20 != null ? s20 + r20 : null;
       const cost40 = s40 != null && r40 != null ? s40 + r40 : null;
+      const socSell20 = s20 != null ? getGuestCarrierSell(fp, k, "soc20", ratePeriod, s20, fr.area) : null;
+      const socSell40 = s40 != null ? getGuestCarrierSell(fp, k, "soc40", ratePeriod, s40, fr.area) : null;
+      const rentM20 = getRentalM(fp, fr.area, "r20");
+      const rentM40 = getRentalM(fp, fr.area, "r40");
+      const rentSell20 = r20 != null ? r20 + rentM20 : null;
+      const rentSell40 = r40 != null ? r40 + rentM40 : null;
+      const t20 = socSell20 != null && rentSell20 != null ? socSell20 + rentSell20 : null;
+      const t40 = socSell40 != null && rentSell40 != null ? socSell40 + rentSell40 : null;
+      const m20 = cost20 != null && t20 != null ? t20 - cost20 : rentM20 + getM(fp, fr.area, "soc20", ratePeriod);
+      const m40 = cost40 != null && t40 != null ? t40 - cost40 : rentM40 + getM(fp, fr.area, "soc40", ratePeriod);
       return {
         k,
         cost20, cost40, soc20: s20, soc40: s40, rent20: r20, rent40: r40, m20, m40,
-        t20: cost20 != null ? cost20 + m20 : null,
-        t40: cost40 != null ? cost40 + m40 : null,
+        t20, t40,
       };
     }).filter(x => x.t20 != null || x.t40 != null);
   };
@@ -6071,9 +6078,27 @@ export default function App() {
     const fp = PM[rPol];
     const freightPol = fp || rPol;
     const fr = fp ? fMap[fp] : null;
-    const margin = fr ? getRentSellMargin(freightPol, rPol, fr.area, si) : 0;
     const b = bRent(rPol, city, rRow, si);
     const cost = getRentCityCost(freightPol, rPol, city, rRow, si);
+    const rt = si === 0 ? "r20" : "r40";
+    const t = si === 0 ? "soc20" : "soc40";
+    if (fr && b.cr) {
+      const soc = getCarrierRate(fr, b.cr, t);
+      const rental = getRentalBase(rPol, city, si);
+      if (isAdmin) {
+        const socSell = soc != null ? getCarrierAdminSell(freightPol, b.cr, t, ratePeriod, soc) : null;
+        const totalSell = socSell != null && rental != null
+          ? socSell + rental + getRentalM(freightPol, fr.area, rt)
+          : null;
+        return mkAdminPrice(cost, totalSell, b.cr);
+      }
+      const socSell = soc != null ? getGuestCarrierSell(freightPol, b.cr, t, ratePeriod, soc, fr.area) : null;
+      const totalSell = socSell != null && rental != null
+        ? socSell + rental + getRentalM(freightPol, fr.area, rt)
+        : null;
+      return mkPrice(cost, totalSell != null && cost != null ? totalSell - cost : null, b.cr);
+    }
+    const margin = fr ? getRentSellMargin(freightPol, rPol, fr.area, si) : 0;
     return mkPrice(cost, margin, b.cr);
   };
   const oceanDetail = (row, t) => {
@@ -6092,19 +6117,12 @@ export default function App() {
     return mkPrice(cost, getM(row.pol, row.area, t, ratePeriod), cr);
   };
   const doDetail = (row, cityKey, si) => {
-    const t = si === 0 ? "coc20" : "coc40";
     const b = bDO(row, cityKey, si);
-    const cost = getDropCityCost(row, cityKey, si);
-    const dropM = b.cr ? getDropM(b.cr, cityKey, si) : 0;
-    if (isAdmin && b.cr) {
-      const oceanCost = getCarrierRate(row, b.cr, t, ratePeriod);
-      const oceanSell = oceanCost != null
-        ? getCarrierAdminSell(row.pol, b.cr, t, ratePeriod, oceanCost)
-        : null;
-      const totalSell = cost != null && oceanSell != null ? oceanSell - oceanCost + cost : null;
-      return mkAdminPrice(cost, totalSell, b.cr);
+    if (!b.cr) {
+      const cost = getDropCityCost(row, cityKey, si);
+      return isAdmin ? mkAdminPrice(cost, null, null) : mkPrice(cost, null, null);
     }
-    return mkPrice(cost, getM(row.pol, row.area, t, ratePeriod) + dropM, b.cr);
+    return dropCarrierDetail(row, cityKey, b.cr, si, ratePeriod);
   };
   const dropCarrierDetail = (row, cityKey, cr, si, period = ratePeriod) => {
     const t = si === 0 ? "coc20" : "coc40";
@@ -7814,8 +7832,8 @@ export default function App() {
                           : carriers.map(c=>{
                           const cdC20=mkPrice(c.cost20,c.m20,c.k);
                           const cdC40=mkPrice(c.cost40,c.m40,c.k);
-                          const socC20=mkPrice(c.soc20,getM(fp,fr.area,"soc20",ratePeriod),c.k);
-                          const socC40=mkPrice(c.soc40,getM(fp,fr.area,"soc40",ratePeriod),c.k);
+                          const socC20=mkAdminPrice(c.soc20, c.soc20 != null ? getCarrierAdminSell(fp,c.k,"soc20",ratePeriod,c.soc20) : null, c.k);
+                          const socC40=mkAdminPrice(c.soc40, c.soc40 != null ? getCarrierAdminSell(fp,c.k,"soc40",ratePeriod,c.soc40) : null, c.k);
                           const rentC20=mkPrice(c.rent20,getRentalM(fp,fr.area,"r20"),c.k);
                           const rentC40=mkPrice(c.rent40,getRentalM(fp,fr.area,"r40"),c.k);
                           return (
@@ -7865,11 +7883,11 @@ export default function App() {
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={c.k}/></td>
                                   <td className="cvt-price" style={{padding:"8px 0",cursor:c.t20?"pointer":"default",color:c.t20?rentPriceColor:"#d1d5db",textDecoration:c.t20?"underline":"none"}} onClick={()=>c.t20&&openSC(c.k,"soc20",row.pol+" > "+city)}>
                                     <div className="cvt-price-main">{c.t20?`$${n(c.t20)}`:"—"}</div>
-                                    {c.t20&&<div className="cvt-price-sub">Rental {n(row.r20[city])}</div>}
+                                    {c.t20&&<div className="cvt-price-sub">Rental {n(getRentalBase(row.pol,city,0) ?? row.r20[city])}</div>}
                                   </td>
                                   <td className="cvt-price" style={{padding:"8px 0",cursor:c.t40?"pointer":"default",color:c.t40?rentPriceColor:"#d1d5db",textDecoration:c.t40?"underline":"none"}} onClick={()=>c.t40&&openSC(c.k,"soc40",row.pol+" > "+city)}>
                                     <div className="cvt-price-main">{c.t40?`$${n(c.t40)}`:"—"}</div>
-                                    {c.t40&&<div className="cvt-price-sub">Rental {n(row.r40[city])}</div>}
+                                    {c.t40&&<div className="cvt-price-sub">Rental {n(getRentalBase(row.pol,city,1) ?? row.r40[city])}</div>}
                                   </td>
                                 </tr>
                               );})}
