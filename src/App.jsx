@@ -10,6 +10,8 @@ const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
 const SAVE_LIGHT_TIMEOUT_MS = 30000;
+const API_TIMEOUT_MS = 45000;
+const RATE_HISTORY_UPLOAD_TIMEOUT_MS = 90000;
 const rentSocType = (si) => (si === 0 ? "soc20" : "soc40");
 const rentRentalType = (si) => (si === 0 ? "r20" : "r40");
 const PRICING_CACHE_KEY = "ysl_pricing_cache_v1";
@@ -167,20 +169,31 @@ function FooterAdSlot({ ads, dismissed, onDismiss }) {
 }
 
 const api = async (path, opts = {}) => {
-  const { headers: optHeaders, ...rest } = opts;
-  const r = await fetch(`${SB_URL}/rest/v1/${path}`, {
-    ...rest,
-    headers: {
-      apikey: SB_KEY,
-      Authorization: `Bearer ${SB_KEY}`,
-      "Content-Type": "application/json",
-      Prefer: "return=representation",
-      ...optHeaders,
-    },
-  });
-  const t = await r.text();
-  if (!r.ok) throw new Error(t || `HTTP ${r.status}`);
-  return t ? JSON.parse(t) : [];
+  const { headers: optHeaders, timeoutMs = API_TIMEOUT_MS, ...rest } = opts;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const r = await fetch(`${SB_URL}/rest/v1/${path}`, {
+      ...rest,
+      signal: ctrl.signal,
+      headers: {
+        apikey: SB_KEY,
+        Authorization: `Bearer ${SB_KEY}`,
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+        ...optHeaders,
+      },
+    });
+    const t = await r.text();
+    if (!r.ok) throw new Error(t || `HTTP ${r.status}`);
+    return t ? JSON.parse(t) : [];
+  } catch (e) {
+    const msg = String(e?.message || e);
+    if (/abort/i.test(msg)) throw new Error(`요청 시간 초과 (${Math.round(timeoutMs / 1000)}초)`);
+    throw e;
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 const HEAVY_SETTING_KEYS_LIST = ["pol_costs", "rental_rates_json", "carrier_rates_json"];
@@ -1109,9 +1122,15 @@ const diffRateHistoryRows = (prevMap, nextMap, { source, note, batchId } = {}) =
 const postRateHistoryRows = async (rows) => {
   if (!rows.length) return 0;
   let sent = 0;
+  const postHeaders = { Prefer: "return=minimal" };
   for (let i = 0; i < rows.length; i += RATE_HISTORY_CHUNK) {
     try {
-      await api("rate_history", { method: "POST", body: JSON.stringify(rows.slice(i, i + RATE_HISTORY_CHUNK)) });
+      await api("rate_history", {
+        method: "POST",
+        body: JSON.stringify(rows.slice(i, i + RATE_HISTORY_CHUNK)),
+        headers: postHeaders,
+        timeoutMs: API_TIMEOUT_MS,
+      });
       sent += Math.min(RATE_HISTORY_CHUNK, rows.length - i);
     } catch (e) {
       console.warn("rate_history chunk skip", e);
@@ -1120,6 +1139,35 @@ const postRateHistoryRows = async (rows) => {
   }
   return sent;
 };
+
+async function uploadExcelRateHistory(parsed, period, fData, note, batchId, polCostO) {
+  const rhRaw = enrichRateHistoryRowsWithCosts(
+    buildRateHistoryRowsFromUpload(parsed, period, fData, note),
+    polCostO,
+    period,
+  );
+  if (!rhRaw.length) return { sent: 0, total: 0 };
+
+  const rhScope = rateHistoryScopeFromUpload(parsed, period);
+  try {
+    const sent = await withTimeout(
+      (async () => {
+        try {
+          await deleteRateHistoryExcelUpload(rhScope.carrier, rhScope.period, rhScope.category);
+        } catch (delErr) {
+          console.warn("rate_history delete skip (DELETE policy 확인):", delErr);
+        }
+        return postRateHistoryRows(rhRaw.map(r => ({ ...r, batch_id: batchId })));
+      })(),
+      RATE_HISTORY_UPLOAD_TIMEOUT_MS,
+      "Rate History 기록 시간 초과",
+    );
+    return { sent, total: rhRaw.length };
+  } catch (e) {
+    console.warn("Rate History 기록 생략 (매입 저장은 완료됨):", e);
+    return { sent: 0, total: rhRaw.length, error: e?.message || String(e) };
+  }
+}
 
 /** 재업로드 시 이전 Excel 업로드 기록 제거 (동일 선사·기간·유형) */
 const deleteRateHistoryExcelUpload = async (carrier, period, category = "ocean") => {
@@ -1130,7 +1178,7 @@ const deleteRateHistoryExcelUpload = async (carrier, period, category = "ocean")
     `category=eq.${encodeURIComponent(category)}`,
     "source=eq.excel_upload",
   ].join("&");
-  await api(q, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+  await api(q, { method: "DELETE", headers: { Prefer: "return=minimal" }, timeoutMs: API_TIMEOUT_MS });
 };
 
 const fetchRateHistoryExcelUploadOcean = async () => {
@@ -3918,6 +3966,8 @@ export default function App() {
       const baseCosts = pricingSaveRef.current.polCostO ?? polCostO;
       let nextCosts = baseCosts;
 
+      setSaveFeedback({ type: null, message: "운임 DB(pol_costs) 저장 중…" });
+
       if (parsed.format === "RENTAL") {
         const { rentalRates: clearedRental } = clearRentalPeriodRates(rentalRates, period);
         const patch = buildRentalRatesFromBases(parsed.bases, period);
@@ -3959,29 +4009,8 @@ export default function App() {
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
       }
 
-      const rhRaw = enrichRateHistoryRowsWithCosts(
-        buildRateHistoryRowsFromUpload(parsed, period, fData, note),
-        nextCosts,
-        period,
-      );
-      if (rhRaw.length) {
-        try {
-          const rhScope = rateHistoryScopeFromUpload(parsed, period);
-          try {
-            await deleteRateHistoryExcelUpload(rhScope.carrier, rhScope.period, rhScope.category);
-          } catch (delErr) {
-            console.warn("rate_history delete skip (DELETE policy 확인):", delErr);
-          }
-          await postRateHistoryRows(rhRaw.map(r => ({ ...r, batch_id: batchId })));
-          rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
-          setFreightAdminTab("history");
-          loadRateHistory();
-        } catch (e) {
-          console.warn("Rate History 기록 생략 (매입 저장은 완료됨):", e);
-        }
-      }
-
       if (excelSaveValidity) {
+        setSaveFeedback({ type: null, message: "Validity 저장 중…" });
         const carrierKey = excelUploadCarrierKey(excelFormat, excelYslCarrier, parsed);
         const baseValidity = pricingSaveRef.current.validityInfo ?? validityInfo;
         const nextValidityInfo = mergeUploadValidity(baseValidity, carrierKey, period, excelValidityDraft);
@@ -3997,10 +4026,31 @@ export default function App() {
 
       writePricingCache({
         ...buildPricingCache(),
+        polCostO: nextCosts,
         pricingSavedAt: Date.now(),
         serverSyncedAt: Date.now(),
       });
+
+      let rhResult = { sent: 0, total: 0 };
+      if (parsed.format !== "RENTAL") {
+        setSaveFeedback({ type: null, message: "Rate History 기록 중…" });
+        rhResult = await uploadExcelRateHistory(parsed, period, fData, note, batchId, nextCosts);
+        if (rhResult.sent > 0) {
+          rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+        }
+      }
+
       setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+
+      if (parsed.format !== "RENTAL") {
+        setFreightAdminTab("history");
+        setTimeout(() => loadRateHistory(), 800);
+        if (rhResult.error) {
+          setRhSelectMsg(`⚠️ 운임 DB 저장 완료 · Rate History 실패: ${rhResult.error}`);
+        } else if (rhResult.total > 0 && rhResult.sent < rhResult.total) {
+          setRhSelectMsg(`⚠️ Rate History ${rhResult.sent}/${rhResult.total}건만 기록됨 · 운임 DB는 저장됨`);
+        }
+      }
     });
   };
 
