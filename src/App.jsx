@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v34"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v35"; // Admin 저장 로직 버전 (배포 확인용)
 const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -591,9 +591,18 @@ const RN = [
   ["Nhava Sheva",700,400,300,100,100,400,100,400,400,400,300,500,1200,1100,1000,800,800,950,900,900,1100,1100,1000,1050],
 ];
 const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN","Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK","Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)","Nhava Sheva":"NHAVA SHEVA","Pasir Gudang":"PASIR GUDANG"};
-const DO = {mow:{SNK:[1100,1400],DY:[800,1400],CK:[950,1300]},spb:{SNK:[700,1000],DY:null,CK:null},nsb:{SNK:[700,1000],DY:[400,600],CK:[400,600]},ekb:{SNK:null,DY:null,CK:[550,800]}};
-const CRS = ["SNK","DY","CK"];
-const VALIDITY_KEYS = [...CRS, "RENTAL"];
+const DO = {
+  mow: { SNK: [1100, 1400], DY: [800, 1400], CK: [950, 1300] },
+  spb: { SNK: [700, 1000], DY: null, CK: null },
+  nsb: { SNK: [700, 1000], DY: [400, 600], CK: [400, 600] },
+  ekb: { SNK: null, DY: null, CK: [550, 800] },
+  irk: { SNK: null, DY: null, CK: null },
+  khab: { SNK: null, DY: null, CK: null },
+  krs: { SNK: null, DY: null, CK: null },
+};
+const CRS = ["SNK", "DY", "CK"];
+const carrierDropValidityKey = (cr) => `${cr}_DROP`;
+const VALIDITY_KEYS = [...CRS, ...CRS.map(carrierDropValidityKey), "RENTAL"];
 const RATE_TYPES = ["coc20","coc40","soc20","soc40"];
 const RENTAL_RATE_TYPES = ["r20", "r40"];
 const rentalRateLabel = (t) => (t === "r20" ? "20'" : "40'");
@@ -715,13 +724,22 @@ const CARRIER_CALL_PORTS = {
   DY: ["VMTP", "Fishery"],
   CK: ["VMTP", "Fishery"],
 };
-const DOC = [{k:"mow",l:"Moscow"},{k:"spb",l:"SPB"},{k:"nsb",l:"Novosibirsk"},{k:"ekb",l:"Ekaterinburg"}];
+const DOC = [
+  { k: "mow", l: "Moscow" },
+  { k: "spb", l: "SPB" },
+  { k: "nsb", l: "Novosibirsk" },
+  { k: "ekb", l: "Ekaterinburg" },
+  { k: "irk", l: "Irkutsk" },
+  { k: "khab", l: "Khabarovsk" },
+  { k: "krs", l: "Krasnoyarsk" },
+];
 
 const defaultCarrierDropRates = () => Object.fromEntries(CRS.map(cr => [cr, {
   current: Object.fromEntries(
     DOC.filter(({ k }) => DO[k]?.[cr]).map(({ k }) => [k, { c20: DO[k][cr][0], c40: DO[k][cr][1] }])
   ),
   future: {},
+  byValidity: {},
 }]));
 
 const defaultCarrierDropMargins = () => Object.fromEntries(
@@ -731,12 +749,15 @@ const defaultCarrierDropMargins = () => Object.fromEntries(
 const mergeCarrierDropRates = (saved) => {
   const next = defaultCarrierDropRates();
   Object.entries(saved || {}).forEach(([cr, periods]) => {
-    if (!next[cr]) next[cr] = { current: {}, future: {} };
+    if (!next[cr]) next[cr] = { current: {}, future: {}, byValidity: {} };
     ["current", "future"].forEach(p => {
       Object.entries(periods?.[p] || {}).forEach(([city, vals]) => {
         next[cr][p][city] = { ...(next[cr][p][city] || {}), ...vals };
       });
     });
+    if (periods?.byValidity && typeof periods.byValidity === "object") {
+      next[cr].byValidity = JSON.parse(JSON.stringify(periods.byValidity));
+    }
   });
   return next;
 };
@@ -752,7 +773,15 @@ const mergeCarrierDropMargins = (saved) => {
   return next;
 };
 const F_TO_R = Object.fromEntries(Object.entries(PM).map(([rental, freight]) => [freight, rental]));
-const DOC_RC = {mow:"Moscow",spb:"St.Petersburg",nsb:"Novosibirsk",ekb:"Ekaterinburg"};
+const DOC_RC = {
+  mow: "Moscow",
+  spb: "St.Petersburg",
+  nsb: "Novosibirsk",
+  ekb: "Ekaterinburg",
+  irk: "Irkutsk",
+  khab: "Khabarovsk",
+  krs: "Krasnoyarsk",
+};
 const RC_LABEL = Object.fromEntries(DOC.map(d => [DOC_RC[d.k], d.l]));
 const RENT_CITY_ORDER = [...DOC.map(d => DOC_RC[d.k]), ...RC.filter(c => !Object.values(DOC_RC).includes(c))];
 const n = v => v != null ? v.toLocaleString() : "—";
@@ -1098,7 +1127,7 @@ const resolveCarrierEffectiveSell = (
   return adminMode ? null : cost;
 };
 
-const DROP_CITY_LABELS = { mow: "Moscow", spb: "St.Petersburg", nsb: "Novosibirsk", ekb: "Ekaterinburg" };
+const DROP_CITY_LABELS = { ...DOC_RC };
 const RATE_HISTORY_CHUNK = 80;
 
 const rateHistoryEntryKey = (row) =>
@@ -1454,6 +1483,7 @@ const copyCarrierDropRatesPeriod = (prev, carrier) => {
     [carrier]: {
       current: { ...(prev[carrier]?.current || {}) },
       future: JSON.parse(JSON.stringify(cur)),
+      byValidity: { ...(prev[carrier]?.byValidity || {}) },
     },
   };
 };
@@ -2167,6 +2197,7 @@ const PDF_DROP = {
   Novosibirsk: [650, 850],
   Irkutsk: [700, 900],
   Krasnoyarsk: [750, 900],
+  Khabarovsk: [650, 750],
   Ekaterinburg: [400, 700],
   Vladivostok: [600, 700],
   "St.Petersburg": [450, 750],
@@ -2270,6 +2301,49 @@ const countCarrierValidityArchive = (polCostO, carrier) => {
   });
   return keys.size;
 };
+
+/** Drop off 단일 셀 — validity 구간별 누적 + current/future 동기화 */
+function mergeCarrierDropRateCell(carrierDropRates, carrier, cityKey, sk, rawValue, period, validityDraft) {
+  const out = JSON.parse(JSON.stringify(carrierDropRates || {}));
+  const slot = normalizeValiditySlot(validityDraft);
+  const vKey = validityStorageKey(slot);
+  const label = formatValiditySlotLabel(slot) || vKey;
+  const cr = out[carrier] || { current: {}, future: {}, byValidity: {} };
+  const crCopy = JSON.parse(JSON.stringify(cr));
+
+  const periodBucket = { ...(crCopy[period] || {}) };
+  const cityBucket = { ...(periodBucket[cityKey] || {}) };
+  if (rawValue === "") delete cityBucket[sk];
+  else {
+    const v = parseInt(rawValue, 10);
+    if (!Number.isFinite(v)) return null;
+    cityBucket[sk] = v;
+  }
+  if (Object.keys(cityBucket).length === 0) delete periodBucket[cityKey];
+  else periodBucket[cityKey] = cityBucket;
+  crCopy[period] = periodBucket;
+
+  const byValidity = { ...(crCopy.byValidity || {}) };
+  const archEntry = { ...(byValidity[vKey] || {}) };
+  archEntry.slot = period;
+  archEntry.from = slot.from ?? "";
+  archEntry.till = slot.till ?? "";
+  archEntry.furtherNotice = !!slot.furtherNotice;
+  archEntry.label = label;
+  const archCity = { ...(archEntry[cityKey] || {}) };
+  if (rawValue === "") delete archCity[sk];
+  else archCity[sk] = parseInt(rawValue, 10);
+  if (Object.keys(archCity).length === 0) delete archEntry[cityKey];
+  else archEntry[cityKey] = archCity;
+  byValidity[vKey] = archEntry;
+  crCopy.byValidity = byValidity;
+
+  out[carrier] = crCopy;
+  return out;
+}
+
+const countCarrierDropValidityArchive = (carrierDropRates, carrier) =>
+  Object.keys(carrierDropRates?.[carrier]?.byValidity || {}).length;
 
 const num = (v) => {
   if (v == null || v === "" || v === "-") return null;
@@ -5821,19 +5895,11 @@ export default function App() {
     const raw = String(value).trim();
     const sk = sz(si);
     const p = period === "future" ? "future" : "current";
+    const dropVKey = carrierDropValidityKey(cr);
+    const validityDraft = validityInfo[dropVKey]?.[p] || defaultValiditySlot();
     setCarrierDropRates(prev => {
-      const crBucket = { current: { ...(prev[cr]?.current || {}) }, future: { ...(prev[cr]?.future || {}) } };
-      const periodBucket = { ...crBucket[p] };
-      const cityBucket = { ...(periodBucket[cityKey] || {}) };
-      if (raw === "") delete cityBucket[sk];
-      else {
-        const v = parseInt(raw, 10);
-        if (!Number.isFinite(v)) return prev;
-        cityBucket[sk] = v;
-      }
-      if (Object.keys(cityBucket).length === 0) delete periodBucket[cityKey];
-      else periodBucket[cityKey] = cityBucket;
-      return { ...prev, [cr]: { ...crBucket, [p]: periodBucket } };
+      const next = mergeCarrierDropRateCell(prev, cr, cityKey, sk, raw, p, validityDraft);
+      return next ?? prev;
     });
   };
 
@@ -7400,9 +7466,33 @@ export default function App() {
                     {CN_KR[caCr]} · Drop off · 전체 반납지
                   </div>
                   <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>
-                    {isFuture ? "향후" : "현재"} · 반납지별 Drop off 단가 · 마진 기본 0 · 셀 클릭하여 수정
+                    {isFuture ? "향후" : "현재"} · Validity 설정 후 금액 입력 · 자동 DB 저장 · 누적 {countCarrierDropValidityArchive(carrierDropRates, caCr)}구간
                   </div>
                 </div>
+              </div>
+              <div style={{marginBottom:12,background:"#fff",border:"1px solid #d1fae5",borderRadius:10,padding:10}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#047857",marginBottom:8}}>
+                  Drop off Validity · {CN_KR[caCr]}
+                </div>
+                <ValidityPeriodFields
+                  carrierKey={carrierDropValidityKey(caCr)}
+                  period={caPeriod}
+                  periodLabel={isFuture ? "향후 (From ~ Till)" : "현재 (From ~ Till)"}
+                  compact
+                  validityInfo={validityInfo}
+                  onUpdate={updateValiditySlot}
+                  futureFromMin={isFuture ? getFutureFromMinDate(carrierDropValidityKey(caCr)) : undefined}
+                />
+                {(() => {
+                  const slot = validityInfo[carrierDropValidityKey(caCr)]?.[caPeriod];
+                  const preview = formatValiditySlotLabel(slot);
+                  if (!preview) return null;
+                  return (
+                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 6 }}>
+                      저장 키: {validityStorageKey(slot)} · {preview}
+                    </div>
+                  );
+                })()}
               </div>
               {isFuture && (
                 <div className="import-current-freight-box" style={{ marginBottom: 12 }}>
