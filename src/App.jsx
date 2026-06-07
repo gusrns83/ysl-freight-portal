@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v53"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v54"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -1814,9 +1814,7 @@ const parsePricingFromSettings = (s) => {
     try {
       const parsed = JSON.parse(s.rental_rates_json);
       if (parsed && typeof parsed === "object") {
-        snap.rentalRates = repairRentalRatesStripLegacyPdfDrop(
-          mergeRentalRates(buildDefaultRentalRates(), parsed),
-        );
+        snap.rentalRates = mergeRentalRates(buildDefaultRentalRates(), parsed);
       }
     } catch (e) {}
   }
@@ -1934,9 +1932,7 @@ const bootPricingFromCache = () => {
       : defaultCarrierDropMargins(),
     validityInfo: cache.validityInfo ?? defaultValidityInfo(),
     rentalRates: cache.rentalRates
-      ? repairRentalRatesStripLegacyPdfDrop(
-          mergeRentalRates(buildDefaultRentalRates(), cache.rentalRates),
-        )
+      ? mergeRentalRates(buildDefaultRentalRates(), cache.rentalRates)
       : buildDefaultRentalRates(),
     rentalMargins: normalizeRentalMargins(cache.rentalMargins),
     rentalAreaM: cache.rentalAreaM ?? {},
@@ -2468,47 +2464,6 @@ const PDF_DROP = {
   Kazan: [650, 750],
   Minsk: [500, 500],
 };
-
-/** 레거시 업로드(PDF_DROP 합산)로 DB에 남은 Drop 가산분 제거 — ③ 업로드용 순수 렌탈과 맞춤 */
-function repairRentalRatesStripLegacyPdfDrop(rentalRates) {
-  if (!rentalRates || typeof rentalRates !== "object") return rentalRates;
-  let changed = false;
-  const out = JSON.parse(JSON.stringify(rentalRates));
-  Object.values(out).forEach((periods) => {
-    ["current", "future"].forEach((p) => {
-      Object.entries(periods[p] || {}).forEach(([city, vals]) => {
-        const drop = PDF_DROP[city];
-        if (!drop) return;
-        const b = normalizeRentalCityBucket(vals);
-        const d40 = drop[1];
-        const dvRaw = b.c40dv;
-        const hcRaw = b.c40hc;
-        const dv = dvRaw != null && dvRaw !== "" && Number.isFinite(Number(dvRaw)) ? Number(dvRaw) : null;
-        const hc = hcRaw != null && hcRaw !== "" && Number.isFinite(Number(hcRaw)) ? Number(hcRaw) : null;
-        let cityChanged = false;
-
-        if (dv != null && hc != null && dv === hc && d40 > 0) {
-          b.c40dv = dv - d40;
-          b.c40hc = hc - d40;
-          cityChanged = true;
-        } else if (hc != null && dv != null && hc > dv && d40 > 0) {
-          const stripped = hc - d40;
-          if (stripped >= dv && stripped > dv) {
-            b.c40hc = stripped;
-            cityChanged = true;
-          }
-        }
-
-        if (cityChanged) {
-          delete b.c40;
-          periods[p][city] = b;
-          changed = true;
-        }
-      });
-    });
-  });
-  return changed ? compactRentalRates(out) : rentalRates;
-}
 
 const UPLOAD_FORMATS = [
   { id: "SNK", label: "장금상선 (SKR-YSL)", hint: "「Vladivostok … (업로드용)」· NET+매출" },
@@ -4735,9 +4690,7 @@ export default function App() {
         const patch = parsed.cityRates
           ? buildRentalRatesFromCityRates(parsed.cityRates, period)
           : buildRentalRatesFromBases(parsed.bases, period);
-        const merged = repairRentalRatesStripLegacyPdfDrop(
-          compactRentalRates(mergeRentalRatesPatch(clearedRental, patch)),
-        );
+        const merged = compactRentalRates(mergeRentalRatesPatch(clearedRental, patch));
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
         setRentalRates(merged);
         setExcelMsg("Rental 운임 DB 저장 중…");
@@ -6332,34 +6285,13 @@ export default function App() {
         ]);
         if (cancelled) return;
 
-        const rentalMap = settingsMapFromRows(rentalRows);
         applySettingsBundle({
           ...settingsMapFromRows(dropRows),
-          ...rentalMap,
+          ...settingsMapFromRows(rentalRows),
           ...settingsMapFromRows(miscRows),
         });
 
-        if (!cancelled && rentalMap.rental_rates_json) {
-          try {
-            const raw = JSON.parse(rentalMap.rental_rates_json);
-            const merged = compactRentalRates(mergeRentalRates(buildDefaultRentalRates(), raw));
-            const repaired = repairRentalRatesStripLegacyPdfDrop(merged);
-            if (isAdmin && JSON.stringify(merged) !== JSON.stringify(repaired)) {
-              skipAutoSaveRef.current = true;
-              const repairedJson = JSON.stringify(repaired);
-              enqueueNetworkWrite(async () => {
-                await saveSettingDirect("rental_rates_json", repairedJson);
-                pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: repaired };
-                setRentalRates(repaired);
-              });
-              setTimeout(() => { skipAutoSaveRef.current = false; }, 3500);
-            }
-          } catch (e) {
-            console.warn("rental legacy PDF drop strip persist skip", e);
-          }
-        }
-
-        // Drop/Rental DB 로드 후 baseline — 이전에는 500ms만 기다려 Moscow drop20 등 변경이 이력에 안 남을 수 있음
+        // Drop/Rental DB 로드 후 baseline
         setTimeout(() => syncRateHistoryBaseline(), 400);
       } catch (err) {
         console.error("settings load failed", err);
