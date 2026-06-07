@@ -1159,10 +1159,36 @@ const deleteRateHistoryByIds = async (ids) => {
   }
 };
 
+/** Excel 업로드 기록 중 서비스 구간 밖 + pol_costs 연동 정리 */
+async function pruneRateHistoryOutsideService(fData, storeSnap, rData) {
+  const all = await fetchRateHistoryExcelUploadOcean();
+  const invalid = all.filter(row => !carrierUploadServesRate(fData, row.carrier, row.pol, row.rate_type));
+  if (!invalid.length) {
+    return {
+      historyCleared: 0,
+      polCostO: storeSnap.polCostO,
+      polCostsChanged: false,
+      dbCleared: 0,
+    };
+  }
+  const applied = applyRateHistoryDeletesToStores(invalid, storeSnap, rData);
+  await deleteRateHistoryByIds(invalid.map(r => r.id));
+  return {
+    historyCleared: invalid.length,
+    polCostO: applied.polCostO,
+    polCostsChanged: applied.polCostsChanged,
+    dbCleared: applied.dbCleared,
+    dropChanged: applied.dropChanged,
+    carrierDropRates: applied.carrierDropRates,
+    rentalChanged: applied.rentalChanged,
+    rentalRates: applied.rentalRates,
+  };
+}
+
 const buildRateHistoryQuery = (filters) => {
   const parts = ["rate_history?select=*", "order=created_at.desc", "limit=400"];
   parts.push("source=neq.excel_delete");
-  parts.push("cost=not.is.null");
+  parts.push("cost=gt.0");
   if (filters.carrier && filters.carrier !== "ALL") parts.push(`carrier=eq.${encodeURIComponent(filters.carrier)}`);
   if (filters.area && filters.area !== "ALL") parts.push(`area=eq.${encodeURIComponent(filters.area)}`);
   if (filters.period && filters.period !== "ALL") parts.push(`period=eq.${encodeURIComponent(filters.period)}`);
@@ -2119,12 +2145,18 @@ const ratesFromCols = (rows, r, cols) => Object.fromEntries(
   RATE_TYPES.map((t, i) => [t, num(cell(rows, r, cols[i]))]).filter(([, v]) => v != null),
 );
 
-const readRateQuadruple = (rows, r, startCol) => {
+const readRateQuadruple = (rows, r, startCol, opts = {}) => {
   if (startCol == null || startCol < 0) return {};
   return Object.fromEntries(
-    RATE_TYPES.map((t, i) => [t, num(cell(rows, r, startCol + i))]).filter(([, v]) => v != null),
+    RATE_TYPES.map((t, i) => [t, num(cell(rows, r, startCol + i))]).filter(([, v]) => {
+      if (v == null) return false;
+      if (opts.minPositive && v <= 0) return false;
+      return true;
+    }),
   );
 };
+
+const readCostQuadruple = (rows, r, startCol) => readRateQuadruple(rows, r, startCol, { minPositive: true });
 
 const is20SizeToken = (v) => {
   const s = String(v ?? "").trim().replace(/\s+/g, " ");
@@ -2169,7 +2201,7 @@ function parsePolNetSellGrid(rows, cols, carrier) {
       continue;
     }
 
-    const costs = readRateQuadruple(rows, r, cols.netStart);
+    const costs = readCostQuadruple(rows, r, cols.netStart);
     const sells = cols.sellStart != null ? readRateQuadruple(rows, r, cols.sellStart) : {};
     if (!Object.keys(costs).length && !Object.keys(sells).length) continue;
 
@@ -2201,7 +2233,7 @@ function parseOceanNetSellRows(rows, cols, carrier) {
 
     if (reSkipSnk(polName)) continue;
 
-    const costs = readRateQuadruple(rows, r, cols.netStart);
+    const costs = readCostQuadruple(rows, r, cols.netStart);
     const sells = readRateQuadruple(rows, r, cols.sellStart);
     if (!Object.keys(costs).length && !Object.keys(sells).length) continue;
 
@@ -2591,7 +2623,7 @@ function parseYslCarrierSheet(rows, carrier) {
       skipped.push(String(pol));
       continue;
     }
-    const costs = readRateQuadruple(rows, r, 2);
+    const costs = readCostQuadruple(rows, r, 2);
     const sells = readRateQuadruple(rows, r, 6);
     if (!Object.keys(costs).length && !Object.keys(sells).length) continue;
     portals.forEach(portal => {
@@ -3074,7 +3106,52 @@ function mergePolCostsWithSells(polCostO, netRows, sellRows, carrier, period) {
   return out;
 }
 
-/** 매입만 있고 매출 없는 셀 보완 — 향후←현재 복사, 동일 POL 마진·전역 마진 적용 */
+/** SNK 일본 — SHIMIZU 등 매출 있는 항의 마진(기본 20'+120 / 40'+200) */
+const SNK_JAPAN_DEFAULT_MARGIN = { coc20: 120, coc40: 200, soc20: 120, soc40: 200 };
+
+function snkJapanReferenceMargins(polCostO, period) {
+  const margin = {};
+  JAPAN_PORTS.forEach(pol => {
+    const bucket = polCostO?.[pol]?.carrier?.SNK?.[period];
+    if (!bucket?.sell) return;
+    RATE_TYPES.forEach(t => {
+      if (bucket[t] != null && bucket[t] > 0 && bucket.sell[t] != null) {
+        margin[t] = bucket.sell[t] - bucket[t];
+      }
+    });
+  });
+  RATE_TYPES.forEach(t => {
+    if (margin[t] == null && SNK_JAPAN_DEFAULT_MARGIN[t] != null) {
+      margin[t] = SNK_JAPAN_DEFAULT_MARGIN[t];
+    }
+  });
+  return margin;
+}
+
+function applySnkJapanSellBackfill(polCostO) {
+  const out = JSON.parse(JSON.stringify(polCostO || {}));
+  let filled = 0;
+  ["current", "future"].forEach(period => {
+    const refMargin = snkJapanReferenceMargins(out, period);
+    JAPAN_PORTS.forEach(pol => {
+      const cr = out[pol]?.carrier?.SNK;
+      const bucket = cr?.[period];
+      if (!bucket) return;
+      if (!bucket.sell) bucket.sell = {};
+      RATE_TYPES.forEach(t => {
+        if (bucket[t] == null || bucket[t] <= 0 || bucket.sell[t] != null) return;
+        const m = refMargin[t];
+        if (m == null) return;
+        bucket.sell[t] = bucket[t] + m;
+        filled++;
+      });
+      if (!Object.keys(bucket.sell).length) delete bucket.sell;
+    });
+  });
+  return { polCostO: out, filled };
+}
+
+/** 매입만 있고 매출 없는 셀 보완 — 향후←현재 복사, 동일 POL 마진·전역 마진·SNK 일본 마진 적용 */
 function backfillPolCostSells(polCostO, { polM, polMFuture, margins } = {}) {
   const out = JSON.parse(JSON.stringify(polCostO || {}));
   let filled = 0;
@@ -3130,7 +3207,9 @@ function backfillPolCostSells(polCostO, { polM, polMFuture, margins } = {}) {
     });
   });
 
-  return { polCostO: out, filled };
+  const japan = applySnkJapanSellBackfill(out);
+  filled += japan.filled;
+  return { polCostO: japan.polCostO, filled };
 }
 
 function mergePolMarginsMap(polM, marginRows) {
@@ -3224,25 +3303,36 @@ function previewSummary(parsed, period) {
 
 function enrichRateHistoryRowsWithCosts(rows, polCostO, period) {
   return (rows || []).map(row => {
-    if (row.sell != null || row.category !== "ocean") return row;
-    const sell = resolveCarrierExplicitSell(polCostO, row.pol, row.carrier, row.rate_type, period);
+    if (row.category !== "ocean") return row;
+    let sell = row.sell;
+    if (sell == null) {
+      sell = resolveCarrierExplicitSell(polCostO, row.pol, row.carrier, row.rate_type, period);
+    }
+    if (sell == null && row.carrier === "SNK" && JAPAN_POL_SET.has(row.pol) && row.cost > 0) {
+      const m = snkJapanReferenceMargins(polCostO, period)[row.rate_type];
+      if (m != null) sell = row.cost + m;
+    }
     if (sell == null) return row;
     return { ...row, sell, margin: sell - row.cost };
   });
 }
 
-/** Rate History 표시 · DB에 매출 없을 때 pol_costs에서 보완 */
+/** Rate History 표시 · DB에 매출 없을 때 pol_costs·SNK 일본 마진에서 보완 */
 function hydrateRateHistoryRowSells(rows, polCostO, polM, polMFuture) {
   return (rows || []).map(row => {
-    if (row.category !== "ocean" || row.cost == null) return row;
+    if (row.category !== "ocean" || row.cost == null || row.cost <= 0) return row;
     const explicit = resolveCarrierExplicitSell(polCostO, row.pol, row.carrier, row.rate_type, row.period);
     if (explicit != null && (row.sell == null || row.sell === 0)) {
       return { ...row, sell: explicit, margin: explicit - row.cost, sellHydrated: true };
     }
-    if (row.sell != null) return row;
-    const sell = resolveCarrierEffectiveSell(polCostO, row.pol, row.carrier, row.rate_type, row.period, row.cost, {
+    if (row.sell != null && row.sell !== 0) return row;
+    let sell = resolveCarrierEffectiveSell(polCostO, row.pol, row.carrier, row.rate_type, row.period, row.cost, {
       polM, polMFuture, adminMode: true,
     });
+    if (sell == null && row.carrier === "SNK" && JAPAN_POL_SET.has(row.pol)) {
+      const m = snkJapanReferenceMargins(polCostO, row.period)[row.rate_type];
+      if (m != null) sell = row.cost + m;
+    }
     if (sell == null) return row;
     return { ...row, sell, margin: sell - row.cost, sellHydrated: true };
   });
@@ -3257,7 +3347,7 @@ function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
     Object.entries(netRows || {}).forEach(([pol, rates]) => {
       const sells = sellRows[pol] || {};
       RATE_TYPES.forEach(t => {
-        if (rates[t] == null) return;
+        if (rates[t] == null || rates[t] <= 0) return;
         if (!carrierUploadServesRate(fData, carrier, pol, t)) return;
         const sell = sells[t] ?? null;
         rows.push({
@@ -3456,6 +3546,7 @@ export default function App() {
   const [excelValidityDraft, setExcelValidityDraft] = useState(defaultValiditySlot);
   const [excelSaveValidity, setExcelSaveValidity] = useState(true);
   const rateHistoryBaselineRef = useRef(null);
+  const rhAutoPruneRef = useRef(false);
   const [rhRows, setRhRows] = useState([]);
   const [rhLoading, setRhLoading] = useState(false);
   const [rhError, setRhError] = useState("");
@@ -3546,6 +3637,50 @@ export default function App() {
     setRhLoading(true);
     setRhError("");
     try {
+      if (isAdmin && !rhAutoPruneRef.current) {
+        rhAutoPruneRef.current = true;
+        try {
+          const base = pricingSaveRef.current;
+          const pruned = await pruneRateHistoryOutsideService(fData, base, rData);
+          if (pruned.historyCleared > 0) {
+            if (pruned.polCostsChanged) {
+              setPolCostO(pruned.polCostO);
+              pricingSaveRef.current = {
+                ...base,
+                polCostO: pruned.polCostO,
+                carrierDropRates: pruned.dropChanged ? pruned.carrierDropRates : base.carrierDropRates,
+                rentalRates: pruned.rentalChanged ? pruned.rentalRates : base.rentalRates,
+              };
+              skipAutoSaveRef.current = true;
+              await saveOneSettingWithRetry("pol_costs", serializePolCosts(pruned.polCostO));
+              setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+            }
+            setRhSelectMsg(`✅ 서비스外 ${pruned.historyCleared}건 자동 정리${pruned.dbCleared ? ` · 운임 DB ${pruned.dbCleared}셀` : ""}`);
+          }
+        } catch (e) {
+          console.warn("rate_history 서비스外 자동 정리 skip", e);
+        }
+      }
+
+      const costsForHydrate = pricingSaveRef.current?.polCostO ?? polCostO;
+      let hydrateCosts = costsForHydrate;
+      if (isAdmin) {
+        const bf = backfillPolCostSells(hydrateCosts, {
+          polM: pricingSaveRef.current?.polM ?? polM,
+          polMFuture: pricingSaveRef.current?.polMFuture ?? polMFuture,
+          margins: pricingSaveRef.current?.margins ?? margins,
+        });
+        if (bf.filled > 0) {
+          hydrateCosts = bf.polCostO;
+          setPolCostO(bf.polCostO);
+          pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: bf.polCostO };
+          skipAutoSaveRef.current = true;
+          await saveOneSettingWithRetry("pol_costs", serializePolCosts(bf.polCostO));
+          setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+          setRhSelectMsg(`✅ 매출 ${bf.filled}셀 보완 (SNK 일본 포함)`);
+        }
+      }
+
       const data = await api(buildRateHistoryQuery({
         carrier: rhCarrier,
         area: rhArea,
@@ -3557,8 +3692,8 @@ export default function App() {
       }));
       setRhRows(Array.isArray(data)
         ? hydrateRateHistoryRowSells(
-          data.filter(row => row.cost != null && row.source !== "excel_delete"),
-          pricingSaveRef.current?.polCostO ?? polCostO,
+          data.filter(row => row.cost != null && row.cost > 0 && row.source !== "excel_delete"),
+          hydrateCosts,
           pricingSaveRef.current?.polM ?? polM,
           pricingSaveRef.current?.polMFuture ?? polMFuture,
         )
