@@ -275,14 +275,8 @@ const stripSellFromPolCosts = (polCostO) => {
   return out;
 };
 
-const SELL_PURGE_REV = "v2";
-const needsSellPurge = () => {
-  try { return localStorage.getItem("ysl_sell_purge") !== SELL_PURGE_REV; }
-  catch { return false; }
-};
-const markSellPurgeDone = () => {
-  try { localStorage.setItem("ysl_sell_purge", SELL_PURGE_REV); } catch {}
-};
+const SELL_PURGE_REV = "v3";
+const needsSellPurge = () => false;
 
 const serializePolCosts = (polCostO) => JSON.stringify(compactPolCostO(polCostO));
 
@@ -2847,6 +2841,15 @@ function previewSummary(parsed, period) {
   };
 }
 
+function enrichRateHistoryRowsWithCosts(rows, polCostO, period) {
+  return (rows || []).map(row => {
+    if (row.sell != null || row.category !== "ocean") return row;
+    const sell = resolveCarrierExplicitSell(polCostO, row.pol, row.carrier, row.rate_type, period);
+    if (sell == null) return row;
+    return { ...row, sell, margin: sell - row.cost };
+  });
+}
+
 function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
   const rows = [];
   const areaMap = Object.fromEntries((fData || []).map(r => [r.pol, r.area]));
@@ -3239,6 +3242,7 @@ export default function App() {
         ? crypto.randomUUID()
         : `batch-${Date.now()}`;
       const baseCosts = pricingSaveRef.current.polCostO ?? polCostO;
+      let nextCosts = baseCosts;
 
       if (parsed.format === "RENTAL") {
         const { rentalRates: clearedRental } = clearRentalPeriodRates(rentalRates, period);
@@ -3248,7 +3252,7 @@ export default function App() {
         await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(merged));
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
       } else if (parsed.format === "DY") {
-        const nextCosts = replacePolCostsWithSells(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period);
+        nextCosts = replacePolCostsWithSells(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period);
         const nextDrop = buildDyDropRates(
           JSON.stringify(carrierDropRates),
           parsed.oceanRows,
@@ -3265,13 +3269,17 @@ export default function App() {
       } else {
         const cr = parsed.carrier;
         const netRows = parsed.netRows || {};
-        const nextCosts = replacePolCostsWithSells(baseCosts, netRows, parsed.sellRows, cr, period);
+        nextCosts = replacePolCostsWithSells(baseCosts, netRows, parsed.sellRows, cr, period);
         setPolCostO(nextCosts);
         await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
       }
 
-      const rhRaw = buildRateHistoryRowsFromUpload(parsed, period, fData, note);
+      const rhRaw = enrichRateHistoryRowsWithCosts(
+        buildRateHistoryRowsFromUpload(parsed, period, fData, note),
+        nextCosts,
+        period,
+      );
       if (rhRaw.length) {
         try {
           const rhScope = rateHistoryScopeFromUpload(parsed, period);
@@ -4346,9 +4354,7 @@ export default function App() {
       setPolCostO(prev => {
         const server = snap.polCostO || {};
         const cached = readStoredPricingCache()?.polCostO;
-        let merged = mergePolCostODeep(mergePolCostODeep(server, prev), cached);
-        if (!polCostOHasSellOverrides(server)) merged = stripSellFromPolCosts(merged);
-        return merged;
+        return mergePolCostODeep(mergePolCostODeep(server, prev), cached);
       });
     }
     if (settingBundleHas(s, "carrier_drop_rates_json")) {
@@ -4516,39 +4522,34 @@ export default function App() {
           cacheMarginsFuture = {};
         }
 
-        const pendingSellPurge = needsSellPurge();
-        if (pendingSellPurge || !polCostOHasSellOverrides(serverCosts)) {
-          mergedCosts = stripSellFromPolCosts(mergedCosts);
-        }
+        const pendingSellPurge = false;
         const costsDiffer = cacheCosts && JSON.stringify(cacheCosts) !== JSON.stringify(serverCosts);
         const mergedDiffersFromServer = JSON.stringify(mergedCosts) !== JSON.stringify(serverCosts);
         const marginsDiffer = cacheMargins && JSON.stringify(cacheMargins) !== JSON.stringify(serverMargins);
         const marginsFutureDiffer = cacheMarginsFuture && JSON.stringify(cacheMarginsFuture) !== JSON.stringify(serverMarginsFuture);
         const cacheNewer = (cached?.pricingSavedAt || 0) > (cached?.serverSyncedAt || 0);
-        const pendingCostResync = pendingSellPurge
-          || (cacheNewer && (costsDiffer || mergedDiffersFromServer));
+        const pendingCostResync = cacheNewer && (costsDiffer || mergedDiffersFromServer);
         const pendingMarginCacheFix = cacheWouldRestoreMargins;
-        const pendingMarginResync = !pendingSellPurge && !pendingMarginCacheFix
+        const pendingMarginResync = !pendingMarginCacheFix
           && (marginsDiffer || marginsFutureDiffer) && cacheNewer;
 
         priority.pol_costs = serializePolCosts(mergedCosts);
-        if (pendingSellPurge || pendingMarginCacheFix || serverMarginsEmpty) {
+        if (pendingMarginCacheFix || serverMarginsEmpty) {
           priority.pol_margins = "{}";
         } else if (pendingMarginResync && cacheMargins) {
           priority.pol_margins = JSON.stringify(cacheMargins);
         }
-        if (pendingSellPurge || pendingMarginCacheFix || serverMarginsFutureEmpty) {
+        if (pendingMarginCacheFix || serverMarginsFutureEmpty) {
           priority.pol_margins_future = "{}";
         } else if (pendingMarginResync && cacheMarginsFuture) {
           priority.pol_margins_future = JSON.stringify(cacheMarginsFuture);
         }
-        if (pendingSellPurge || pendingMarginCacheFix) {
+        if (pendingMarginCacheFix) {
           priority.pol_margin_timestamps = "{}";
           priority.pol_margin_timestamps_future = "{}";
         }
 
         applySettingsBundle(priority, { markServerSynced: !pendingCostResync && !pendingMarginResync && !pendingMarginCacheFix });
-        if (pendingSellPurge) markSellPurgeDone();
 
         if (pendingCostResync || pendingMarginResync || pendingMarginCacheFix) {
           skipAutoSaveRef.current = true;
@@ -4557,7 +4558,7 @@ export default function App() {
               if (pendingCostResync) {
                 await saveOneSettingWithRetry("pol_costs", serializePolCosts(mergedCosts));
               }
-              if (pendingMarginCacheFix || pendingSellPurge) {
+              if (pendingMarginCacheFix) {
                 await saveSettingsEntries([
                   ["pol_margins", "{}"],
                   ["pol_margins_future", "{}"],
