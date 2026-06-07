@@ -7605,17 +7605,44 @@ export default function App() {
     </div>
   );
 
-  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", compact = false}) => (
-    <div className={`guest-rent-triple${compact ? " guest-rent-triple--compact" : ""}`}>
-      {[d20, d40dv, d40hc].map((d, i) => (
-        <div key={RENT_COMBO_SHORT[i]} className="guest-rent-col">
-          <div className="guest-rent-size">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
-          <div className={`guest-price-val guest-rent-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
-          {d.cr && <Bg k={d.cr}/>}
+  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", compact = false}) => {
+    const combos = [d20, d40dv, d40hc];
+    const labels = RENT_COMBO_SHORT.map((s, i) => (prefix ? `${prefix} ${s}` : s));
+    if (compact) {
+      return (
+        <div className="guest-rent-triple guest-rent-triple--rows">
+          <div className="guest-rent-row guest-rent-row--sizes">
+            {labels.map((lbl, i) => (
+              <span key={lbl} className="guest-rent-size">{lbl}</span>
+            ))}
+          </div>
+          <div className="guest-rent-row guest-rent-row--vals">
+            {combos.map((d, i) => (
+              <span key={RENT_COMBO_SHORT[i]} className={`guest-rent-val guest-price-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>
+                {d.sell != null ? `$${n(d.sell)}` : "—"}
+              </span>
+            ))}
+          </div>
+          <div className="guest-rent-row guest-rent-row--tags">
+            {combos.map((d, i) => (
+              <span key={`tag-${RENT_COMBO_SHORT[i]}`} className="guest-rent-tag">{d.cr ? <Bg k={d.cr}/> : null}</span>
+            ))}
+          </div>
         </div>
-      ))}
-    </div>
-  );
+      );
+    }
+    return (
+      <div className="guest-rent-triple">
+        {combos.map((d, i) => (
+          <div key={RENT_COMBO_SHORT[i]} className="guest-rent-col">
+            <div className="guest-rent-size">{labels[i]}</div>
+            <div className={`guest-price-val guest-rent-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
+            {d.cr && <Bg k={d.cr}/>}
+          </div>
+        ))}
+      </div>
+    );
+  };
 
   const AdminRentTriple = ({d20, d40dv, d40hc, prefix = "", editable, onCost20, onCost40dv, onCost40hc}) => {
     const combos = [d20, d40dv, d40hc];
