@@ -1994,10 +1994,10 @@ const PDF_DROP = {
 };
 
 const UPLOAD_FORMATS = [
-  { id: "SNK", label: "장금상선 (SKR-YSL)", hint: "POL 이름 기준 매칭 · NET(매입)만" },
-  { id: "DY", label: "동영 (Fishery Import)", hint: "POL 기준 · Import 시트 · 해상+Drop" },
-  { id: "CK", label: "천경 (CK Line)", hint: "POL 기준 · COC/SOC 해상만 (DROP OFF·REF 제외)" },
-  { id: "YSL", label: "YSL 관리양식", hint: "포털 POL 목록 · NET(C~F) 매입만" },
+  { id: "SNK", label: "장금상선 (SKR-YSL)", hint: "「Vladivostok … (업로드용)」· NET+매출" },
+  { id: "DY", label: "동영 (Fishery Import)", hint: "「Import (업로드용)」· NET+매출 · Import=Drop 포함" },
+  { id: "CK", label: "천경 (CK Line)", hint: "「CKL Guidance Rate (업로드용)」· NET+매출" },
+  { id: "YSL", label: "YSL 관리양식", hint: "NET(C~F) 매입 · SELL(G~J) 매출" },
   { id: "RENTAL", label: "컨테이너 Rental", hint: "극동 컨테이너 운임 · POL별 base" },
 ];
 
@@ -2078,6 +2078,103 @@ const expandSnkPol = (name) => resolveExcelPolList(name, "SNK");
 const ratesFromCols = (rows, r, cols) => Object.fromEntries(
   RATE_TYPES.map((t, i) => [t, num(cell(rows, r, cols[i]))]).filter(([, v]) => v != null),
 );
+
+const readRateQuadruple = (rows, r, startCol) => {
+  if (startCol == null || startCol < 0) return {};
+  return Object.fromEntries(
+    RATE_TYPES.map((t, i) => [t, num(cell(rows, r, startCol + i))]).filter(([, v]) => v != null),
+  );
+};
+
+const is20SizeToken = (v) => {
+  const s = String(v ?? "").trim().replace(/\s+/g, " ");
+  const u = s.toUpperCase();
+  return (s === "20'" || s === "20" || u === "20'") && !u.includes("REF");
+};
+
+/** CK/DY 「업로드용」: COC·SOC 4열 × 2 (매입·매출) */
+function detectDualNetSellGrid(rows) {
+  let polCol = 1;
+  for (let r = 0; r < Math.min(20, rows.length); r++) {
+    const row = rows[r] || [];
+    const upper = row.map(c => String(c ?? "").trim().toUpperCase());
+    const polI = upper.findIndex(t => t === "POL" || /^POL\b/.test(t));
+    if (polI >= 0) polCol = polI;
+    if (upper.some(t => t.includes("DROP OFF"))) continue;
+
+    const c20cols = upper.map((t, i) => (is20SizeToken(row[i]) ? i : -1)).filter(i => i >= 0);
+    const hasRef = upper.some(t => t.includes("REF"));
+    if (c20cols.length >= 4 && !hasRef) {
+      return { polCol, netStart: c20cols[0], sellStart: c20cols[2], dataStart: r + 1 };
+    }
+  }
+  return null;
+};
+
+/** POL + 4운임(×2) 그리드 — CK/DY 업로드용 */
+function parsePolNetSellGrid(rows, cols, carrier) {
+  const netRows = {};
+  const sellRows = {};
+  const skipped = [];
+
+  for (let r = cols.dataStart; r < rows.length; r++) {
+    const raw = cell(rows, r, cols.polCol);
+    if (raw == null) continue;
+    const name = String(raw).trim();
+    if (!name || /^(remark|note|\*|-)/i.test(name)) continue;
+
+    const portals = resolveExcelPolList(name, carrier);
+    if (!portals.length) {
+      skipped.push(name);
+      continue;
+    }
+
+    const costs = readRateQuadruple(rows, r, cols.netStart);
+    const sells = cols.sellStart != null ? readRateQuadruple(rows, r, cols.sellStart) : {};
+    if (!Object.keys(costs).length && !Object.keys(sells).length) continue;
+
+    portals.forEach(portal => {
+      if (Object.keys(costs).length) netRows[portal] = costs;
+      if (Object.keys(sells).length) sellRows[portal] = sells;
+    });
+  }
+  return { netRows, sellRows, skipped, carrier };
+}
+
+/** AREA/POL + NET·SELL 4열 양식 공통 파서 */
+function parseOceanNetSellRows(rows, cols, carrier) {
+  const netRows = {};
+  const sellRows = {};
+  const skipped = [];
+  let currentArea = null;
+
+  for (let r = cols.dataStart; r < rows.length; r++) {
+    const areaCell = cols.areaCol != null ? cell(rows, r, cols.areaCol) : null;
+    if (areaCell != null && String(areaCell).trim()) currentArea = String(areaCell).trim();
+
+    let polName = cell(rows, r, cols.polCol);
+    if (polName != null && String(polName).trim()) {
+      polName = String(polName).trim();
+    } else if (currentArea && currentArea.toUpperCase() === "SINGAPORE") {
+      polName = "SINGAPORE";
+    } else continue;
+
+    if (reSkipSnk(polName)) continue;
+
+    const costs = readRateQuadruple(rows, r, cols.netStart);
+    const sells = readRateQuadruple(rows, r, cols.sellStart);
+    if (!Object.keys(costs).length && !Object.keys(sells).length) continue;
+
+    const portals = resolveExcelPolList(polName, carrier);
+    if (!portals.length) { skipped.push(polName); continue; }
+
+    portals.forEach(portal => {
+      if (Object.keys(costs).length) netRows[portal] = costs;
+      if (Object.keys(sells).length) sellRows[portal] = sells;
+    });
+  }
+  return { netRows, sellRows, skipped, carrier };
+}
 
 /** CK Line: COC(해상) + IMPORT SOC(해상) 열만 — DROP OFF / REF 제외 */
 function detectCkColumns(rows) {
@@ -2230,7 +2327,7 @@ function parsePolScanSheet(rows, carrier) {
     }
   }
 
-  return { netRows, marginRows: {}, skipped, carrier, polScan: true };
+  return { netRows, marginRows: {}, skipped, carrier, polScan: true, sellRows: {} };
 }
 
 async function readExcelFile(file) {
@@ -2275,23 +2372,32 @@ function detectSnkColumns(rows) {
     for (let c = 0; c < 22; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
     if (vals.includes("NET") && vals.includes("SELL") && vals.includes("PROFIT")) {
       const netI = vals.indexOf("NET");
+      const sellI = vals.indexOf("SELL");
       const ap = findAreaPolRow(r + 1, Math.min(r + 5, rows.length));
       return {
         dataStart: ap?.dataStart ?? pickDataStart(r, netI),
         areaCol: ap?.areaCol ?? 0,
         polCol: ap?.polCol ?? 1,
         netStart: netI,
+        sellStart: sellI,
       };
     }
   }
 
   for (let r = 0; r < 10; r++) {
-    const vals = [];
-    for (let c = 0; c < 14; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
-    if (!vals.includes("NET") || vals.includes("SELL") || vals.includes("PROFIT")) continue;
+    const rawVals = [];
+    for (let c = 0; c < 14; c++) rawVals.push(String(cell(rows, r, c) ?? "").trim());
+    const vals = rawVals.map(v => v.toUpperCase());
+    if (!vals.includes("NET") || vals.includes("PROFIT")) continue;
+    if (vals.includes("SELL") && vals.includes("PROFIT")) continue;
     const netI = vals.indexOf("NET");
+    const sellI = vals.indexOf("SELL");
+    const sellK = rawVals.findIndex(v => v.includes("매출"));
+    const sellStart = sellI >= 0 ? sellI : (sellK >= 0 ? sellK : undefined);
     const ap = findAreaPolRow(r + 1, Math.min(r + 5, rows.length));
-    if (ap) return { ...ap, netStart: netI };
+    if (ap) {
+      return sellStart != null ? { ...ap, netStart: netI, sellStart } : { ...ap, netStart: netI };
+    }
   }
 
   for (let r = 0; r < 7; r++) {
@@ -2299,7 +2405,8 @@ function detectSnkColumns(rows) {
     for (let c = 0; c < 22; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
     if (vals.includes("NET") && vals.includes("SELL") && vals.includes("PROFIT")) {
       const netI = vals.indexOf("NET");
-      return { dataStart: 6, areaCol: 1, polCol: 2, netStart: netI };
+      const sellI = vals.indexOf("SELL");
+      return { dataStart: 6, areaCol: 1, polCol: 2, netStart: netI, sellStart: sellI };
     }
   }
 
@@ -2319,40 +2426,10 @@ const isSnkLegacyTransitSheet = (rows) => {
 function parseSnkSheet(rows) {
   try {
     const cols = detectSnkColumns(rows);
-    const netRows = {};
-    const skipped = [];
-    let currentArea = null;
-
-    for (let r = cols.dataStart; r < rows.length; r++) {
-      const areaCell = cell(rows, r, cols.areaCol);
-      if (areaCell != null && String(areaCell).trim()) currentArea = String(areaCell).trim();
-
-      let polName = cell(rows, r, cols.polCol);
-      if (polName != null && String(polName).trim()) {
-        polName = String(polName).trim();
-      } else if (currentArea && currentArea.toUpperCase() === "SINGAPORE") {
-        polName = "SINGAPORE";
-      } else continue;
-
-      if (reSkipSnk(polName)) continue;
-
-      const net = {
-        coc20: num(cell(rows, r, cols.netStart)),
-        coc40: num(cell(rows, r, cols.netStart + 1)),
-        soc20: num(cell(rows, r, cols.netStart + 2)),
-        soc40: num(cell(rows, r, cols.netStart + 3)),
-      };
-
-      if (RATE_TYPES.every(t => net[t] == null)) continue;
-
-      const portals = resolveExcelPolList(polName, "SNK");
-      if (!portals.length) { skipped.push(polName); continue; }
-      const costs = Object.fromEntries(RATE_TYPES.filter(t => net[t] != null).map(t => [t, net[t]]));
-      portals.forEach(portal => {
-        if (Object.keys(costs).length) netRows[portal] = costs;
-      });
+    const parsed = parseOceanNetSellRows(rows, cols, "SNK");
+    if (Object.keys(parsed.netRows).length || Object.keys(parsed.sellRows).length) {
+      return { ...parsed, marginRows: {} };
     }
-    if (Object.keys(netRows).length) return { netRows, marginRows: {}, skipped, carrier: "SNK" };
   } catch (e) {
     if (isSnkLegacyTransitSheet(rows)) {
       throw new Error("구형 Vladivostok/TO RUSSIA 양식입니다 · 「Vladivostok 06.01 (업로드용)」 시트를 선택하세요");
@@ -2371,6 +2448,12 @@ function mapDyPol(raw) {
 }
 
 function parseDySheet(rows) {
+  const dual = detectDualNetSellGrid(rows);
+  if (dual) {
+    const { netRows, sellRows, skipped } = parsePolNetSellGrid(rows, dual, "DY");
+    return { oceanRows: netRows, sellRows, dropRows: {}, skipped, carrier: "DY" };
+  }
+
   const DATA_START = 6;
   const POL_COL = 1;
   const oceanRows = {};
@@ -2411,13 +2494,19 @@ function parseDySheet(rows) {
     if (Object.keys(drop).length) dropRows[portal] = drop;
   }
   if (Object.keys(oceanRows).length) {
-    return { oceanRows, dropRows, skipped, carrier: "DY" };
+    return { oceanRows, dropRows, skipped, carrier: "DY", sellRows: {} };
   }
   const scanned = parsePolScanSheet(rows, "DY");
-  return { oceanRows: scanned.netRows, dropRows: {}, skipped: scanned.skipped, carrier: "DY", polScan: true };
+  return { oceanRows: scanned.netRows, dropRows: {}, skipped: scanned.skipped, carrier: "DY", polScan: true, sellRows: {} };
 }
 
 function parseCkSheet(rows) {
+  const dual = detectDualNetSellGrid(rows);
+  if (dual) {
+    const parsed = parsePolNetSellGrid(rows, dual, "CK");
+    return { ...parsed, marginRows: {} };
+  }
+
   let cols = detectCkColumns(rows);
   let { netRows, skipped } = parseCkOceanRows(rows, cols);
 
@@ -2426,11 +2515,22 @@ function parseCkSheet(rows) {
     ({ netRows, skipped } = parseCkOceanRows(rows, cols));
   }
 
-  return { netRows, marginRows: {}, skipped, carrier: "CK" };
+  return { netRows, marginRows: {}, skipped, carrier: "CK", sellRows: {} };
 }
 
 function parseYslCarrierSheet(rows, carrier) {
+  try {
+    const cols = detectSnkColumns(rows);
+    const parsed = parseOceanNetSellRows(rows, cols, carrier);
+    if (Object.keys(parsed.netRows).length || Object.keys(parsed.sellRows).length) {
+      return { ...parsed, marginRows: {} };
+    }
+  } catch {
+    /* fallback below */
+  }
+
   const netRows = {};
+  const sellRows = {};
   const skipped = [];
   const DATA_START = 10;
 
@@ -2442,18 +2542,16 @@ function parseYslCarrierSheet(rows, carrier) {
       skipped.push(String(pol));
       continue;
     }
-    const net = {
-      coc20: num(cell(rows, r, 2)),
-      coc40: num(cell(rows, r, 3)),
-      soc20: num(cell(rows, r, 4)),
-      soc40: num(cell(rows, r, 5)),
-    };
-    if (RATE_TYPES.every(t => net[t] == null)) continue;
-    const costs = Object.fromEntries(RATE_TYPES.filter(t => net[t] != null).map(t => [t, net[t]]));
-    portals.forEach(portal => { netRows[portal] = costs; });
+    const costs = readRateQuadruple(rows, r, 2);
+    const sells = readRateQuadruple(rows, r, 6);
+    if (!Object.keys(costs).length && !Object.keys(sells).length) continue;
+    portals.forEach(portal => {
+      if (Object.keys(costs).length) netRows[portal] = costs;
+      if (Object.keys(sells).length) sellRows[portal] = sells;
+    });
   }
-  if (Object.keys(netRows).length) {
-    return { netRows, sellRows: {}, marginRows: {}, skipped, carrier };
+  if (Object.keys(netRows).length || Object.keys(sellRows).length) {
+    return { netRows, sellRows, marginRows: {}, skipped, carrier };
   }
   return parsePolScanSheet(rows, carrier);
 }
@@ -2497,13 +2595,21 @@ function parseByFormat(format, rows, options = {}) {
 function suggestSheet(format, sheetNames) {
   if (!sheetNames?.length) return "";
   if (format === "DY") {
+    const upload = sheetNames.find(s => /업로드용|\(upload\)/i.test(s) && /import/i.test(s));
+    if (upload) return upload;
     const hit = sheetNames.find(s => /^Import$/i.test(s));
     if (hit) return hit;
   }
-  if (format === "SNK") {
+  if (format === "CK") {
     const upload = sheetNames.find(s => /업로드용|\(upload\)/i.test(s));
     if (upload) return upload;
-    const dated = sheetNames.find(s => /Vladivostok/i.test(s) && /06\.01|6\.01/.test(s));
+  }
+  if (format === "SNK") {
+    const upload = sheetNames.find(s => /업로드용|\(upload\)/i.test(s) && /Vladivostok|06\.01|6\.01/i.test(s));
+    if (upload) return upload;
+    const uploadAny = sheetNames.find(s => /업로드용|\(upload\)/i.test(s));
+    if (uploadAny) return uploadAny;
+    const dated = sheetNames.find(s => /Vladivostok/i.test(s) && /06\.01|6\.01/.test(s) && !/업로드|\(upload\)/i.test(s));
     if (dated) return dated;
     const vladDated = sheetNames.find(s => /^Vladivostok\s+\d/i.test(s));
     if (vladDated) return vladDated;
@@ -2561,6 +2667,16 @@ function clearPolCostsCarrierPeriod(polCostO, carrier, period) {
 
 function replacePolCostsCarrier(polCostO, netRows, carrier, period) {
   return mergePolCostsCarrier(clearPolCostsCarrierPeriod(polCostO, carrier, period), netRows, carrier, period);
+}
+
+function replacePolCostsWithSells(polCostO, netRows, sellRows, carrier, period) {
+  return mergePolCostsWithSells(
+    clearPolCostsCarrierPeriod(polCostO, carrier, period),
+    netRows,
+    sellRows || {},
+    carrier,
+    period,
+  );
 }
 
 const carrierBucketHasData = (cr) => {
@@ -2717,11 +2833,17 @@ function previewSummary(parsed, period) {
     };
   }
   const netRows = parsed.netRows || parsed.oceanRows || {};
-  const scanNote = parsed.polScan ? " · POL 스캔 (양식 확인)" : " · NET 컬럼";
+  const sellRows = parsed.sellRows || {};
+  const sellN = Object.keys(sellRows).length;
+  const scanNote = parsed.polScan ? " · POL 스캔 (양식 확인)" : (sellN ? " · NET+SELL" : " · NET 컬럼");
+  const sellNote = sellN ? ` · 매출 ${sellN} POL` : "";
   return {
     title: `${parsed.carrier} · ${Object.keys(netRows).length} POL`,
-    detail: `POL 기준 매입${scanNote} · 스킵 ${(parsed.skipped || []).length}건`,
-    sample: Object.entries(netRows).slice(0, 3),
+    detail: `POL 기준 매입${sellNote}${scanNote} · 스킵 ${(parsed.skipped || []).length}건`,
+    sample: Object.entries(netRows).slice(0, 3).map(([pol, rates]) => {
+      const sell = sellRows[pol];
+      return [pol, sell ? { ...rates, sell } : rates];
+    }),
   };
 }
 
@@ -2730,13 +2852,15 @@ function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
   const areaMap = Object.fromEntries((fData || []).map(r => [r.pol, r.area]));
   const batchNote = note || "";
 
-  const pushOcean = (carrier, netRows) => {
+  const pushOcean = (carrier, netRows, sellRows = {}) => {
     Object.entries(netRows || {}).forEach(([pol, rates]) => {
+      const sells = sellRows[pol] || {};
       RATE_TYPES.forEach(t => {
         if (rates[t] == null) return;
+        const sell = sells[t] ?? null;
         rows.push({
           carrier, area: areaMap[pol] || "", pol, route: pol, rate_type: t, period,
-          category: "ocean", cost: rates[t], sell: null, margin: null,
+          category: "ocean", cost: rates[t], sell, margin: sell != null ? sell - rates[t] : null,
           source: "excel_upload", note: batchNote,
         });
       });
@@ -2766,16 +2890,16 @@ function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
   }
 
   if (parsed.format === "DY") {
-    pushOcean("DY", parsed.oceanRows);
+    pushOcean("DY", parsed.oceanRows, parsed.sellRows);
     return rows;
   }
 
   if (parsed.format === "YSL") {
-    pushOcean(parsed.carrier, parsed.netRows);
+    pushOcean(parsed.carrier, parsed.netRows, parsed.sellRows);
     return rows;
   }
 
-  pushOcean(parsed.carrier, parsed.netRows);
+  pushOcean(parsed.carrier, parsed.netRows, parsed.sellRows);
   return rows;
 }
 
@@ -3124,7 +3248,7 @@ export default function App() {
         await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(merged));
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
       } else if (parsed.format === "DY") {
-        const nextCosts = replacePolCostsCarrier(baseCosts, parsed.oceanRows, "DY", period);
+        const nextCosts = replacePolCostsWithSells(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period);
         const nextDrop = buildDyDropRates(
           JSON.stringify(carrierDropRates),
           parsed.oceanRows,
@@ -3140,7 +3264,8 @@ export default function App() {
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
       } else {
         const cr = parsed.carrier;
-        const nextCosts = replacePolCostsCarrier(baseCosts, parsed.netRows, cr, period);
+        const netRows = parsed.netRows || {};
+        const nextCosts = replacePolCostsWithSells(baseCosts, netRows, parsed.sellRows, cr, period);
         setPolCostO(nextCosts);
         await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
@@ -5111,7 +5236,7 @@ export default function App() {
         </div>
         <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 80px" }}>
           <div style={{ fontSize: 11, color: "#92400e", marginBottom: 12, lineHeight: 1.5 }}>
-            선사 원본 Excel 업로드 시 **포털 POL 이름**으로 자동 매칭합니다 (별칭·그룹항 포함). 매입(NET)만 저장 · 매출·마진은 Admin에서 설정.
+            선사 원본 Excel **「업로드용」** 시트 기준 · POL 자동 매칭 · **NET(매입)+매출** 함께 저장 (Drop off는 DY Import 원본 시트).
           </div>
 
           <div style={{ background: "#fff", border: "1px solid #fde68a", borderRadius: 12, padding: 14, marginBottom: 12 }}>
