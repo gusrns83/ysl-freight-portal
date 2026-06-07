@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v52"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v53"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -3912,7 +3912,7 @@ function buildRentalRatesFromBases(bases, period = "current") {
     if (!Object.keys(bucket).length) return;
     const cities = {};
     Object.keys(PDF_DROP).forEach((city) => { cities[city] = { ...bucket }; });
-    out[pol] = { [period]: cities, future: {} };
+    out[pol] = { [period]: cities };
   });
   return out;
 }
@@ -3924,9 +3924,17 @@ function buildRentalRatesFromCityRates(cityRates, period = "current") {
     Object.entries(cities).forEach(([city, vals]) => {
       normalized[city] = normalizeRentalCityBucket(vals);
     });
-    if (Object.keys(normalized).length) out[pol] = { [period]: normalized, future: {} };
+    if (Object.keys(normalized).length) out[pol] = { [period]: normalized };
   });
   return out;
+}
+
+function rentalPeriodBucketHasRates(bucket) {
+  if (!bucket || typeof bucket !== "object") return false;
+  return Object.values(bucket).some(v => {
+    const b = normalizeRentalCityBucket(v);
+    return b.c20 != null || b.c40dv != null || b.c40hc != null || b.c40 != null;
+  });
 }
 
 function mergeRentalRatesPatch(existing, patch) {
@@ -3934,7 +3942,9 @@ function mergeRentalRatesPatch(existing, patch) {
   Object.entries(patch).forEach(([pol, periods]) => {
     if (!out[pol]) out[pol] = { current: {}, future: {} };
     ["current", "future"].forEach(p => {
-      if (periods[p]) out[pol][p] = periods[p];
+      const bucket = periods[p];
+      if (!rentalPeriodBucketHasRates(bucket)) return;
+      out[pol][p] = bucket;
     });
   });
   return out;
@@ -4717,6 +4727,8 @@ export default function App() {
       const baseCosts = pricingSaveRef.current.polCostO ?? polCostO;
       let nextCosts = baseCosts;
 
+      let rentalRhLogged = 0;
+
       if (parsed.format === "RENTAL") {
         const baseRental = pricingSaveRef.current.rentalRates ?? rentalRates;
         const { rentalRates: clearedRental } = clearRentalPeriodRates(baseRental, period);
@@ -4730,6 +4742,11 @@ export default function App() {
         setRentalRates(merged);
         setExcelMsg("Rental 운임 DB 저장 중…");
         await saveSettingDirect("rental_rates_json", JSON.stringify(merged));
+        rentalRhLogged = await recordRateHistory(
+          { source: "excel_upload", note, batchId },
+          { ...pricingSaveRef.current, rentalRates: merged },
+        );
+        rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
       } else if (parsed.format === "DY") {
         nextCosts = mergePolCostsUploadByValidity(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period, excelValidityDraft);
         nextCosts = backfillPolCostSells(nextCosts, {
@@ -4818,21 +4835,22 @@ export default function App() {
       finishUpload(
         true,
         parsed.format === "RENTAL"
-          ? `✅ Rental 저장 완료 · ${validityLabel} (${slotLabel}) · ${Object.keys(parsed.cityRates || parsed.bases || {}).length} POL`
+          ? `✅ Rental 저장 완료 · ${validityLabel} (${slotLabel}) · ${Object.keys(parsed.cityRates || parsed.bases || {}).length} POL${rentalRhLogged ? ` · 이력 ${rentalRhLogged}건` : ""}`
           : `✅ 저장 완료 · ${validityLabel} (${slotLabel} 탭) · DB에 validity ${archiveN}구간 누적`,
       );
 
-      uploadExcelRateHistory(parsed, period, fData, note, batchId, nextCosts)
-        .then(rhResult => {
-          if (rhResult.sent > 0) {
-            rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
-            const rhLabel = parsed.format === "RENTAL" ? "Rental Rate History" : "Rate History";
-            setExcelMsg(`✅ 저장 완료 · ${rhLabel} ${rhResult.sent}건`);
-          } else if (rhResult.error) {
-            setExcelMsg(`✅ 운임 DB 저장됨 · Rate History: ${rhResult.error}`);
-          }
-        })
-        .catch(e => console.warn("Rate History background skip", e));
+      if (parsed.format !== "RENTAL") {
+        uploadExcelRateHistory(parsed, period, fData, note, batchId, nextCosts)
+          .then(rhResult => {
+            if (rhResult.sent > 0) {
+              rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+              setExcelMsg(`✅ 저장 완료 · Rate History ${rhResult.sent}건`);
+            } else if (rhResult.error) {
+              setExcelMsg(`✅ 운임 DB 저장됨 · Rate History: ${rhResult.error}`);
+            }
+          })
+          .catch(e => console.warn("Rate History background skip", e));
+      }
     })(), EXCEL_UPLOAD_MAX_MS, "업로드 시간 초과 (90초) · 네트워크 확인 후 다시 시도")
       .catch(e => {
         resetSaveQueue();
