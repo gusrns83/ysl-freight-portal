@@ -3781,12 +3781,34 @@ export default function App() {
     setRhSelectMsg(`→ 현재 운임: ${CN_KR[row.carrier] || row.carrier} · ${row.pol} · ${row.rate_type}`);
   };
 
+  const ensurePolCostSellsBackfill = async (opts = {}) => {
+    if (!isAdmin) return 0;
+    const base = pricingSaveRef.current;
+    const { polCostO: next, filled } = backfillPolCostSells(base?.polCostO ?? polCostO, {
+      polM: base?.polM ?? polM,
+      polMFuture: base?.polMFuture ?? polMFuture,
+      margins: base?.margins ?? margins,
+    });
+    if (!filled) return 0;
+    setPolCostO(next);
+    pricingSaveRef.current = { ...base, polCostO: next };
+    if (opts.persist !== false) {
+      skipAutoSaveRef.current = true;
+      await saveOneSettingWithRetry("pol_costs", serializePolCosts(next));
+      setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+    }
+    return filled;
+  };
+
   const openFreightAdmin = (tab = "grid") => {
     setShowFreightAdmin(true);
     setFreightAdminTab(tab);
     if (tab === "grid") {
       setCarrierAdminPolFilter("");
       setCarrierEditCell(null);
+      ensurePolCostSellsBackfill().then(filled => {
+        if (filled > 0) setRhSelectMsg(`✅ 매출 ${filled}셀 자동 보완 · 현재 운임 반영`);
+      }).catch(e => console.warn("pol_costs 매출 보완 skip", e));
     }
     if (tab === "history") loadRateHistory();
   };
@@ -3800,6 +3822,11 @@ export default function App() {
           onClick={() => {
             setFreightAdminTab(id);
             if (id === "history") loadRateHistory();
+            if (id === "grid") {
+              ensurePolCostSellsBackfill().then(filled => {
+                if (filled > 0) setRhSelectMsg(`✅ 매출 ${filled}셀 자동 보완 · 현재 운임 반영`);
+              }).catch(e => console.warn("pol_costs 매출 보완 skip", e));
+            }
           }}
           style={{
             flex: 1, padding: "10px 8px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "none", cursor: "pointer",
@@ -4335,11 +4362,21 @@ export default function App() {
       margins, marginTs, areaM, areaTs, polM, polTs, polMFuture, polTsFuture,
     }));
 
-  /** 선사 Admin 단가표: sell 저장값 → POL 마진 → 없으면 null (전역 마진 미적용) */
-  const getCarrierAdminSell = (pol, cr, type, period, cost) =>
-    resolveCarrierEffectiveSell(polCostO, pol, cr, type, period, cost, {
-      polM, polMFuture, adminMode: true,
-    });
+  /** 선사 Admin 단가표: sell 저장값 → POL 마진 → 동일 POL 마진(형제 타입) → SNK 일본 마진 */
+  const getCarrierAdminSell = (pol, cr, type, period, cost) => {
+    if (cost == null) return null;
+    const explicit = resolveCarrierExplicitSell(polCostO, pol, cr, type, period);
+    if (explicit != null) return explicit;
+    const polMargin = getPolStoredMargin(pol, type, period, polM, polMFuture);
+    if (polMargin != null) return cost + polMargin;
+    const sibling = polCostSiblingMargin(polCostO, pol, cr, period, type);
+    if (sibling != null) return cost + sibling;
+    if (cr === "SNK" && JAPAN_POL_SET.has(pol)) {
+      const m = snkJapanReferenceMargins(polCostO, period)[type];
+      if (m != null) return cost + m;
+    }
+    return null;
+  };
 
   /** 게스트·포털: sell 저장값 → POL 마진 → getM() 전체 마진 */
   const getGuestCarrierSell = (pol, cr, type, period, cost, area) =>
