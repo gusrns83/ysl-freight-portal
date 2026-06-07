@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v50"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v52"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -1814,7 +1814,9 @@ const parsePricingFromSettings = (s) => {
     try {
       const parsed = JSON.parse(s.rental_rates_json);
       if (parsed && typeof parsed === "object") {
-        snap.rentalRates = mergeRentalRates(buildDefaultRentalRates(), parsed);
+        snap.rentalRates = repairRentalRatesStripLegacyPdfDrop(
+          mergeRentalRates(buildDefaultRentalRates(), parsed),
+        );
       }
     } catch (e) {}
   }
@@ -1932,7 +1934,9 @@ const bootPricingFromCache = () => {
       : defaultCarrierDropMargins(),
     validityInfo: cache.validityInfo ?? defaultValidityInfo(),
     rentalRates: cache.rentalRates
-      ? mergeRentalRates(buildDefaultRentalRates(), cache.rentalRates)
+      ? repairRentalRatesStripLegacyPdfDrop(
+          mergeRentalRates(buildDefaultRentalRates(), cache.rentalRates),
+        )
       : buildDefaultRentalRates(),
     rentalMargins: normalizeRentalMargins(cache.rentalMargins),
     rentalAreaM: cache.rentalAreaM ?? {},
@@ -2464,6 +2468,47 @@ const PDF_DROP = {
   Kazan: [650, 750],
   Minsk: [500, 500],
 };
+
+/** 레거시 업로드(PDF_DROP 합산)로 DB에 남은 Drop 가산분 제거 — ③ 업로드용 순수 렌탈과 맞춤 */
+function repairRentalRatesStripLegacyPdfDrop(rentalRates) {
+  if (!rentalRates || typeof rentalRates !== "object") return rentalRates;
+  let changed = false;
+  const out = JSON.parse(JSON.stringify(rentalRates));
+  Object.values(out).forEach((periods) => {
+    ["current", "future"].forEach((p) => {
+      Object.entries(periods[p] || {}).forEach(([city, vals]) => {
+        const drop = PDF_DROP[city];
+        if (!drop) return;
+        const b = normalizeRentalCityBucket(vals);
+        const d40 = drop[1];
+        const dvRaw = b.c40dv;
+        const hcRaw = b.c40hc;
+        const dv = dvRaw != null && dvRaw !== "" && Number.isFinite(Number(dvRaw)) ? Number(dvRaw) : null;
+        const hc = hcRaw != null && hcRaw !== "" && Number.isFinite(Number(hcRaw)) ? Number(hcRaw) : null;
+        let cityChanged = false;
+
+        if (dv != null && hc != null && dv === hc && d40 > 0) {
+          b.c40dv = dv - d40;
+          b.c40hc = hc - d40;
+          cityChanged = true;
+        } else if (hc != null && dv != null && hc > dv && d40 > 0) {
+          const stripped = hc - d40;
+          if (stripped >= dv && stripped > dv) {
+            b.c40hc = stripped;
+            cityChanged = true;
+          }
+        }
+
+        if (cityChanged) {
+          delete b.c40;
+          periods[p][city] = b;
+          changed = true;
+        }
+      });
+    });
+  });
+  return changed ? compactRentalRates(out) : rentalRates;
+}
 
 const UPLOAD_FORMATS = [
   { id: "SNK", label: "장금상선 (SKR-YSL)", hint: "「Vladivostok … (업로드용)」· NET+매출" },
@@ -3850,20 +3895,24 @@ function buildDyDropRates(existingJson, oceanRows, dropRows, period, carrier = "
   return out;
 }
 
+function rentalBaseToCityBucket(base) {
+  const entry = {};
+  if (base.c20 != null) entry.c20 = base.c20;
+  const dv = base.c40dv ?? base.c40;
+  const hc = base.c40hc ?? base.c40;
+  if (dv != null) entry.c40dv = dv;
+  if (hc != null) entry.c40hc = hc;
+  return entry;
+}
+
 function buildRentalRatesFromBases(bases, period = "current") {
   const out = {};
   Object.entries(bases).forEach(([pol, base]) => {
+    const bucket = rentalBaseToCityBucket(base);
+    if (!Object.keys(bucket).length) return;
     const cities = {};
-    Object.entries(PDF_DROP).forEach(([city, [d20, d40]]) => {
-      const entry = {};
-      if (base.c20 != null) entry.c20 = base.c20 + d20;
-      const dv = base.c40dv ?? base.c40;
-      const hc = base.c40hc ?? base.c40;
-      if (dv != null) entry.c40dv = dv + d40;
-      if (hc != null) entry.c40hc = hc + d40;
-      if (Object.keys(entry).length) cities[city] = entry;
-    });
-    if (Object.keys(cities).length) out[pol] = { [period]: cities, future: {} };
+    Object.keys(PDF_DROP).forEach((city) => { cities[city] = { ...bucket }; });
+    out[pol] = { [period]: cities, future: {} };
   });
   return out;
 }
@@ -4056,25 +4105,27 @@ function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
 
   if (parsed.format === "RENTAL") {
     const pushCityRates = (rentalPol, cities) => {
+      const freightPol = PM[rentalPol] || rentalPol;
+      const area = areaMap[freightPol] || "OTHERS";
       Object.entries(cities).forEach(([city, vals]) => {
         const bucket = normalizeRentalCityBucket(vals);
         if (bucket.c20 != null) {
           rows.push({
-            carrier: "RENTAL", area: "OTHERS", pol: rentalPol, route: `${rentalPol} > ${city}`,
+            carrier: "RENTAL", area, pol: freightPol, route: `${freightPol} > ${city}`,
             rate_type: "r20", period, category: "rental", cost: bucket.c20, sell: null, margin: null,
             source: "excel_upload", note: batchNote,
           });
         }
         if (bucket.c40dv != null) {
           rows.push({
-            carrier: "RENTAL", area: "OTHERS", pol: rentalPol, route: `${rentalPol} > ${city}`,
+            carrier: "RENTAL", area, pol: freightPol, route: `${freightPol} > ${city}`,
             rate_type: "r40dv", period, category: "rental", cost: bucket.c40dv, sell: null, margin: null,
             source: "excel_upload", note: batchNote,
           });
         }
         if (bucket.c40hc != null) {
           rows.push({
-            carrier: "RENTAL", area: "OTHERS", pol: rentalPol, route: `${rentalPol} > ${city}`,
+            carrier: "RENTAL", area, pol: freightPol, route: `${freightPol} > ${city}`,
             rate_type: "r40hc", period, category: "rental", cost: bucket.c40hc, sell: null, margin: null,
             source: "excel_upload", note: batchNote,
           });
@@ -4085,15 +4136,9 @@ function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
       Object.entries(parsed.cityRates).forEach(([rentalPol, cities]) => pushCityRates(rentalPol, cities));
     } else {
       Object.entries(parsed.bases || {}).forEach(([rentalPol, base]) => {
-        Object.entries(PDF_DROP).forEach(([city, [d20, d40]]) => {
-          const cities = {
-            [city]: {
-              c20: base.c20 != null ? base.c20 + d20 : null,
-              c40dv: (base.c40dv ?? base.c40) != null ? (base.c40dv ?? base.c40) + d40 : null,
-              c40hc: (base.c40hc ?? base.c40) != null ? (base.c40hc ?? base.c40) + d40 : null,
-            },
-          };
-          pushCityRates(rentalPol, cities);
+        const bucket = rentalBaseToCityBucket(base);
+        Object.keys(PDF_DROP).forEach((city) => {
+          pushCityRates(rentalPol, { [city]: bucket });
         });
       });
     }
@@ -4678,7 +4723,9 @@ export default function App() {
         const patch = parsed.cityRates
           ? buildRentalRatesFromCityRates(parsed.cityRates, period)
           : buildRentalRatesFromBases(parsed.bases, period);
-        const merged = compactRentalRates(mergeRentalRatesPatch(clearedRental, patch));
+        const merged = repairRentalRatesStripLegacyPdfDrop(
+          compactRentalRates(mergeRentalRatesPatch(clearedRental, patch)),
+        );
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: merged };
         setRentalRates(merged);
         setExcelMsg("Rental 운임 DB 저장 중…");
@@ -4775,18 +4822,17 @@ export default function App() {
           : `✅ 저장 완료 · ${validityLabel} (${slotLabel} 탭) · DB에 validity ${archiveN}구간 누적`,
       );
 
-      if (parsed.format !== "RENTAL") {
-        uploadExcelRateHistory(parsed, period, fData, note, batchId, nextCosts)
-          .then(rhResult => {
-            if (rhResult.sent > 0) {
-              rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
-              setExcelMsg(`✅ 저장 완료 · Rate History ${rhResult.sent}건`);
-            } else if (rhResult.error) {
-              setExcelMsg(`✅ 운임 DB 저장됨 · Rate History: ${rhResult.error}`);
-            }
-          })
-          .catch(e => console.warn("Rate History background skip", e));
-      }
+      uploadExcelRateHistory(parsed, period, fData, note, batchId, nextCosts)
+        .then(rhResult => {
+          if (rhResult.sent > 0) {
+            rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+            const rhLabel = parsed.format === "RENTAL" ? "Rental Rate History" : "Rate History";
+            setExcelMsg(`✅ 저장 완료 · ${rhLabel} ${rhResult.sent}건`);
+          } else if (rhResult.error) {
+            setExcelMsg(`✅ 운임 DB 저장됨 · Rate History: ${rhResult.error}`);
+          }
+        })
+        .catch(e => console.warn("Rate History background skip", e));
     })(), EXCEL_UPLOAD_MAX_MS, "업로드 시간 초과 (90초) · 네트워크 확인 후 다시 시도")
       .catch(e => {
         resetSaveQueue();
@@ -6268,11 +6314,33 @@ export default function App() {
         ]);
         if (cancelled) return;
 
+        const rentalMap = settingsMapFromRows(rentalRows);
         applySettingsBundle({
           ...settingsMapFromRows(dropRows),
-          ...settingsMapFromRows(rentalRows),
+          ...rentalMap,
           ...settingsMapFromRows(miscRows),
         });
+
+        if (!cancelled && rentalMap.rental_rates_json) {
+          try {
+            const raw = JSON.parse(rentalMap.rental_rates_json);
+            const merged = compactRentalRates(mergeRentalRates(buildDefaultRentalRates(), raw));
+            const repaired = repairRentalRatesStripLegacyPdfDrop(merged);
+            if (isAdmin && JSON.stringify(merged) !== JSON.stringify(repaired)) {
+              skipAutoSaveRef.current = true;
+              const repairedJson = JSON.stringify(repaired);
+              enqueueNetworkWrite(async () => {
+                await saveSettingDirect("rental_rates_json", repairedJson);
+                pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: repaired };
+                setRentalRates(repaired);
+              });
+              setTimeout(() => { skipAutoSaveRef.current = false; }, 3500);
+            }
+          } catch (e) {
+            console.warn("rental legacy PDF drop strip persist skip", e);
+          }
+        }
+
         // Drop/Rental DB 로드 후 baseline — 이전에는 500ms만 기다려 Moscow drop20 등 변경이 이력에 안 남을 수 있음
         setTimeout(() => syncRateHistoryBaseline(), 400);
       } catch (err) {
