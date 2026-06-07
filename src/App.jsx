@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v49"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v50"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -703,11 +703,6 @@ const normalizeValiditySlot = (slot) => {
   };
 };
 
-const normalizeValidityCarrier = (raw) => ({
-  current: normalizeValiditySlot(raw?.current),
-  future: normalizeValiditySlot(raw?.future),
-});
-
 const formatValiditySlotLabel = (slot) => {
   const s = normalizeValiditySlot(slot);
   if (s.furtherNotice && !s.from && !s.till) return FURTHER_NOTICE_LABEL;
@@ -750,18 +745,23 @@ const formatValidityCompact = (slot) => {
   return "";
 };
 
-const defaultValidityInfo = () => Object.fromEntries(VALIDITY_KEYS.map(k => [k, {
-  current: {
-    from: "",
-    till: k === "SNK" ? "Till 15.06.2026" : "Till 30.06.2026",
-    furtherNotice: false,
-  },
-  future: {
-    from: k === "SNK" ? "From 16.06.2026" : (k === "CK" ? "From 16.06.2026" : "From 01.07.2026"),
-    till: "Till 30.06.2026",
-    furtherNotice: false,
-  },
-}]));
+const defaultValidityInfo = () => Object.fromEntries(VALIDITY_KEYS.map(k => {
+  const isSnk = k === "SNK" || k === "SNK_DROP";
+  const isDy = k === "DY" || k === "DY_DROP";
+  const isCk = k === "CK" || k === "CK_DROP";
+  return [k, {
+    current: {
+      from: "",
+      till: (isSnk || isDy) ? "Till 15.06.2026" : "Till 30.06.2026",
+      furtherNotice: false,
+    },
+    future: {
+      from: (isSnk || isCk || isDy) ? "From 16.06.2026" : "From 01.07.2026",
+      till: "Till 30.06.2026",
+      furtherNotice: false,
+    },
+  }];
+}));
 const defaultCarrierRates = () => Object.fromEntries(CRS.map(k => [k, {
   current: { coc20: "", coc40: "", soc20: "", soc40: "" },
   future: { coc20: "", coc40: "", soc20: "", soc40: "" },
@@ -959,6 +959,37 @@ const syncFromAfterTill = (currentTill, futureFrom) => {
   }
   return futureFrom;
 };
+
+/** Till이 From보다 앞서면(예: 01.07~30.06) 운임 validity 패턴(16일~말일)으로 보정 */
+const repairValiditySlot = (slot) => {
+  const s = normalizeValiditySlot(slot);
+  if (s.furtherNotice) return s;
+  const fromIso = parseValidityToISO(s.from);
+  const tillIso = parseValidityToISO(s.till);
+  if (!fromIso || !tillIso || tillIso >= fromIso) return s;
+  const [y, mo] = tillIso.split("-");
+  const alignedFrom = `${y}-${mo}-16`;
+  if (alignedFrom <= tillIso) {
+    return { ...s, from: formatValidityDate(alignedFrom, "From") };
+  }
+  const fromMonthEnd = new Date(Number(fromIso.slice(0, 4)), Number(fromIso.slice(5, 7)), 0);
+  const tillFix = `${fromMonthEnd.getFullYear()}-${String(fromMonthEnd.getMonth() + 1).padStart(2, "0")}-${String(fromMonthEnd.getDate()).padStart(2, "0")}`;
+  if (tillFix >= fromIso) {
+    return { ...s, till: formatValidityDate(tillFix, "Till") };
+  }
+  return { ...s, till: formatValidityDate(fromIso, "Till") };
+};
+
+const normalizeValidityCarrier = (raw) => ({
+  current: repairValiditySlot(raw?.current),
+  future: repairValiditySlot(raw?.future),
+});
+
+const serializeValidityInfo = (validityInfo) => JSON.stringify(
+  Object.fromEntries(
+    Object.entries(validityInfo || {}).map(([k, v]) => [k, normalizeValidityCarrier(v)]),
+  ),
+);
 
 function AdminSaveToast({ busy, feedback, onDismiss }) {
   if (!busy && !feedback?.type) return null;
@@ -4696,7 +4727,7 @@ export default function App() {
         const nextValidityInfo = mergeUploadValidity(baseValidity, carrierKey, period, excelValidityDraft);
         setValidityInfo(nextValidityInfo);
         pricingSaveRef.current = { ...pricingSaveRef.current, validityInfo: nextValidityInfo };
-        const validitySaves = [["validity_info_json", JSON.stringify(nextValidityInfo)]];
+        const validitySaves = [["validity_info_json", serializeValidityInfo(nextValidityInfo)]];
         const legacyKey = LEGACY_VALIDITY_KEY[carrierKey];
         if (legacyKey) {
           validitySaves.push([legacyKey, formatValiditySlotLabel(nextValidityInfo[carrierKey]?.current)]);
@@ -5682,6 +5713,9 @@ export default function App() {
       }
     }
     entry[period] = slot;
+    if (period === "future" || period === "current") {
+      entry[period] = repairValiditySlot(entry[period]);
+    }
     return entry;
   };
 
@@ -5689,7 +5723,7 @@ export default function App() {
     setValidityInfo(p => {
       const entry = normalizeValidityCarrier(p[carrier] || {});
       patchValiditySlot(entry, period, field, value);
-      return { ...p, [carrier]: entry };
+      return { ...p, [carrier]: normalizeValidityCarrier(entry) };
     });
   };
 
@@ -5710,13 +5744,7 @@ export default function App() {
     });
   };
 
-  const getFutureFromMinDate = (carrierKey) => {
-    const cur = normalizeValiditySlot(validityInfo[carrierKey]?.current);
-    const tillIso = parseValidityToISO(cur.till);
-    if (tillIso) return addDaysToISO(tillIso, 1);
-    const fromIso = parseValidityToISO(cur.from);
-    return fromIso ? addDaysToISO(fromIso, 1) : undefined;
-  };
+  const getFutureFromMinDate = () => undefined;
 
   const legacyValidityCurrent = (carrierKey) =>
     formatValiditySlotLabel(validityInfo[carrierKey]?.current);
@@ -5877,7 +5905,7 @@ export default function App() {
     return [
       ["carrier_drop_rates_json", JSON.stringify(serializeCarrierDropRatesForSave(s.carrierDropRates))],
       ["carrier_drop_margins_json", JSON.stringify(s.carrierDropMargins)],
-      ["validity_info_json", JSON.stringify(s.validityInfo)],
+      ["validity_info_json", serializeValidityInfo(s.validityInfo)],
     ];
   };
 
@@ -5895,7 +5923,7 @@ export default function App() {
       ["pol_margin_timestamps", JSON.stringify(s.polTs)],
       ["pol_margin_timestamps_future", JSON.stringify(s.polTsFuture)],
       ["carrier_rates_json", JSON.stringify(s.carrierRates)],
-      ["validity_info_json", JSON.stringify(s.validityInfo)],
+      ["validity_info_json", serializeValidityInfo(s.validityInfo)],
     ];
   };
 
@@ -5912,7 +5940,7 @@ export default function App() {
       ["rental_margin_timestamps", JSON.stringify(s.rentalMarginTs)],
       ["rental_area_margin_timestamps", JSON.stringify(s.rentalAreaTs)],
       ["rental_pol_margin_timestamps", JSON.stringify(s.rentalPolTs)],
-      ["validity_info_json", JSON.stringify(s.validityInfo)],
+      ["validity_info_json", serializeValidityInfo(s.validityInfo)],
     ];
   };
 
