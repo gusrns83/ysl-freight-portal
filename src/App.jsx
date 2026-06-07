@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v48"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v49"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -1268,6 +1268,7 @@ const rateHistoryDuplicateValueKey = (row) =>
 
 const RH_SOURCE_KEEP_RANK = {
   excel_upload: 100,
+  history_backfill: 75,
   admin_save: 80,
   rental_save: 80,
   admin: 70,
@@ -4245,6 +4246,8 @@ export default function App() {
   const [excelSaveValidity, setExcelSaveValidity] = useState(true);
   const rateHistoryBaselineRef = useRef(null);
   const rhAutoPruneRef = useRef(false);
+  const rhBackfillInFlightRef = useRef(false);
+  const rateHistoryLastLogAtRef = useRef(0);
   const [rhRows, setRhRows] = useState([]);
   const [rhLoading, setRhLoading] = useState(false);
   const [rhError, setRhError] = useState("");
@@ -4332,6 +4335,7 @@ export default function App() {
     return postRateHistoryRows(rows)
       .then(count => {
         rateHistoryBaselineRef.current = nextMap;
+        rateHistoryLastLogAtRef.current = Date.now();
         return count;
       })
       .catch(err => {
@@ -4843,48 +4847,77 @@ export default function App() {
     });
   };
 
-  const applyBackfillDropRateHistory = () => {
-    setRhSelectMsg("");
-    const snap = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
-    const existingKeys = new Set(rhRows.map(r => rateHistoryEntryKey(r)));
-    const batch_id = typeof crypto !== "undefined" && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `batch-${Date.now()}`;
-    const rows = [];
-    snap.forEach((entry) => {
-      if (entry.category !== "dropoff") return;
-      if (existingKeys.has(rateHistoryEntryKey(entry))) return;
-      rows.push({
-        batch_id,
-        source: "admin_save",
-        note: "Drop off 누락 보완",
-        carrier: entry.carrier,
-        area: entry.area || null,
-        pol: entry.pol,
-        route: entry.route || entry.pol,
-        rate_type: entry.rate_type,
-        period: entry.period,
-        category: entry.category,
-        cost: entry.cost,
-        sell: entry.sell,
-        margin: entry.margin,
-      });
-    });
-    if (!rows.length) {
-      setRhSelectMsg("Drop off 누락 이력 없음 · 화면·DB와 이력 키가 일치합니다");
+  const applyBackfillDropRateHistory = async () => {
+    if (rhBackfillInFlightRef.current) {
+      setRhSelectMsg("Drop off 보완 처리 중…");
       return;
     }
-    const preview = rows.slice(0, 4).map(r =>
-      `${r.pol} ${r.rate_type === "drop20" ? "20'" : "40'"} ${r.period === "future" ? "향후" : "현재"}`,
-    ).join(", ");
-    setRhSelectMsg(`Drop off ${rows.length}건 이력 보완 중… (${preview}${rows.length > 4 ? " …" : ""})`);
-    postRateHistoryRows(rows)
-      .then((count) => {
-        rateHistoryBaselineRef.current = snap;
-        setRhSelectMsg(`✅ Drop off ${count || rows.length}건 이력 보완 · Admin에 있는 값(예: Moscow 20' Drop) 반영`);
-        loadRateHistory();
-      })
-      .catch(e => setRhSelectMsg(`Drop off 보완 실패: ${e.message}`));
+    if (!window.confirm(
+      "Admin Drop off 화면의 현재값 중, 변경 이력에 없는 셀만 등록합니다.\n\n"
+      + "· 자동 생성 아님 · 버튼을 눌렀을 때만 실행\n"
+      + "· 이미 이력에 있는 Moscow 20' 등은 건너뜀\n\n계속할까요?",
+    )) return;
+
+    setRhSelectMsg("");
+    rhBackfillInFlightRef.current = true;
+    setRhLoading(true);
+    try {
+      const freshRows = await api(buildRateHistoryQuery({
+        scope: rhScope,
+        carrier: rhCarrier,
+        area: rhArea,
+        period: rhPeriod,
+        category: rhCategory,
+        pol: rhPol,
+        dateFrom: rhDateFrom,
+        dateTo: rhDateTo,
+      }));
+      const existingKeys = new Set(
+        (Array.isArray(freshRows) ? freshRows : []).map(r => rateHistoryEntryKey(r)),
+      );
+      const snap = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+      const batch_id = typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : `batch-${Date.now()}`;
+      const rows = [];
+      snap.forEach((entry) => {
+        if (entry.category !== "dropoff") return;
+        if (existingKeys.has(rateHistoryEntryKey(entry))) return;
+        rows.push({
+          batch_id,
+          source: "history_backfill",
+          note: "Drop off 누락 보완",
+          carrier: entry.carrier,
+          area: entry.area || null,
+          pol: entry.pol,
+          route: entry.route || entry.pol,
+          rate_type: entry.rate_type,
+          period: entry.period,
+          category: entry.category,
+          cost: entry.cost,
+          sell: entry.sell,
+          margin: entry.margin,
+        });
+      });
+      if (!rows.length) {
+        setRhSelectMsg("Drop off 누락 이력 없음 · 화면·DB와 이력 키가 일치합니다");
+        return;
+      }
+      const preview = rows.slice(0, 4).map(r =>
+        `${r.pol} ${r.rate_type === "drop20" ? "20'" : "40'"} ${r.period === "future" ? "향후" : "현재"}`,
+      ).join(", ");
+      setRhSelectMsg(`Drop off ${rows.length}건 이력 보완 중… (${preview}${rows.length > 4 ? " …" : ""})`);
+      const count = await postRateHistoryRows(rows);
+      rateHistoryBaselineRef.current = snap;
+      rateHistoryLastLogAtRef.current = Date.now();
+      setRhSelectMsg(`✅ Drop off ${count || rows.length}건 이력 보완 · 출처「이력 보완」`);
+      loadRateHistory();
+    } catch (e) {
+      setRhSelectMsg(`Drop off 보완 실패: ${e.message}`);
+    } finally {
+      rhBackfillInFlightRef.current = false;
+      setRhLoading(false);
+    }
   };
 
   const applyFindRhDuplicates = () => {
@@ -5819,7 +5852,13 @@ export default function App() {
       });
       flashSaveFeedback("success", `✅ ${successLabel} 저장 완료`);
       if (!String(successLabel).includes("Excel")) {
-        recordRateHistory({ source: "admin_save", note: successLabel });
+        const isRoutinePricingSave = [DB_LABEL[DB_DROP], DB_LABEL[DB_OCEAN], DB_LABEL[DB_RENTAL]].includes(successLabel);
+        const recentAutoLog = Date.now() - rateHistoryLastLogAtRef.current < 10000;
+        if (!isRoutinePricingSave || !recentAutoLog) {
+          recordRateHistory({ source: "admin_save", note: successLabel });
+        } else {
+          rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+        }
       }
     } catch (e) {
       resetSaveQueue();
@@ -6999,8 +7038,21 @@ export default function App() {
     };
     const rhSourceLabel = (s) => ({
       admin_save: "Admin 저장", auto_save: "자동 저장", excel_upload: "Excel 업로드", excel_delete: "운임 삭제",
-      gri: "GRI", import: "기존운임 복사", import_undo: "복사 되돌리기", rental_save: "렌탈 저장",
+      history_backfill: "이력 보완", gri: "GRI", import: "기존운임 복사", import_undo: "복사 되돌리기", rental_save: "렌탈 저장",
     }[s] || s || "—");
+    const rhSourceCell = (row) => {
+      const label = rhSourceLabel(row.source);
+      const note = String(row.note || "").trim();
+      if (note && !label.includes(note)) {
+        return (
+          <>
+            <div>{label}</div>
+            <div style={{ fontSize: 9, color: "#9ca3af", marginTop: 2 }}>{note}</div>
+          </>
+        );
+      }
+      return label;
+    };
     const rhDisplayRows = sortRateHistoryRowsByCity(
       rhShowDuplicatesOnly && rhDuplicateIds.size
         ? rhRows.filter(r => rhDuplicateIds.has(r.id))
@@ -7257,7 +7309,7 @@ export default function App() {
                     <td style={{ padding: "7px 6px", textAlign: "right" }}>{row.cost != null ? n(row.cost) : "—"}</td>
                     <td style={{ padding: "7px 6px", textAlign: "right" }}>{row.sell != null ? n(row.sell) : "—"}</td>
                     <td style={{ padding: "7px 6px", textAlign: "right", color: "#059669" }}>{row.margin != null ? n(row.margin) : "—"}</td>
-                    <td style={{ padding: "7px 6px", fontSize: 10, color: "#6b7280" }} title={row.note || ""}>{rhSourceLabel(row.source)}</td>
+                    <td style={{ padding: "7px 6px", fontSize: 10, color: "#6b7280" }} title={row.note || ""}>{rhSourceCell(row)}</td>
                     <td style={{ padding: "7px 6px", textAlign: "center" }} onClick={e => e.stopPropagation()}>
                       <input
                         type="checkbox"
