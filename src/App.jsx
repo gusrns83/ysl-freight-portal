@@ -5,7 +5,11 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v41"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v42"; // Admin 저장 로직 버전 (배포 확인용)
+const DB_OCEAN = "ocean";
+const DB_DROP = "dropoff";
+const DB_RENTAL = "rental";
+const DB_LABEL = { [DB_OCEAN]: "해상 운임 DB", [DB_DROP]: "Drop off DB", [DB_RENTAL]: "Rental DB" };
 const SAVE_UI_MAX_MS = 180000;
 const SAVE_HEAVY_ATTEMPTS = 3;
 const SAVE_HEAVY_TIMEOUT_MS = 45000;
@@ -207,13 +211,25 @@ const api = async (path, opts = {}) => {
 
 const HEAVY_SETTING_KEYS_LIST = ["pol_costs", "rental_rates_json", "carrier_rates_json"];
 
-const PRICING_LIGHT_KEYS = [
-  "global_margins", "area_margins", "pol_margins", "pol_margins_future",
+/** Supabase settings — 3개 운임 DB 번들 */
+const OCEAN_DB_KEYS = [
+  "pol_costs", "pol_portal_overrides_json",
+  "pol_margins", "pol_margins_future", "global_margins", "area_margins",
   "margin_timestamps", "area_margin_timestamps", "pol_margin_timestamps", "pol_margin_timestamps_future",
-  "rental_global_margins", "rental_area_margins", "rental_pol_margins",
+  "carrier_rates_json", "validity_info_json", "validity_snk", "validity_dy", "validity_ck",
+];
+const DROP_DB_KEYS = ["carrier_drop_rates_json", "carrier_drop_margins_json"];
+const RENTAL_DB_KEYS = [
+  "rental_rates_json", "rental_global_margins", "rental_area_margins", "rental_pol_margins",
   "rental_margin_timestamps", "rental_area_margin_timestamps", "rental_pol_margin_timestamps",
-  "validity_info_json", "validity_snk", "validity_dy", "validity_ck", "validity_rental",
-  "carrier_drop_rates_json", "carrier_drop_margins_json",
+  "validity_rental",
+];
+const ALL_PRICING_DB_KEYS = [...new Set([...OCEAN_DB_KEYS, ...DROP_DB_KEYS, ...RENTAL_DB_KEYS])];
+
+const PRICING_LIGHT_KEYS = [
+  ...OCEAN_DB_KEYS.filter(k => k !== "pol_costs"),
+  ...DROP_DB_KEYS,
+  ...RENTAL_DB_KEYS.filter(k => k !== "rental_rates_json"),
 ];
 
 const settingsMapFromRows = (rows) => {
@@ -333,6 +349,45 @@ const SELL_PURGE_REV = "v3";
 const needsSellPurge = () => false;
 
 const serializePolCosts = (polCostO) => JSON.stringify(compactPolCostO(polCostO));
+
+const extractPortalOverrides = (polCostO) => {
+  const out = {};
+  Object.entries(polCostO || {}).forEach(([pol, data]) => {
+    if (!data || typeof data !== "object") return;
+    const entry = {};
+    if (data.rent && Object.keys(data.rent).length) entry.rent = data.rent;
+    if (data.drop && Object.keys(data.drop).length) entry.drop = data.drop;
+    if (Object.keys(entry).length) out[pol] = entry;
+  });
+  return out;
+};
+
+const mergePortalOverridesIntoPolCostO = (polCostO, overrides) => {
+  if (!overrides || !Object.keys(overrides).length) return polCostO || {};
+  const out = { ...(polCostO || {}) };
+  Object.entries(overrides).forEach(([pol, entry]) => {
+    if (!entry || typeof entry !== "object") return;
+    out[pol] = { ...(out[pol] || {}), ...entry };
+  });
+  return out;
+};
+
+/** 해상 DB 전용 — carrier 매입·매출·validity 아카이브만 (rent/drop 제외) */
+const compactPolCostOceanOnly = (polCostO) => {
+  if (!polCostO || !Object.keys(polCostO).length) return {};
+  const carrierOnly = {};
+  Object.entries(polCostO).forEach(([pol, data]) => {
+    if (data?.carrier) carrierOnly[pol] = { carrier: data.carrier };
+  });
+  return compactPolCostO(carrierOnly);
+};
+
+const serializeOceanPolCosts = (polCostO) => JSON.stringify(compactPolCostOceanOnly(polCostO));
+
+const saveOceanPolCostsBundle = async (polCostO, saveFn = saveOneSettingWithRetry) => {
+  await saveFn("pol_costs", serializeOceanPolCosts(polCostO));
+  await saveFn("pol_portal_overrides_json", JSON.stringify(extractPortalOverrides(polCostO)));
+};
 
 const HEAVY_SETTING_KEYS = new Set(["pol_costs", "rental_rates_json", "carrier_rates_json"]);
 const EXCEL_UPLOAD_MAX_MS = 90000;
@@ -1692,6 +1747,14 @@ const parsePricingFromSettings = (s) => {
   }
   if (s.pol_costs != null && s.pol_costs !== "") {
     try { snap.polCostO = JSON.parse(s.pol_costs); } catch (e) {}
+  }
+  if (s.pol_portal_overrides_json) {
+    try {
+      snap.polCostO = mergePortalOverridesIntoPolCostO(
+        snap.polCostO || {},
+        JSON.parse(s.pol_portal_overrides_json),
+      );
+    } catch (e) {}
   }
   if (s.carrier_drop_rates_json) {
     try {
@@ -4206,7 +4269,7 @@ export default function App() {
                 rentalRates: pruned.rentalChanged ? pruned.rentalRates : base.rentalRates,
               };
               skipAutoSaveRef.current = true;
-              await saveOneSettingWithRetry("pol_costs", serializePolCosts(pruned.polCostO));
+              await saveOceanPolCostsBundle(pruned.polCostO);
               setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
             }
             setRhSelectMsg(`✅ 서비스外 ${pruned.historyCleared}건 자동 정리${pruned.dbCleared ? ` · 운임 DB ${pruned.dbCleared}셀` : ""}`);
@@ -4229,7 +4292,7 @@ export default function App() {
           setPolCostO(bf.polCostO);
           pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: bf.polCostO };
           skipAutoSaveRef.current = true;
-          await saveOneSettingWithRetry("pol_costs", serializePolCosts(bf.polCostO));
+          await saveOceanPolCostsBundle(bf.polCostO);
           setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
           setRhSelectMsg(`✅ 매출 ${bf.filled}셀 보완 (SNK 일본 포함)`);
         }
@@ -4290,7 +4353,7 @@ export default function App() {
     pricingSaveRef.current = { ...base, polCostO: next };
     if (opts.persist !== false) {
       skipAutoSaveRef.current = true;
-      await saveOneSettingWithRetry("pol_costs", serializePolCosts(next));
+      await saveOceanPolCostsBundle(next);
       setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
     }
     return filled;
@@ -4462,7 +4525,8 @@ export default function App() {
         setPolCostO(nextCosts);
         setCarrierDropRates(nextDrop);
         await saveSettingsEntriesDirect([
-          ["pol_costs", serializePolCosts(nextCosts)],
+          ["pol_costs", serializeOceanPolCosts(nextCosts)],
+          ["pol_portal_overrides_json", JSON.stringify(extractPortalOverrides(nextCosts))],
           ["carrier_drop_rates_json", JSON.stringify(nextDrop)],
         ]);
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts, carrierDropRates: nextDrop };
@@ -4476,7 +4540,8 @@ export default function App() {
           margins: pricingSaveRef.current.margins ?? margins,
         }).polCostO;
         setPolCostO(nextCosts);
-        await saveSettingDirect("pol_costs", serializePolCosts(nextCosts));
+        await saveSettingDirect("pol_costs", serializeOceanPolCosts(nextCosts));
+        await saveSettingDirect("pol_portal_overrides_json", JSON.stringify(extractPortalOverrides(nextCosts)));
         pricingSaveRef.current = { ...pricingSaveRef.current, polCostO: nextCosts };
       }
 
@@ -4577,7 +4642,7 @@ export default function App() {
 
       if (applied.polCostsChanged) {
         setPolCostO(applied.polCostO);
-        await saveOneSettingWithRetry("pol_costs", serializePolCosts(applied.polCostO));
+        await saveOceanPolCostsBundle(applied.polCostO);
       }
       if (applied.dropChanged) {
         setCarrierDropRates(applied.carrierDropRates);
@@ -4625,7 +4690,7 @@ export default function App() {
       clearTimeout(autoSaveTimerRef.current);
       skipAutoSaveRef.current = true;
       setPolCostO(next);
-      await saveOneSettingWithRetry("pol_costs", serializePolCosts(next));
+      await saveOceanPolCostsBundle(next);
       pricingSaveRef.current = { ...base, polCostO: next };
       writePricingCache({
         ...buildPricingCache(),
@@ -4659,7 +4724,7 @@ export default function App() {
 
       if (applied.polCostsChanged) {
         setPolCostO(applied.polCostO);
-        await saveOneSettingWithRetry("pol_costs", serializePolCosts(applied.polCostO));
+        await saveOceanPolCostsBundle(applied.polCostO);
       }
       if (applied.dropChanged) {
         setCarrierDropRates(applied.carrierDropRates);
@@ -4841,7 +4906,7 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
+      await saveOceanPolCostsBundle(nextCosts);
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -4867,7 +4932,7 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveOneSettingWithRetry("pol_costs", serializePolCosts(restored));
+      await saveOceanPolCostsBundle(restored);
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -4906,7 +4971,7 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveOneSettingWithRetry("pol_costs", serializePolCosts(nextCosts));
+      await saveOceanPolCostsBundle(nextCosts);
     })
       .then(() => {
         writePricingCache({
@@ -4937,7 +5002,7 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveOneSettingWithRetry("pol_costs", serializePolCosts(restoredCosts));
+      await saveOceanPolCostsBundle(restoredCosts);
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -4998,10 +5063,8 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveSettingsEntries([
-        ["pol_costs", serializePolCosts(nextCosts)],
-        ["carrier_rates_json", JSON.stringify(nextRates)],
-      ]);
+      await saveOceanPolCostsBundle(nextCosts);
+      await saveOneSettingWithRetry("carrier_rates_json", JSON.stringify(nextRates));
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -5052,10 +5115,8 @@ export default function App() {
       pricingSavedAt: Date.now(),
     });
     enqueueSave(async () => {
-      await saveSettingsEntries([
-        ["pol_costs", serializePolCosts(restoredCosts)],
-        ["carrier_rates_json", JSON.stringify(restoredRates)],
-      ]);
+      await saveOceanPolCostsBundle(restoredCosts);
+      await saveOneSettingWithRetry("carrier_rates_json", JSON.stringify(restoredRates));
     })
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
@@ -5543,10 +5604,11 @@ export default function App() {
     ];
   };
 
-  const getCarrierSaveEntries = () => {
+  const getOceanSaveEntries = () => {
     const s = pricingSaveRef.current;
     return [
-      ["pol_costs", serializePolCosts(s.polCostO)],
+      ["pol_costs", serializeOceanPolCosts(s.polCostO)],
+      ["pol_portal_overrides_json", JSON.stringify(extractPortalOverrides(s.polCostO))],
       ["pol_margins", JSON.stringify(s.polM)],
       ["pol_margins_future", JSON.stringify(s.polMFuture)],
       ["global_margins", JSON.stringify(s.margins)],
@@ -5556,11 +5618,12 @@ export default function App() {
       ["pol_margin_timestamps", JSON.stringify(s.polTs)],
       ["pol_margin_timestamps_future", JSON.stringify(s.polTsFuture)],
       ["carrier_rates_json", JSON.stringify(s.carrierRates)],
-      ["carrier_drop_rates_json", JSON.stringify(serializeCarrierDropRatesForSave(s.carrierDropRates))],
-      ["carrier_drop_margins_json", JSON.stringify(s.carrierDropMargins)],
       ["validity_info_json", JSON.stringify(s.validityInfo)],
     ];
   };
+
+  /** @deprecated — 해상+Drop 혼합 저장 금지. getOceanSaveEntries / getDropOffSaveEntries 사용 */
+  const getCarrierSaveEntries = () => getOceanSaveEntries();
 
   const getRentalSaveEntries = () => {
     const s = pricingSaveRef.current;
@@ -5576,20 +5639,25 @@ export default function App() {
     ];
   };
 
-  const getPricingSaveEntries = () => [...getCarrierSaveEntries(), ...getRentalSaveEntries().filter(
-    ([k]) => k !== "validity_info_json"
-  )];
+  const getPricingSaveEntries = () => [
+    ...getOceanSaveEntries(),
+    ...getDropOffSaveEntries().filter(([k]) => k !== "validity_info_json"),
+    ...getRentalSaveEntries().filter(([k]) => k !== "validity_info_json"),
+  ];
 
-  const persistCarrierQuiet = () => enqueueSave(() => saveSettingsEntries(getCarrierSaveEntries()));
-  const persistRentalQuiet = () => enqueueSave(() => saveSettingsEntries(getRentalSaveEntries()));
-  const persistPricingQuiet = () => enqueueSave(async () => {
-    await saveSettingsEntries(getCarrierSaveEntries());
-    try {
-      await saveSettingsEntries(getRentalSaveEntries());
-    } catch (e) {
-      console.warn("rental save deferred", e);
-    }
-  });
+  const saveOceanDb = () => saveSettingsEntriesDirect(getOceanSaveEntries());
+  const saveDropDb = () => saveSettingsEntriesDirect(getDropOffSaveEntries());
+  const saveRentalDb = () => saveSettingsEntriesDirect(getRentalSaveEntries());
+  const saveAllPricingDbs = async () => {
+    await saveOceanDb();
+    await saveDropDb();
+    await saveRentalDb();
+  };
+
+  const persistOceanQuiet = () => enqueueSave(() => saveOceanDb());
+  const persistDropQuiet = () => enqueueSave(() => saveDropDb());
+  const persistRentalQuiet = () => enqueueSave(() => saveRentalDb());
+  const persistCarrierQuiet = persistOceanQuiet;
 
   const buildPricingCache = () => {
     const s = pricingSaveRef.current;
@@ -5646,6 +5714,12 @@ export default function App() {
         const cached = readStoredPricingCache()?.polCostO;
         return mergePolCostODeep(mergePolCostODeep(server, prev), cached);
       });
+    }
+    if (settingBundleHas(s, "pol_portal_overrides_json")) {
+      try {
+        const overrides = JSON.parse(s.pol_portal_overrides_json);
+        setPolCostO(prev => mergePortalOverridesIntoPolCostO(prev, overrides));
+      } catch (e) {}
     }
     if (settingBundleHas(s, "carrier_drop_rates_json")) {
       setCarrierDropRates(snap.carrierDropRates ?? defaultCarrierDropRates());
@@ -5705,37 +5779,16 @@ export default function App() {
     } catch (_) {}
   };
 
-  const saveAllSettings = () => runSave("전체 설정", () => saveSettingsEntries([
-    ["notices_json", JSON.stringify(notices)],
-    ["notice_text", notices[0].text],
-    ["notice_on", notices[0].on],
-    ["notice_file_url", notices[0].fileUrl],
-    ["validity_info_json", JSON.stringify(validityInfo)],
-    ["carrier_rates_json", JSON.stringify(carrierRates)],
-    ["carrier_drop_rates_json", JSON.stringify(serializeCarrierDropRatesForSave(carrierDropRates))],
-    ["carrier_drop_margins_json", JSON.stringify(carrierDropMargins)],
-    ["rental_rates_json", JSON.stringify(rentalRates)],
-    ["validity_snk", legacyValidityCurrent("SNK")],
-    ["validity_dy", legacyValidityCurrent("DY")],
-    ["validity_ck", legacyValidityCurrent("CK")],
-    ["validity_rental", legacyValidityCurrent("RENTAL")],
-    ["global_margins", JSON.stringify(margins)],
-    ["area_margins", JSON.stringify(areaM)],
-    ["pol_margins", JSON.stringify(polM)],
-    ["pol_margins_future", JSON.stringify(polMFuture)],
-    ["margin_timestamps", JSON.stringify(marginTs)],
-    ["area_margin_timestamps", JSON.stringify(areaTs)],
-    ["pol_margin_timestamps", JSON.stringify(polTs)],
-    ["pol_margin_timestamps_future", JSON.stringify(polTsFuture)],
-    ["rental_global_margins", JSON.stringify(rentalMargins)],
-    ["rental_area_margins", JSON.stringify(rentalAreaM)],
-    ["rental_pol_margins", JSON.stringify(rentalPolM)],
-    ["rental_margin_timestamps", JSON.stringify(rentalMarginTs)],
-    ["rental_area_margin_timestamps", JSON.stringify(rentalAreaTs)],
-    ["rental_pol_margin_timestamps", JSON.stringify(rentalPolTs)],
-    ["pol_costs", serializePolCosts(polCostO)],
-    ["ad_banners_json", JSON.stringify(adBanners)],
-  ]));
+  const saveAllSettings = () => runSave("전체 설정", async () => {
+    await saveAllPricingDbs();
+    await saveSettingsEntries([
+      ["notices_json", JSON.stringify(notices)],
+      ["notice_text", notices[0].text],
+      ["notice_on", notices[0].on],
+      ["notice_file_url", notices[0].fileUrl],
+      ["ad_banners_json", JSON.stringify(adBanners)],
+    ]);
+  });
 
   const applyNoticesAndAdsFromSettings = (s) => {
     if (s.notices_json) {
@@ -5772,16 +5825,13 @@ export default function App() {
 
     const loadSettings = async () => {
       try {
-        const deferExclude = [...HEAVY_SETTING_KEYS_LIST, ...PRICING_LIGHT_KEYS];
-        const [polCostsRows, pricingLightRows] = await Promise.all([
-          fetchSettingsByKey("pol_costs"),
-          fetchSettingsInKeys(PRICING_LIGHT_KEYS),
+        const [oceanRows] = await Promise.all([
+          fetchSettingsInKeys(OCEAN_DB_KEYS),
         ]);
         if (cancelled) return;
 
         const priority = {
-          ...settingsMapFromRows(pricingLightRows),
-          ...settingsMapFromRows(polCostsRows),
+          ...settingsMapFromRows(oceanRows),
         };
         const cached = readStoredPricingCache();
         const serverSnap = parsePricingFromSettings(priority);
@@ -5840,7 +5890,8 @@ export default function App() {
         const pendingMarginResync = !pendingMarginCacheFix
           && (marginsDiffer || marginsFutureDiffer) && cacheNewer;
 
-        priority.pol_costs = serializePolCosts(mergedCosts);
+        priority.pol_costs = serializeOceanPolCosts(mergedCosts);
+        priority.pol_portal_overrides_json = JSON.stringify(extractPortalOverrides(mergedCosts));
         if (pendingMarginCacheFix || serverMarginsEmpty) {
           priority.pol_margins = "{}";
         } else if (pendingMarginResync && cacheMargins) {
@@ -5863,7 +5914,7 @@ export default function App() {
           enqueueNetworkWrite(async () => {
             try {
               if (pendingCostResync) {
-                await saveOneSettingWithRetry("pol_costs", serializePolCosts(mergedCosts));
+        await saveOceanPolCostsBundle(mergedCosts);
               }
               if (pendingMarginCacheFix) {
                 await saveSettingsEntries([
@@ -5903,17 +5954,15 @@ export default function App() {
         setSettingsLoaded(true);
         setTimeout(() => syncRateHistoryBaseline(), 500);
 
-        const [rentalRows, carrierRows, miscRows] = await Promise.all([
-          fetchSettingsByKey("rental_rates_json"),
-          fetchSettingsByKey("carrier_rates_json"),
-          fetchSettingsExceptKeys(deferExclude),
+        const [dropRows, rentalRows] = await Promise.all([
+          fetchSettingsInKeys(DROP_DB_KEYS),
+          fetchSettingsInKeys(RENTAL_DB_KEYS),
         ]);
         if (cancelled) return;
 
         applySettingsBundle({
+          ...settingsMapFromRows(dropRows),
           ...settingsMapFromRows(rentalRows),
-          ...settingsMapFromRows(carrierRows),
-          ...settingsMapFromRows(miscRows),
         });
       } catch (err) {
         console.error("settings load failed", err);
@@ -5933,19 +5982,12 @@ export default function App() {
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
       const task = showRentalAdmin
-        ? () => saveSettingsEntries(getRentalSaveEntries())
+        ? () => saveRentalDb()
         : showFreightAdmin && freightAdminTab === "grid" && carrierAdminMode === "dropoff"
-          ? () => saveSettingsEntriesDirect(getDropOffSaveEntries())
+          ? () => saveDropDb()
           : showFreightAdmin && freightAdminTab === "grid"
-            ? () => saveSettingsEntries(getCarrierSaveEntries())
-            : async () => {
-                await saveSettingsEntries(getCarrierSaveEntries());
-                try {
-                  await saveSettingsEntries(getRentalSaveEntries());
-                } catch (e) {
-                  console.warn("rental auto-save deferred", e);
-                }
-              };
+            ? () => saveOceanDb()
+            : () => saveAllPricingDbs();
       enqueueSave(task)
         .then(() => {
           writePricingCache({
@@ -6459,26 +6501,15 @@ export default function App() {
 
   const saveCarrierPricing = () => {
     if (carrierAdminMode === "dropoff") {
-      return runSave("Drop off", () => saveSettingsEntriesDirect(getDropOffSaveEntries()));
+      return runSave(DB_LABEL[DB_DROP], () => saveDropDb());
     }
-    return runSave("선사 운임", async () => {
-      clearTimeout(autoSaveTimerRef.current);
-      const entries = getCarrierSaveEntries();
-      const light = entries.filter(([k]) => !HEAVY_SETTING_KEYS.has(k));
-      const heavy = entries.filter(([k]) => HEAVY_SETTING_KEYS.has(k));
-      for (const [key, value] of heavy) {
-        await saveOneSettingWithRetry(key, value);
-      }
-      if (light.length) {
-        await postSettingsRows(light.map(([key, value]) => ({ key, value: String(value) })), "carrier settings");
-      }
-    });
+    return runSave(DB_LABEL[DB_OCEAN], () => saveOceanDb());
   };
 
-  const saveRentalPricing = () => runSave("렌탈 운임", async () => {
+  const saveRentalPricing = () => runSave(DB_LABEL[DB_RENTAL], async () => {
     clearTimeout(autoSaveTimerRef.current);
-    await saveSettingsEntries(getRentalSaveEntries());
-    writePricingCache();
+    await saveRentalDb();
+    writePricingCache(buildPricingCache());
   });
 
   const renderNoticeFile = (fileUrl, title) => {
@@ -7378,7 +7409,10 @@ export default function App() {
         <div className="portal-sticky-top admin-sticky-top">
           <div style={{padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
             <button onClick={()=>setShowRentalAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
-            <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
+              <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV} · {DB_LABEL[DB_RENTAL]}</div>
+            </div>
             <button type="button" onClick={saveRentalPricing} disabled={saveBusy}
               style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#c4b5fd":"#7c3aed",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
               {saveBusy ? "저장 중…" : "💾 저장"}
@@ -7654,7 +7688,7 @@ export default function App() {
             <button onClick={closeFreightAdmin} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
             <div style={{textAlign:"center"}}>
               <div style={{fontSize:14,fontWeight:700,color:"#111"}}>운임 관리</div>
-              <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV} · 변경 시 자동 저장</div>
+              <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV} · {carrierAdminMode === "dropoff" ? DB_LABEL[DB_DROP] : DB_LABEL[DB_OCEAN]} · 변경 시 자동 저장</div>
             </div>
             <button type="button" onClick={saveCarrierPricing} disabled={saveBusy}
               style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#93c5fd":"#2563eb",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
@@ -7809,7 +7843,7 @@ export default function App() {
                     {CN_KR[caCr]} · Drop off · 전체 반납지
                   </div>
                   <div style={{fontSize:10,color:"#6b7280",marginTop:2}}>
-                    {isFuture ? "향후" : "현재"} · Validity 설정 후 금액 입력 · 자동 DB 저장 · 누적 {countCarrierDropValidityArchive(carrierDropRates, caCr)}구간
+                    {isFuture ? "향후" : "현재"} · {DB_LABEL[DB_DROP]} · Validity 설정 후 금액 입력 · 자동 저장 · 누적 {countCarrierDropValidityArchive(carrierDropRates, caCr)}구간
                   </div>
                 </div>
               </div>
