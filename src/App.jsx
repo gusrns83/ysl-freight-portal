@@ -1102,15 +1102,6 @@ const diffRateHistoryRows = (prevMap, nextMap, { source, note, batchId } = {}) =
       category: entry.category, cost: entry.cost, sell: entry.sell, margin: entry.margin,
     });
   });
-  prevMap?.forEach((prev, key) => {
-    if (nextMap.has(key) || prev.cost == null) return;
-    rows.push({
-      batch_id, source: source || "admin", note: note || null,
-      carrier: prev.carrier, area: prev.area || null, pol: prev.pol,
-      route: prev.route || prev.pol, rate_type: prev.rate_type, period: prev.period,
-      category: prev.category, cost: null, sell: null, margin: null,
-    });
-  });
   return rows;
 };
 
@@ -1143,6 +1134,8 @@ const deleteRateHistoryExcelUpload = async (carrier, period, category = "ocean")
 
 const buildRateHistoryQuery = (filters) => {
   const parts = ["rate_history?select=*", "order=created_at.desc", "limit=400"];
+  parts.push("source=neq.excel_delete");
+  parts.push("cost=not.is.null");
   if (filters.carrier && filters.carrier !== "ALL") parts.push(`carrier=eq.${encodeURIComponent(filters.carrier)}`);
   if (filters.area && filters.area !== "ALL") parts.push(`area=eq.${encodeURIComponent(filters.area)}`);
   if (filters.period && filters.period !== "ALL") parts.push(`period=eq.${encodeURIComponent(filters.period)}`);
@@ -3034,7 +3027,9 @@ export default function App() {
         dateFrom: rhDateFrom,
         dateTo: rhDateTo,
       }));
-      setRhRows(Array.isArray(data) ? data : []);
+      setRhRows(Array.isArray(data)
+        ? data.filter(row => row.cost != null && row.source !== "excel_delete")
+        : []);
     } catch (e) {
       const msg = String(e.message || e);
       setRhRows([]);
@@ -3210,7 +3205,6 @@ export default function App() {
         await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(next));
         pricingSaveRef.current = { ...pricingSaveRef.current, rentalRates: next };
         try { await deleteRateHistoryExcelUpload("RENTAL", period, "rental"); } catch (e) { console.warn("rate_history clear skip", e); }
-        await recordRateHistory({ source: "excel_delete", note: `렌탈 ${periodLabel} 운임 삭제 (${clearedPols.length} POL)` });
         writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now(), serverSyncedAt: Date.now() });
         setMsg(`✅ 렌탈 ${periodLabel} 운임 ${clearedPols.length}개 POL 삭제 완료`);
         loadRateHistory();
@@ -3234,10 +3228,6 @@ export default function App() {
         setCarrierDropRates(nextDrop);
         await saveOneSettingWithRetry("carrier_drop_rates_json", JSON.stringify(nextDrop));
         pricingSaveRef.current = { ...pricingSaveRef.current, carrierDropRates: nextDrop };
-        await recordRateHistory({
-          source: "excel_delete",
-          note: `${carrierLabel} ${periodLabel} Drop off 삭제`,
-        }, pricingSaveRef.current);
         writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now(), serverSyncedAt: Date.now() });
         setMsg(`✅ ${carrierLabel} ${periodLabel} Drop off ${dropN}개 도시 삭제 완료`);
         loadRateHistory();
@@ -3299,10 +3289,6 @@ export default function App() {
         carrierDropRates: nextDrop,
       };
       try { await deleteRateHistoryExcelUpload(carrierKey, period, "ocean"); } catch (e) { console.warn("rate_history clear skip", e); }
-      await recordRateHistory({
-        source: "excel_delete",
-        note: `${carrierLabel} ${periodLabel} 삭제 · 해상 ${clearedPols.length} POL${clearedDrop ? " · Drop off" : ""}`,
-      }, pricingSaveRef.current);
       writePricingCache({ ...buildPricingCache(), pricingSavedAt: Date.now(), serverSyncedAt: Date.now() });
       setMsg(`✅ ${carrierLabel} ${periodLabel} · ${parts.join(", ")} 삭제 완료`);
       loadRateHistory();
@@ -5427,7 +5413,7 @@ export default function App() {
             </table>
           </div>
           <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 12, lineHeight: 1.5 }}>
-            변경·업로드·삭제 시 Rate History에 기록됩니다. 삭제 시 매입은 <strong>—</strong>(null)로 표시됩니다.
+            변경·업로드 시 Rate History에 기록됩니다. 삭제된 운임은 목록에 표시하지 않습니다.
           </div>
         </div>
       </div>
