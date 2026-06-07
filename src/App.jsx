@@ -3530,10 +3530,9 @@ export default function App() {
   const [showMgr, setShowMgr] = useState(false);
   const [showNoticeAdmin, setShowNoticeAdmin] = useState(false);
   const [showAdAdmin, setShowAdAdmin] = useState(false);
-  const [showCarrierAdmin, setShowCarrierAdmin] = useState(false);
+  const [showFreightAdmin, setShowFreightAdmin] = useState(false);
+  const [freightAdminTab, setFreightAdminTab] = useState("grid");
   const [showRentalAdmin, setShowRentalAdmin] = useState(false);
-  const [showRateHistoryAdmin, setShowRateHistoryAdmin] = useState(false);
-  const [showExcelUploadAdmin, setShowExcelUploadAdmin] = useState(false);
   const [excelFormat, setExcelFormat] = useState("SNK");
   const [excelPeriod, setExcelPeriod] = useState("current");
   const [excelSheet, setExcelSheet] = useState("");
@@ -3567,6 +3566,7 @@ export default function App() {
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
   const [carrierAdminMode, setCarrierAdminMode] = useState("ocean");
+  const [carrierAdminPolFilter, setCarrierAdminPolFilter] = useState("");
   const [carrierEditCell, setCarrierEditCell] = useState(null);
   const [rentalAdminPeriod, setRentalAdminPeriod] = useState("current");
   const [selReturnCity, setSelReturnCity] = useState("");
@@ -3579,6 +3579,16 @@ export default function App() {
   const isAdmin = mode === "admin";
   const isClient = mode === "client";
   const isGuest = mode === "guest";
+
+  const carrierGridAreaGroups = useMemo(() => {
+    const q = carrierAdminPolFilter.trim().toLowerCase();
+    if (!q) return carrierAreaGroups;
+    return carrierAreaGroups
+      .map(g => ({ ...g, rows: g.rows.filter(r => r.pol.toLowerCase().includes(q)) }))
+      .filter(g => g.rows.length);
+  }, [carrierAreaGroups, carrierAdminPolFilter]);
+
+  const closeFreightAdmin = () => setShowFreightAdmin(false);
 
   pricingSaveRef.current = {
     polCostO,
@@ -3709,6 +3719,52 @@ export default function App() {
       setRhLoading(false);
     }
   };
+
+  const jumpToFreightGridFromRh = (row) => {
+    if (row.category !== "ocean" || !CRS.includes(row.carrier)) return;
+    setFreightAdminTab("grid");
+    setCarrierAdminCr(row.carrier);
+    setCarrierAdminPeriod(row.period === "future" ? "future" : "current");
+    setCarrierAdminMode("ocean");
+    setCarrierAdminPolFilter(row.pol || "");
+    if (RATE_TYPES.includes(row.rate_type)) {
+      setCarrierEditCell(`${row.pol}:${row.rate_type}`);
+    }
+    setRhSelectMsg(`→ 현재 운임: ${CN_KR[row.carrier] || row.carrier} · ${row.pol} · ${row.rate_type}`);
+  };
+
+  const openFreightAdmin = (tab = "grid") => {
+    setShowFreightAdmin(true);
+    setFreightAdminTab(tab);
+    if (tab === "grid") {
+      setCarrierAdminPolFilter("");
+      setCarrierEditCell(null);
+    }
+    if (tab === "history") loadRateHistory();
+  };
+
+  const freightAdminTabBar = (
+    <div style={{ display: "flex", gap: 6, padding: "10px 16px 12px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
+      {[["grid", "현재 운임", "#1e40af"], ["history", "변경 이력", "#0f766e"], ["upload", "Excel 업로드", "#b45309"]].map(([id, label, color]) => (
+        <button
+          key={id}
+          type="button"
+          onClick={() => {
+            setFreightAdminTab(id);
+            if (id === "history") loadRateHistory();
+          }}
+          style={{
+            flex: 1, padding: "10px 8px", fontSize: 11, fontWeight: 700, borderRadius: 8, border: "none", cursor: "pointer",
+            background: freightAdminTab === id ? color : "#f3f4f6",
+            color: freightAdminTab === id ? "#fff" : "#6b7280",
+            boxShadow: freightAdminTab === id ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+          }}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
+  );
 
   const parseExcelWorkbook = (workbook, format, sheetName, period, yslCarrier) => {
     const sheet = sheetName || suggestSheet(format, workbook.sheetNames);
@@ -3843,7 +3899,8 @@ export default function App() {
           }
           await postRateHistoryRows(rhRaw.map(r => ({ ...r, batch_id: batchId })));
           rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
-          if (showRateHistoryAdmin) loadRateHistory();
+          setFreightAdminTab("history");
+          loadRateHistory();
         } catch (e) {
           console.warn("Rate History 기록 생략 (매입 저장은 완료됨):", e);
         }
@@ -4786,8 +4843,8 @@ export default function App() {
   }, [excelFormat, excelPeriod, excelYslCarrier, validityInfo]);
 
   useEffect(() => {
-    if (showExcelUploadAdmin) syncExcelValidityDraft();
-  }, [showExcelUploadAdmin, syncExcelValidityDraft]);
+    if (showFreightAdmin && freightAdminTab === "upload") syncExcelValidityDraft();
+  }, [showFreightAdmin, freightAdminTab, syncExcelValidityDraft]);
 
   const updateExcelValidityDraft = (_carrier, period, field, value) => {
     setExcelValidityDraft(prev => {
@@ -5338,7 +5395,7 @@ export default function App() {
     writePricingCache(buildPricingCache());
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
-      const task = showCarrierAdmin
+      const task = showFreightAdmin && freightAdminTab === "grid"
         ? () => saveSettingsEntries(getCarrierSaveEntries())
         : showRentalAdmin
           ? () => saveSettingsEntries(getRentalSaveEntries())
@@ -5368,7 +5425,8 @@ export default function App() {
   }, [
     isAdmin,
     saveBusy,
-    showCarrierAdmin,
+    showFreightAdmin,
+    freightAdminTab,
     showRentalAdmin,
     polCostO,
     margins,
@@ -5931,8 +5989,8 @@ export default function App() {
     </div>
   );
 
-  // ── EXCEL UPLOAD ADMIN ──
-  if (showExcelUploadAdmin && isAdmin) {
+  // ── EXCEL UPLOAD (운임 관리 · Excel 탭) ──
+  if (showFreightAdmin && freightAdminTab === "upload" && isAdmin) {
     const fmt = UPLOAD_FORMATS.find(f => f.id === excelFormat);
     const sum = excelPreview ? previewSummary(excelPreview, excelPeriod) : null;
     const uploadCarrierKey = excelUploadCarrierKey(excelFormat, excelYslCarrier, excelPreview);
@@ -5941,13 +5999,16 @@ export default function App() {
     return (
       <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: ff }}>
         {adminSaveToastEl}
-        <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", zIndex: 30 }}>
-          <button type="button" onClick={() => setShowExcelUploadAdmin(false)} style={{ fontSize: 13, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>← Back</button>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#b45309" }}>Excel 운임 업로드</div>
-          <button type="button" onClick={applyExcelUpload} disabled={!excelPreview || saveBusy || excelUploading}
-            style={{ fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 8, background: !excelPreview || saveBusy ? "#fcd34d" : "#d97706", color: "#fff", border: "none", cursor: !excelPreview || saveBusy ? "not-allowed" : "pointer" }}>
-            {saveBusy ? "저장 중…" : "업로드"}
-          </button>
+        <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e5e7eb", zIndex: 30 }}>
+          <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <button type="button" onClick={closeFreightAdmin} style={{ fontSize: 13, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>← Back</button>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>운임 관리</div>
+            <button type="button" onClick={applyExcelUpload} disabled={!excelPreview || saveBusy || excelUploading}
+              style={{ fontSize: 11, fontWeight: 700, padding: "6px 12px", borderRadius: 8, background: !excelPreview || saveBusy ? "#fcd34d" : "#d97706", color: "#fff", border: "none", cursor: !excelPreview || saveBusy ? "not-allowed" : "pointer" }}>
+              {saveBusy ? "저장 중…" : "업로드"}
+            </button>
+          </div>
+          {freightAdminTabBar}
         </div>
         <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 80px" }}>
           <div style={{ fontSize: 11, color: "#92400e", marginBottom: 12, lineHeight: 1.5 }}>
@@ -6071,8 +6132,8 @@ export default function App() {
     );
   }
 
-  // ── RATE HISTORY ADMIN ──
-  if (showRateHistoryAdmin && isAdmin) {
+  // ── RATE HISTORY (운임 관리 · 이력 탭) ──
+  if (showFreightAdmin && freightAdminTab === "history" && isAdmin) {
     const fmtRhDate = (iso) => {
       if (!iso) return "—";
       try {
@@ -6117,12 +6178,15 @@ export default function App() {
     return (
       <div style={{ minHeight: "100vh", background: "#f8fafc", fontFamily: ff }}>
         {adminSaveToastEl}
-        <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e5e7eb", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", zIndex: 30 }}>
-          <button type="button" onClick={() => setShowRateHistoryAdmin(false)} style={{ fontSize: 13, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>← Back</button>
-          <div style={{ fontSize: 14, fontWeight: 700, color: "#0f766e" }}>Rate History</div>
-          <button type="button" onClick={loadRateHistory} disabled={rhLoading} style={{ fontSize: 11, fontWeight: 700, padding: "6px 10px", borderRadius: 8, background: rhLoading ? "#99f6e4" : "#0d9488", color: "#fff", border: "none", cursor: rhLoading ? "not-allowed" : "pointer" }}>
-            {rhLoading ? "…" : "검색"}
-          </button>
+        <div style={{ position: "sticky", top: 0, background: "#fff", borderBottom: "1px solid #e5e7eb", zIndex: 30 }}>
+          <div style={{ padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <button type="button" onClick={closeFreightAdmin} style={{ fontSize: 13, color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>← Back</button>
+            <div style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>운임 관리</div>
+            <button type="button" onClick={loadRateHistory} disabled={rhLoading} style={{ fontSize: 11, fontWeight: 700, padding: "6px 10px", borderRadius: 8, background: rhLoading ? "#99f6e4" : "#0d9488", color: "#fff", border: "none", cursor: rhLoading ? "not-allowed" : "pointer" }}>
+              {rhLoading ? "…" : "검색"}
+            </button>
+          </div>
+          {freightAdminTabBar}
         </div>
         <div style={{ maxWidth: 960, margin: "0 auto", padding: "16px 16px 80px" }}>
           <div style={{ background: "#fff", border: "1px solid #e5e7eb", borderRadius: 12, padding: 14, marginBottom: 12 }}>
@@ -6309,6 +6373,8 @@ export default function App() {
                   <tr
                     key={row.id}
                     onClick={() => toggleRhRowSelect(row.id)}
+                    onDoubleClick={() => jumpToFreightGridFromRh(row)}
+                    title={row.category === "ocean" && CRS.includes(row.carrier) ? "더블클릭 → 현재 운임 탭에서 편집" : undefined}
                     style={{
                       borderBottom: "1px solid #f3f4f6",
                       background: selected ? "#fffbeb" : "#fff",
@@ -6346,7 +6412,7 @@ export default function App() {
             </table>
           </div>
           <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 12, lineHeight: 1.5 }}>
-            행 클릭 또는 오른쪽 체크박스로 선택 · <strong>선택 기록 삭제</strong>는 Rate History + Supabase 운임 DB(pol_costs)에서 해당 POL·타입을 제거합니다. Validity는 선사·기간별 저장값입니다.
+            행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → 현재 운임 탭에서 해당 POL 편집 · <strong>선택 기록 삭제</strong>는 Rate History + Supabase 운임 DB(pol_costs)에서 해당 POL·타입을 제거합니다.
           </div>
         </div>
       </div>
@@ -6884,16 +6950,19 @@ export default function App() {
     );
   }
 
-  // ── CARRIER RATES ADMIN ──
-  if (showCarrierAdmin && isAdmin) {
+  // ── CARRIER RATES (운임 관리 · 현재 운임 탭) ──
+  if (showFreightAdmin && freightAdminTab === "grid" && isAdmin) {
     if (!settingsLoaded) {
       return (
         <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
           {adminSaveToastEl}
-          <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
-            <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
-            <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
-            <div style={{width:48}}/>
+          <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",zIndex:30}}>
+            <div style={{padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <button onClick={closeFreightAdmin} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+              <div style={{fontSize:14,fontWeight:700,color:"#111"}}>운임 관리</div>
+              <div style={{width:48}}/>
+            </div>
+            {freightAdminTabBar}
           </div>
           <RatesLoading />
         </div>
@@ -6913,7 +6982,7 @@ export default function App() {
       if (cost == null) return;
       applyCarrierDropMargin(caCr, cityKey, si, sell - cost);
     };
-    const filteredCarrierAreaGroups = carrierAreaGroups;
+    const filteredCarrierAreaGroups = carrierGridAreaGroups;
     const gridPolCount = filteredCarrierAreaGroups.reduce((n, g) => n + g.rows.length, 0);
     const gridFilterLabel = `${gridPolCount}개 POL (전체)`;
     const griTargetRows = griScopeTab === "area" && griSelAreas.length > 0
@@ -7033,9 +7102,9 @@ export default function App() {
         {adminSaveToastEl}
         <div className="portal-sticky-top admin-sticky-top">
           <div style={{padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
-            <button onClick={()=>setShowCarrierAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+            <button onClick={closeFreightAdmin} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
             <div style={{textAlign:"center"}}>
-              <div style={{fontSize:14,fontWeight:700,color:"#1e40af"}}>선사별 운임</div>
+              <div style={{fontSize:14,fontWeight:700,color:"#111"}}>운임 관리</div>
               <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>{ADMIN_SAVE_REV} · 변경 시 자동 저장</div>
             </div>
             <button type="button" onClick={saveCarrierPricing} disabled={saveBusy}
@@ -7043,6 +7112,7 @@ export default function App() {
               {saveBusy ? "저장 중…" : "💾 저장"}
             </button>
           </div>
+          {freightAdminTabBar}
           <div className="carrier-admin-page" onClick={e => e.stopPropagation()}>
             <div style={{display:"flex",background:"#eff6ff",borderRadius:10,padding:3,marginBottom:8}}>
               {CRS.map(k=>(
@@ -7075,6 +7145,15 @@ export default function App() {
                 </button>
               ))}
             </div>
+            {carrierAdminPolFilter && (
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, padding: "6px 10px", background: "#eff6ff", borderRadius: 8, fontSize: 11 }}>
+                <span style={{ color: "#1e40af", fontWeight: 600 }}>POL 필터: {carrierAdminPolFilter}</span>
+                <button type="button" onClick={() => { setCarrierAdminPolFilter(""); setCarrierEditCell(null); }}
+                  style={{ marginLeft: "auto", fontSize: 10, padding: "2px 8px", borderRadius: 6, border: "1px solid #93c5fd", background: "#fff", color: "#2563eb", cursor: "pointer" }}>
+                  필터 해제
+                </button>
+              </div>
+            )}
           </div>
         </div>
         <div className="carrier-admin-page" onClick={e => e.stopPropagation()}>
@@ -7600,10 +7679,8 @@ export default function App() {
           <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",justifyContent:"flex-end",maxWidth:"62%"}}>
             {isAdmin && (
               <>
-                <button onClick={()=>setShowCarrierAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#1e40af",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>선사운임</button>
+                <button onClick={() => openFreightAdmin("grid")} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#1e40af",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>운임관리</button>
                 <button onClick={()=>setShowRentalAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#7c3aed",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>렌탈운임</button>
-                <button onClick={()=>setShowExcelUploadAdmin(true)} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#d97706",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>Excel</button>
-                <button onClick={()=>{setShowRateHistoryAdmin(true);}} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:20,background:"#0d9488",color:"#fff",border:"none",cursor:"pointer",whiteSpace:"nowrap"}}>Rate History</button>
                 <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer",whiteSpace:"nowrap"}}>Notice</button>
                 <button onClick={()=>setShowAdAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa",cursor:"pointer",whiteSpace:"nowrap"}}>광고</button>
                 <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer",whiteSpace:"nowrap"}}>Clients</button>
@@ -7686,21 +7763,13 @@ export default function App() {
             <RatesLoading />
           ) : (
           <>
-          <button type="button" onClick={()=>setShowCarrierAdmin(true)}
+          <button type="button" onClick={() => openFreightAdmin("grid")}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#1e40af",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            선사별 운임 관리 (매입 · 매출 · 마진)
-          </button>
-          <button type="button" onClick={()=>setShowExcelUploadAdmin(true)}
-            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#d97706",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            Excel 운임 업로드 (선사 원본 · YSL 양식)
+            운임 관리 (현재 · 변경 이력 · Excel)
           </button>
           <button type="button" onClick={()=>setShowRentalAdmin(true)}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#7c3aed",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
             컨테이너 Rental 운임 관리 (매입 · 매출 · 마진)
-          </button>
-          <button type="button" onClick={()=>{ setShowRateHistoryAdmin(true); loadRateHistory(); }}
-            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#0d9488",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
-            Rate History (운임 변경 이력)
           </button>
           <button type="button" onClick={()=>setShowAdAdmin(true)}
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#ea580c",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
