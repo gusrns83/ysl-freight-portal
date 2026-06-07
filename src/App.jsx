@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = true; // 검토용 — 배포 전 false 로 변경
-const ADMIN_SAVE_REV = "save-v47"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v48"; // Admin 저장 로직 버전 (배포 확인용)
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
@@ -4819,6 +4819,50 @@ export default function App() {
     });
   };
 
+  const applyBackfillDropRateHistory = () => {
+    setRhSelectMsg("");
+    const snap = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
+    const existingKeys = new Set(rhRows.map(r => rateHistoryEntryKey(r)));
+    const batch_id = typeof crypto !== "undefined" && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `batch-${Date.now()}`;
+    const rows = [];
+    snap.forEach((entry) => {
+      if (entry.category !== "dropoff") return;
+      if (existingKeys.has(rateHistoryEntryKey(entry))) return;
+      rows.push({
+        batch_id,
+        source: "admin_save",
+        note: "Drop off 누락 보완",
+        carrier: entry.carrier,
+        area: entry.area || null,
+        pol: entry.pol,
+        route: entry.route || entry.pol,
+        rate_type: entry.rate_type,
+        period: entry.period,
+        category: entry.category,
+        cost: entry.cost,
+        sell: entry.sell,
+        margin: entry.margin,
+      });
+    });
+    if (!rows.length) {
+      setRhSelectMsg("Drop off 누락 이력 없음 · 화면·DB와 이력 키가 일치합니다");
+      return;
+    }
+    const preview = rows.slice(0, 4).map(r =>
+      `${r.pol} ${r.rate_type === "drop20" ? "20'" : "40'"} ${r.period === "future" ? "향후" : "현재"}`,
+    ).join(", ");
+    setRhSelectMsg(`Drop off ${rows.length}건 이력 보완 중… (${preview}${rows.length > 4 ? " …" : ""})`);
+    postRateHistoryRows(rows)
+      .then((count) => {
+        rateHistoryBaselineRef.current = snap;
+        setRhSelectMsg(`✅ Drop off ${count || rows.length}건 이력 보완 · Admin에 있는 값(예: Moscow 20' Drop) 반영`);
+        loadRateHistory();
+      })
+      .catch(e => setRhSelectMsg(`Drop off 보완 실패: ${e.message}`));
+  };
+
   const applyFindRhDuplicates = () => {
     setRhSelectMsg("");
     const { removeIds, keepIds, groupCount, removeCount, highlightIds } = pickRateHistoryDuplicatesToRemove(rhRows);
@@ -6125,7 +6169,6 @@ export default function App() {
         }
 
         setSettingsLoaded(true);
-        setTimeout(() => syncRateHistoryBaseline(), 500);
 
         const [dropRows, rentalRows, miscRows] = await Promise.all([
           fetchSettingsInKeys(DROP_DB_KEYS),
@@ -6139,6 +6182,8 @@ export default function App() {
           ...settingsMapFromRows(rentalRows),
           ...settingsMapFromRows(miscRows),
         });
+        // Drop/Rental DB 로드 후 baseline — 이전에는 500ms만 기다려 Moscow drop20 등 변경이 이력에 안 남을 수 있음
+        setTimeout(() => syncRateHistoryBaseline(), 400);
       } catch (err) {
         console.error("settings load failed", err);
         setSettingsLoaded(true);
@@ -7046,6 +7091,16 @@ export default function App() {
                   </button>
                 </>
               )}
+              {!rhIsRental && (
+                <button
+                  type="button"
+                  onClick={applyBackfillDropRateHistory}
+                  disabled={rhLoading}
+                  style={{ fontSize: 11, fontWeight: 600, padding: "6px 10px", borderRadius: 8, border: "1px solid #a7f3d0", background: "#ecfdf5", color: "#047857", cursor: rhLoading ? "not-allowed" : "pointer" }}
+                >
+                  Drop 누락 보완
+                </button>
+              )}
               <button
                 type="button"
                 onClick={applyFindRhDuplicates}
@@ -7164,7 +7219,11 @@ export default function App() {
                       <div style={{ fontWeight: 600 }}>{row.pol}</div>
                       {row.route && row.route !== row.pol && <div style={{ fontSize: 9, color: "#9ca3af" }}>{row.route}</div>}
                     </td>
-                    <td style={{ padding: "7px 6px" }}>{row.rate_type}</td>
+                    <td style={{ padding: "7px 6px" }} title={row.category === "dropoff" ? "Drop off 추가요금 (해상운임 제외)" : row.rate_type}>
+                      {row.category === "dropoff"
+                        ? (row.rate_type === "drop40" ? "40' Drop" : "20' Drop")
+                        : row.rate_type}
+                    </td>
                     <td style={{ padding: "7px 6px" }}>{row.period === "future" ? "향후" : "현재"}</td>
                     <td style={{ padding: "7px 6px", textAlign: "center", whiteSpace: "nowrap", fontSize: 10, color: "#0f766e", fontWeight: 600 }} title={formatValiditySlotLabel(validityInfo[row.carrier]?.[row.period === "future" ? "future" : "current"])}>
                       {rhValidityForRow(row)}
@@ -7191,7 +7250,7 @@ export default function App() {
             {rhIsRental ? (
               <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → Rental 운임 탭에서 해당 POL·반납지 편집 · <strong>중복 찾기</strong>는 동일 POL·타입·매입·매출·마진 기록을 묶어 삭제 후보를 선택합니다 · <strong>이력만 삭제</strong>는 Rate History만 지우고 Rental DB는 유지 · <strong>선택 기록 삭제</strong>는 이력 + Rental DB 셀 제거.</>
             ) : (
-              <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → 현재 운임 탭에서 해당 POL 편집 · <strong>중복 찾기</strong>는 자동저장·Excel 등 동일 운임값 기록을 찾아 삭제 후보(분홍)를 선택 · 유지(녹색)는 Excel &gt; Admin &gt; 자동저장 우선 · <strong>이력만 삭제</strong>는 DB 유지 · <strong>선택 기록 삭제</strong>는 이력 + pol_costs 제거.</>
+              <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → 현재 운임 탭에서 해당 POL 편집 · Drop 이력 <strong>20'/40' Drop</strong> = Admin Drop off 표의 매입·매출(해상운임 합산 아님) · <strong>Drop 누락 보완</strong> = Admin에 있는데 이력에 없는 Drop 셀 등록 · <strong>중복 찾기</strong> · <strong>이력만 삭제</strong>는 DB 유지.</>
             )}
           </div>
         </div>
