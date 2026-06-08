@@ -200,11 +200,27 @@ const PDF_DROP = {
   Minsk: [500, 500],
 };
 
+// PDF_DROP 도시명 → 엑셀 헤더 도시명 매핑
+const PDF_CITY_TO_EXCEL = {
+  Moscow: "Moscow",
+  Chelyabinsk: "Chelyabinsk",
+  Novosibirsk: "Novosibirsk",
+  Irkutsk: "Irkutsk",
+  Krasnoyarsk: "Krasnoyarsk",
+  Ekaterinburg: "Ekaterinburg",
+  Vladivostok: "Vladivostok",
+  "St.Petersburg": "Saint-Petersburg",
+  Samara: "Samara",
+  Tolyatti: "Tolyatti",
+  Kazan: "Kazan",
+  Minsk: "Minsk",
+};
+
 export const UPLOAD_FORMATS = [
-  { id: "SNK", label: "장금상선 (SKR-YSL)", hint: "NET/SELL/PROFIT 시트 · Vladivostok 등" },
-  { id: "DY", label: "동영 (Fishery Import)", hint: "Import 시트 · 해상 + Drop off" },
-  { id: "CK", label: "천경 (CK Line)", hint: "첫 시트 · COC/SOC 열" },
-  { id: "YSL", label: "YSL 관리양식", hint: "SNK/DY/CK 선사 시트 · NET(C~F)" },
+  { id: "SNK", label: "장금상선 (SKR-YSL)", hint: "「Vladivostok … (업로드용)」· NET+매출" },
+  { id: "DY", label: "동영 (Fishery Import)", hint: "「Import (업로드용)」· NET+매출 · Import=Drop 포함" },
+  { id: "CK", label: "천경 (CK Line)", hint: "「CKL Guidance Rate (업로드용)」· NET+매출" },
+  { id: "YSL", label: "YSL 관리양식", hint: "SNK/DY/CK 선사 시트 · NET(C~F) 매입만" },
   { id: "RENTAL", label: "컨테이너 Rental", hint: "극동 컨테이너 운임 · POL별 base" },
 ];
 
@@ -245,44 +261,160 @@ export async function readExcelFile(file) {
 }
 
 function detectSnkColumns(rows) {
-  for (let r = 0; r < 7; r++) {
-    const vals = [];
-    for (let c = 0; c < 20; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
-    if (vals.includes("NET") && vals.includes("SELL") && vals.includes("PROFIT")) {
-      const netI = vals.indexOf("NET");
-      const profitI = vals.indexOf("PROFIT");
-      const nextRow = cell(rows, r + 1, netI);
-      const dataStart = nextRow == null || nextRow === "COC" || nextRow === "FILO / COC" ? r + 4 : r + 3;
-      return {
-        dataStart,
-        areaCol: 0,
-        polCol: 1,
-        netStart: netI,
-        profitStart: profitI,
-      };
+  const pickDataStart = (headerRow, netI) => {
+    const nextRow = cell(rows, headerRow + 1, netI);
+    const tag = String(nextRow ?? "").trim().toUpperCase();
+    return nextRow == null || tag === "COC" || tag === "FILO / COC" ? headerRow + 4 : headerRow + 3;
+  };
+
+  const findAreaPolRow = (fromRow, toRow) => {
+    for (let r2 = fromRow; r2 < toRow; r2++) {
+      const h = (rows[r2] || []).map(c => String(c ?? "").trim().toUpperCase());
+      const areaI = h.indexOf("AREA");
+      const polI = h.findIndex(t => t === "POL" || /^POL\b/.test(t));
+      if (areaI >= 0 && polI >= 0) {
+        let dataStart = r2 + 1;
+        const sizeRow = rows[r2 + 1] || [];
+        const hasSizes = sizeRow.some(c => {
+          const t = String(c ?? "").trim();
+          return t === "20'" || t === "20" || t === "40'" || t === "40";
+        });
+        if (hasSizes) dataStart = r2 + 2;
+        return { areaCol: areaI, polCol: polI, dataStart };
+      }
     }
-  }
+    return null;
+  };
+
   for (let r = 0; r < 7; r++) {
     const vals = [];
     for (let c = 0; c < 22; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
     if (vals.includes("NET") && vals.includes("SELL") && vals.includes("PROFIT")) {
       const netI = vals.indexOf("NET");
-      const profitI = vals.indexOf("PROFIT");
-      return { dataStart: 6, areaCol: 1, polCol: 2, netStart: netI, profitStart: profitI };
+      const sellI = vals.indexOf("SELL");
+      const ap = findAreaPolRow(r + 1, Math.min(r + 5, rows.length));
+      return {
+        dataStart: ap?.dataStart ?? pickDataStart(r, netI),
+        areaCol: ap?.areaCol ?? 0,
+        polCol: ap?.polCol ?? 1,
+        netStart: netI,
+        sellStart: sellI,
+      };
     }
   }
-  throw new Error("NET/SELL/PROFIT 헤더를 찾을 수 없습니다 (장금상선 양식 확인)");
+
+  for (let r = 0; r < 10; r++) {
+    const rawVals = [];
+    for (let c = 0; c < 22; c++) rawVals.push(String(cell(rows, r, c) ?? "").trim());
+    const vals = rawVals.map(v => v.toUpperCase());
+    if (!vals.includes("NET") || vals.includes("PROFIT")) continue;
+    if (vals.includes("SELL") && vals.includes("PROFIT")) continue;
+    const netI = vals.indexOf("NET");
+    const sellI = vals.indexOf("SELL");
+    const sellK = rawVals.findIndex(v => /매출|SELL/i.test(v));
+    let sellStart = sellI >= 0 ? sellI : (sellK >= 0 ? sellK : undefined);
+    const ap = findAreaPolRow(r + 1, Math.min(r + 5, rows.length));
+    if (ap) {
+      if (sellStart == null) {
+        for (let sr = ap.dataStart - 2; sr <= ap.dataStart - 1 && sr >= 0; sr++) {
+          const c20s = (rows[sr] || []).map((c, i) => (is20SizeToken(c) ? i : -1)).filter(i => i >= 0);
+          if (c20s.length >= 2) { sellStart = c20s[1]; break; }
+        }
+        if (sellStart == null) sellStart = netI + 5;
+      }
+      return { ...ap, netStart: netI, sellStart };
+    }
+  }
+
+  for (let r = 0; r < 7; r++) {
+    const vals = [];
+    for (let c = 0; c < 22; c++) vals.push(String(cell(rows, r, c) ?? "").trim().toUpperCase());
+    if (vals.includes("NET") && vals.includes("SELL") && vals.includes("PROFIT")) {
+      const netI = vals.indexOf("NET");
+      const sellI = vals.indexOf("SELL");
+      return { dataStart: 6, areaCol: 1, polCol: 2, netStart: netI, sellStart: sellI };
+    }
+  }
+
+  throw new Error("NET/SELL/PROFIT 헤더를 찾을 수 없습니다 · 「Vladivostok 06.01 (업로드용)」 시트를 선택하세요");
 }
 
-export function parseSnkSheet(rows) {
-  const cols = detectSnkColumns(rows);
+const isSnkLegacyTransitSheet = (rows) => {
+  for (let r = 0; r < Math.min(20, rows.length); r++) {
+    const row = rows[r] || [];
+    if (row.some(c => /L\.AREA|POL\s*NAME|POR\s*NAME/i.test(String(c ?? "").replace(/\n/g, " ")))) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const readRateQuadruple = (rows, r, startCol) => {
+  if (startCol == null || startCol < 0) return {};
+  return Object.fromEntries(
+    RATE_TYPES.map((t, i) => [t, num(cell(rows, r, startCol + i))]).filter(([, v]) => v != null),
+  );
+};
+
+const is20SizeToken = (v) => {
+  const s = String(v ?? "").trim().replace(/\s+/g, " ");
+  const u = s.toUpperCase();
+  return (s === "20'" || s === "20" || u === "20'") && !u.includes("REF");
+};
+
+function detectDualNetSellGrid(rows) {
+  let polCol = 1;
+  for (let r = 0; r < Math.min(20, rows.length); r++) {
+    const row = rows[r] || [];
+    const upper = row.map(c => String(c ?? "").trim().toUpperCase());
+    const polI = upper.findIndex(t => t === "POL" || /^POL\b/.test(t));
+    if (polI >= 0) polCol = polI;
+    if (upper.some(t => t.includes("DROP OFF"))) continue;
+
+    const c20cols = upper.map((t, i) => (is20SizeToken(row[i]) ? i : -1)).filter(i => i >= 0);
+    const hasRef = upper.some(t => t.includes("REF"));
+    if (c20cols.length >= 4 && !hasRef) {
+      return { polCol, netStart: c20cols[0], sellStart: c20cols[2], dataStart: r + 1 };
+    }
+  }
+  return null;
+};
+
+function parsePolNetSellGrid(rows, cols, carrier, resolvePol) {
   const netRows = {};
-  const marginRows = {};
+  const sellRows = {};
+  const skipped = [];
+
+  for (let r = cols.dataStart; r < rows.length; r++) {
+    const raw = cell(rows, r, cols.polCol);
+    if (raw == null) continue;
+    const name = String(raw).trim();
+    if (!name || /^(remark|note|\*|-)/i.test(name)) continue;
+
+    const portal = resolvePol(name);
+    if (portal == null) {
+      skipped.push(name);
+      continue;
+    }
+
+    const costs = readRateQuadruple(rows, r, cols.netStart);
+    const sells = cols.sellStart != null ? readRateQuadruple(rows, r, cols.sellStart) : {};
+    if (!Object.keys(costs).length && !Object.keys(sells).length) continue;
+
+    if (Object.keys(costs).length) netRows[portal] = costs;
+    if (Object.keys(sells).length) sellRows[portal] = sells;
+  }
+  return { netRows, sellRows, skipped, carrier };
+}
+
+function parseOceanNetSellRows(rows, cols, carrier) {
+  const netRows = {};
+  const sellRows = {};
   const skipped = [];
   let currentArea = null;
 
   for (let r = cols.dataStart; r < rows.length; r++) {
-    const areaCell = cell(rows, r, cols.areaCol);
+    const areaCell = cols.areaCol != null ? cell(rows, r, cols.areaCol) : null;
     if (areaCell != null && String(areaCell).trim()) currentArea = String(areaCell).trim();
 
     let polName = cell(rows, r, cols.polCol);
@@ -294,33 +426,29 @@ export function parseSnkSheet(rows) {
 
     if (reSkipSnk(polName)) continue;
 
-    const net = {
-      coc20: num(cell(rows, r, cols.netStart)),
-      coc40: num(cell(rows, r, cols.netStart + 1)),
-      soc20: num(cell(rows, r, cols.netStart + 2)),
-      soc40: num(cell(rows, r, cols.netStart + 3)),
-    };
-    const profit = {
-      coc20: num(cell(rows, r, cols.profitStart)),
-      coc40: num(cell(rows, r, cols.profitStart + 1)),
-      soc20: num(cell(rows, r, cols.profitStart + 2)),
-      soc40: num(cell(rows, r, cols.profitStart + 3)),
-    };
-
-    if (RATE_TYPES.every(t => net[t] == null)) continue;
+    const costs = readRateQuadruple(rows, r, cols.netStart);
+    const sells = readRateQuadruple(rows, r, cols.sellStart);
+    if (!Object.keys(costs).length && !Object.keys(sells).length) continue;
 
     let mapped = false;
     for (const portal of expandSnkPol(polName)) {
       if (!APP_POLS.has(portal)) continue;
       mapped = true;
-      const costs = Object.fromEntries(RATE_TYPES.filter(t => net[t] != null).map(t => [t, net[t]]));
       if (Object.keys(costs).length) netRows[portal] = costs;
-      const margins = Object.fromEntries(RATE_TYPES.filter(t => profit[t] != null).map(t => [t, profit[t]]));
-      if (Object.keys(margins).length) marginRows[portal] = margins;
+      if (Object.keys(sells).length) sellRows[portal] = sells;
     }
     if (!mapped) skipped.push(polName);
   }
-  return { netRows, marginRows, skipped, carrier: "SNK" };
+  return { netRows, sellRows, skipped, carrier };
+}
+
+export function parseSnkSheet(rows) {
+  if (isSnkLegacyTransitSheet(rows)) {
+    throw new Error("구형 Vladivostok/TO RUSSIA 양식입니다 · 「Vladivostok 06.01 (업로드용)」 시트를 선택하세요");
+  }
+  const cols = detectSnkColumns(rows);
+  const parsed = parseOceanNetSellRows(rows, cols, "SNK");
+  return { ...parsed, marginRows: {} };
 }
 
 function mapDyPol(raw) {
@@ -330,6 +458,13 @@ function mapDyPol(raw) {
 }
 
 export function parseDySheet(rows) {
+  const dual = detectDualNetSellGrid(rows);
+  if (dual) {
+    const resolvePol = (name) => mapDyPol(name);
+    const { netRows, sellRows, skipped } = parsePolNetSellGrid(rows, dual, "DY", resolvePol);
+    return { oceanRows: netRows, sellRows, dropRows: {}, skipped, carrier: "DY" };
+  }
+
   const DATA_START = 6;
   const POL_COL = 1;
   const oceanRows = {};
@@ -372,43 +507,104 @@ export function parseDySheet(rows) {
   return { oceanRows, dropRows, skipped, carrier: "DY" };
 }
 
-export function parseCkSheet(rows) {
+function detectCkColumns(rows) {
+  let polCol = 1;
+  let coc20Col = 2;
+  let coc40Col = 3;
+  let soc20Col = 13;
+  let soc40Col = 14;
+  let dataStart = 8;
+  let socAnchorCol = -1;
+
+  for (let r = 0; r < Math.min(15, rows.length); r++) {
+    const row = rows[r] || [];
+    const upper = row.map(c => String(c ?? "").trim().toUpperCase());
+
+    const polI = upper.indexOf("POL");
+    if (polI >= 0) polCol = polI;
+
+    const socI = upper.findIndex(t => /IMPORT\s*SOC/.test(t));
+    if (socI >= 0) socAnchorCol = socI;
+
+    const isSizeRow = upper.some(t => t === "20'" || t === "20");
+    const hasDropLabel = upper.some(t => t.includes("DROP OFF"));
+    if (!isSizeRow || hasDropLabel) continue;
+
+    const firstC20 = upper.findIndex(t => t === "20'" || t === "20");
+    if (firstC20 >= 0) {
+      coc20Col = firstC20;
+      coc40Col = firstC20 + 1;
+      dataStart = r + 1;
+    }
+    if (socAnchorCol >= 0) {
+      const soc20 = upper.findIndex((t, i) => i >= socAnchorCol && (t === "20'" || t === "20"));
+      if (soc20 >= 0) {
+        soc20Col = soc20;
+        soc40Col = soc20 + 1;
+      }
+    }
+  }
+
+  return { polCol, coc20Col, coc40Col, soc20Col, soc40Col, dataStart };
+}
+
+function parseCkOceanRows(rows, cols, resolvePol) {
   const netRows = {};
   const skipped = [];
 
-  for (let r = 7; r < rows.length; r++) {
-    const raw = cell(rows, r, 1);
+  for (let r = cols.dataStart; r < rows.length; r++) {
+    const raw = cell(rows, r, cols.polCol);
     if (raw == null) continue;
     const name = String(raw).trim();
     if (!name || /^(remark|note|\*|-)/i.test(name)) continue;
 
-    const portal = CK_POL_MAP[name];
+    const portal = resolvePol(name);
     if (portal == null) {
-      if (!(name in CK_POL_MAP)) skipped.push(name);
-      continue;
-    }
-    if (!APP_POLS.has(portal)) {
-      skipped.push(`${name} -> ${portal}`);
+      skipped.push(name);
       continue;
     }
 
     const rates = Object.fromEntries(
       Object.entries({
-        coc20: num(cell(rows, r, 2)),
-        coc40: num(cell(rows, r, 3)),
-        soc20: num(cell(rows, r, 13)),
-        soc40: num(cell(rows, r, 14)),
+        coc20: num(cell(rows, r, cols.coc20Col)),
+        coc40: num(cell(rows, r, cols.coc40Col)),
+        soc20: num(cell(rows, r, cols.soc20Col)),
+        soc40: num(cell(rows, r, cols.soc40Col)),
       }).filter(([, v]) => v != null),
     );
     if (Object.keys(rates).length) netRows[portal] = rates;
   }
+
+  return { netRows, skipped };
+}
+
+export function parseCkSheet(rows) {
+  const resolvePol = (name) => {
+    const portal = CK_POL_MAP[name];
+    if (portal == null) return null;
+    if (!APP_POLS.has(portal)) return null;
+    return portal;
+  };
+
+  const dual = detectDualNetSellGrid(rows);
+  if (dual) {
+    const parsed = parsePolNetSellGrid(rows, dual, "CK", resolvePol);
+    return { ...parsed, marginRows: {} };
+  }
+
+  let cols = detectCkColumns(rows);
+  let { netRows, skipped } = parseCkOceanRows(rows, cols, resolvePol);
+
+  if (!Object.keys(netRows).length && cols.polCol !== 0) {
+    cols = { ...cols, polCol: 0 };
+    ({ netRows, skipped } = parseCkOceanRows(rows, cols, resolvePol));
+  }
+
   return { netRows, marginRows: {}, skipped, carrier: "CK" };
 }
 
 export function parseYslCarrierSheet(rows, carrier) {
   const netRows = {};
-  const sellRows = {};
-  const marginRows = {};
   const skipped = [];
   const DATA_START = 10;
 
@@ -426,29 +622,25 @@ export function parseYslCarrierSheet(rows, carrier) {
       soc20: num(cell(rows, r, 4)),
       soc40: num(cell(rows, r, 5)),
     };
-    const sell = {
-      coc20: num(cell(rows, r, 6)),
-      coc40: num(cell(rows, r, 7)),
-      soc20: num(cell(rows, r, 8)),
-      soc40: num(cell(rows, r, 9)),
-    };
     if (RATE_TYPES.every(t => net[t] == null)) continue;
     netRows[portal] = Object.fromEntries(RATE_TYPES.filter(t => net[t] != null).map(t => [t, net[t]]));
-    const sells = Object.fromEntries(RATE_TYPES.filter(t => sell[t] != null).map(t => [t, sell[t]]));
-    if (Object.keys(sells).length) sellRows[portal] = sells;
-    RATE_TYPES.forEach(t => {
-      if (net[t] != null && sell[t] != null) {
-        if (!marginRows[portal]) marginRows[portal] = {};
-        marginRows[portal][t] = sell[t] - net[t];
-      }
-    });
   }
-  return { netRows, sellRows, marginRows, skipped, carrier };
+  return { netRows, sellRows: {}, marginRows: {}, skipped, carrier };
 }
 
 export function parseRentalSheet(rows) {
   const bases = {};
   const skipped = [];
+
+  // 헤더 행에서 도시명과 컬럼 위치 파악 (2번 컬럼부터 3컬럼씩)
+  const headerRow = rows[0] || [];
+  const cityColumns = [];
+  for (let c = 2; c < headerRow.length; c += 3) {
+    const cityName = headerRow[c];
+    if (cityName != null && String(cityName).trim()) {
+      cityColumns.push({ city: String(cityName).trim(), col: c });
+    }
+  }
 
   for (let r = 1; r < rows.length; r++) {
     const raw = cell(rows, r, 1);
@@ -459,13 +651,31 @@ export function parseRentalSheet(rows) {
       skipped.push(String(raw).trim());
       continue;
     }
-    const c20 = num(cell(rows, r, 2));
-    const c40 = num(cell(rows, r, 3)) ?? num(cell(rows, r, 4));
-    if (c20 == null && c40 == null) {
-      skipped.push(`${raw} (no rates)`);
-      continue;
+
+    if (cityColumns.length > 0) {
+      const citiesData = {};
+      for (const { city, col } of cityColumns) {
+        const c20 = num(cell(rows, r, col));
+        const c40dv = num(cell(rows, r, col + 1));
+        const c40hc = num(cell(rows, r, col + 2));
+        if (c20 != null || c40dv != null || c40hc != null) {
+          citiesData[city] = { c20, c40dv, c40hc };
+        }
+      }
+      if (Object.keys(citiesData).length) {
+        bases[rentalPol] = citiesData;
+      } else {
+        skipped.push(`${raw} (no rates)`);
+      }
+    } else {
+      const c20 = num(cell(rows, r, 2));
+      const c40 = num(cell(rows, r, 3)) ?? num(cell(rows, r, 4));
+      if (c20 == null && c40 == null) {
+        skipped.push(`${raw} (no rates)`);
+        continue;
+      }
+      bases[rentalPol] = { c20, c40 };
     }
-    bases[rentalPol] = { c20, c40 };
   }
   return { bases, skipped, carrier: "RENTAL" };
 }
@@ -485,12 +695,24 @@ export function parseByFormat(format, rows, options = {}) {
 export function suggestSheet(format, sheetNames) {
   if (!sheetNames?.length) return "";
   if (format === "DY") {
+    const upload = sheetNames.find(s => /업로드용|\(upload\)/i.test(s) && /import/i.test(s));
+    if (upload) return upload;
     const hit = sheetNames.find(s => /^Import$/i.test(s));
     if (hit) return hit;
   }
+  if (format === "CK") {
+    const upload = sheetNames.find(s => /업로드용|\(upload\)/i.test(s));
+    if (upload) return upload;
+  }
   if (format === "SNK") {
-    const hit = sheetNames.find(s => /06\.01|6\.01|Vladivostok/i.test(s));
-    if (hit) return hit;
+    const upload = sheetNames.find(s => /업로드용|\(upload\)/i.test(s) && /Vladivostok|06\.01|6\.01/i.test(s));
+    if (upload) return upload;
+    const uploadAny = sheetNames.find(s => /업로드용|\(upload\)/i.test(s));
+    if (uploadAny) return uploadAny;
+    const dated = sheetNames.find(s => /Vladivostok/i.test(s) && /06\.01|6\.01/.test(s) && !/업로드|\(upload\)/i.test(s));
+    if (dated) return dated;
+    const vladDated = sheetNames.find(s => /^Vladivostok\s+\d/i.test(s));
+    if (vladDated) return vladDated;
   }
   if (format === "YSL") {
     const cr = format === "YSL" ? null : format;
@@ -527,6 +749,44 @@ export function mergePolCostsCarrier(polCostO, netRows, carrier, period) {
   return out;
 }
 
+function carrierBucketHasData(cr) {
+  if (!cr || typeof cr !== "object") return false;
+  if (["current", "future"].some(p => {
+    const b = cr[p];
+    return b && (RATE_TYPES.some(t => b[t] != null) || (b.sell && Object.keys(b.sell).length));
+  })) return true;
+  return RATE_TYPES.some(t => cr[t] != null);
+}
+
+export function clearPolCostsCarrierPeriod(polCostO, carrier, period) {
+  const out = JSON.parse(JSON.stringify(polCostO || {}));
+  Object.entries(out).forEach(([pol, polEntry]) => {
+    const carriers = polEntry?.carrier;
+    if (!carriers?.[carrier]?.[period]) return;
+    const cr = { ...carriers[carrier] };
+    delete cr[period];
+    if (!carrierBucketHasData(cr)) delete carriers[carrier];
+    else carriers[carrier] = cr;
+    if (!Object.keys(carriers).length) delete polEntry.carrier;
+    if (!Object.keys(polEntry).length) delete out[pol];
+  });
+  return out;
+}
+
+export function replacePolCostsCarrier(polCostO, netRows, carrier, period) {
+  return mergePolCostsCarrier(clearPolCostsCarrierPeriod(polCostO, carrier, period), netRows, carrier, period);
+}
+
+export function replacePolCostsWithSells(polCostO, netRows, sellRows, carrier, period) {
+  return mergePolCostsWithSells(
+    clearPolCostsCarrierPeriod(polCostO, carrier, period),
+    netRows,
+    sellRows || {},
+    carrier,
+    period,
+  );
+}
+
 export function mergePolCostsWithSells(polCostO, netRows, sellRows, carrier, period) {
   let out = mergePolCostsCarrier(polCostO, netRows, carrier, period);
   Object.entries(sellRows || {}).forEach(([pol, sells]) => {
@@ -553,7 +813,7 @@ export function mergePolMarginsMap(polM, marginRows) {
 export function buildDyDropRates(existingJson, oceanRows, dropRows, period, carrier = "DY", refPol = "BUSAN") {
   let out = existingJson ? JSON.parse(existingJson) : {};
   if (!out[carrier]) out[carrier] = { current: {}, future: {} };
-  if (!out[carrier][period]) out[carrier][period] = {};
+  out[carrier][period] = {};
 
   const pol = dropRows[refPol] ? refPol : Object.keys(dropRows)[0];
   if (!pol) return out;
@@ -571,17 +831,42 @@ export function buildDyDropRates(existingJson, oceanRows, dropRows, period, carr
   return out;
 }
 
+function rentalBaseToCityBucket(base) {
+  const entry = {};
+  if (base.c20 != null) entry.c20 = base.c20;
+  const dv = base.c40dv ?? base.c40;
+  const hc = base.c40hc ?? base.c40;
+  if (dv != null) entry.c40dv = dv;
+  if (hc != null) entry.c40hc = hc;
+  return entry;
+}
+
+function isPerCityBase(base) {
+  const firstVal = Object.values(base)[0];
+  return firstVal != null && typeof firstVal === "object";
+}
+
 export function buildRentalRatesFromBases(bases, period = "current") {
   const out = {};
   Object.entries(bases).forEach(([pol, base]) => {
     const cities = {};
-    Object.entries(PDF_DROP).forEach(([city, [d20, d40]]) => {
-      const entry = {};
-      if (base.c20 != null) entry.c20 = base.c20 + d20;
-      if (base.c40 != null) entry.c40 = base.c40 + d40;
-      if (Object.keys(entry).length) cities[city] = entry;
-    });
-    if (Object.keys(cities).length) out[pol] = { [period]: cities, future: {} };
+    if (isPerCityBase(base)) {
+      Object.keys(PDF_DROP).forEach((city) => {
+        const excelCity = PDF_CITY_TO_EXCEL[city] || city;
+        const cityData = base[excelCity];
+        if (!cityData) return;
+        const entry = {};
+        if (cityData.c20 != null) entry.c20 = cityData.c20;
+        if (cityData.c40dv != null) entry.c40dv = cityData.c40dv;
+        if (cityData.c40hc != null) entry.c40hc = cityData.c40hc;
+        if (Object.keys(entry).length) cities[city] = entry;
+      });
+    } else {
+      const bucket = rentalBaseToCityBucket(base);
+      if (!Object.keys(bucket).length) return;
+      Object.keys(PDF_DROP).forEach((city) => { cities[city] = { ...bucket }; });
+    }
+    if (Object.keys(cities).length) out[pol] = { [period]: cities };
   });
   return out;
 }
@@ -591,7 +876,14 @@ export function mergeRentalRatesPatch(existing, patch) {
   Object.entries(patch).forEach(([pol, periods]) => {
     if (!out[pol]) out[pol] = { current: {}, future: {} };
     ["current", "future"].forEach(p => {
-      if (periods[p]) out[pol][p] = periods[p];
+      const bucket = periods[p];
+      if (!bucket || typeof bucket !== "object") return;
+      const hasRates = Object.values(bucket).some(v => {
+        const b = v && typeof v === "object" ? v : {};
+        return b.c20 != null || b.c40dv != null || b.c40hc != null || b.c40 != null;
+      });
+      if (!hasRates) return;
+      out[pol][p] = bucket;
     });
   });
   return out;
@@ -613,12 +905,31 @@ export function previewSummary(parsed, period) {
     };
   }
   const netRows = parsed.netRows || parsed.oceanRows || {};
-  const marginCount = Object.keys(parsed.marginRows || {}).length;
+  const sellRows = parsed.sellRows || {};
+  const sellN = Object.keys(sellRows).length;
+  const sellNote = sellN ? ` · 매출 ${sellN} POL` : "";
   return {
     title: `${parsed.carrier} · ${Object.keys(netRows).length} POL`,
-    detail: `마진 POL ${marginCount} · 스킵 ${(parsed.skipped || []).length}건`,
-    sample: Object.entries(netRows).slice(0, 3),
+    detail: `POL 기준 매입${sellNote}${sellN ? " · NET+SELL" : " · NET만"} · 스킵 ${(parsed.skipped || []).length}건`,
+    sample: Object.entries(netRows).slice(0, 3).map(([pol, rates]) => {
+      const sell = sellRows[pol];
+      return [pol, sell ? { ...rates, sell } : rates];
+    }),
   };
+}
+
+export function enrichRateHistoryRowsWithCosts(rows, polCostO, period) {
+  const explicitSell = (pol, cr, t, p) => {
+    const sellVal = polCostO?.[pol]?.carrier?.[cr]?.[p === "future" ? "future" : "current"]?.sell?.[t];
+    if (sellVal != null && sellVal !== "") return Number(sellVal);
+    return null;
+  };
+  return (rows || []).map(row => {
+    if (row.sell != null || row.category !== "ocean") return row;
+    const sell = explicitSell(row.pol, row.carrier, row.rate_type, period);
+    if (sell == null) return row;
+    return { ...row, sell, margin: sell - row.cost };
+  });
 }
 
 export function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
@@ -626,15 +937,15 @@ export function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
   const areaMap = Object.fromEntries((fData || []).map(r => [r.pol, r.area]));
   const batchNote = note || "";
 
-  const pushOcean = (carrier, netRows, marginRows) => {
+  const pushOcean = (carrier, netRows, sellRows = {}) => {
     Object.entries(netRows || {}).forEach(([pol, rates]) => {
-      const margins = (marginRows || {})[pol] || {};
+      const sells = sellRows[pol] || {};
       RATE_TYPES.forEach(t => {
         if (rates[t] == null) return;
-        const margin = margins[t];
+        const sell = sells[t] ?? null;
         rows.push({
           carrier, area: areaMap[pol] || "", pol, route: pol, rate_type: t, period,
-          category: "ocean", cost: rates[t], sell: margin != null ? rates[t] + margin : null, margin: margin ?? null,
+          category: "ocean", cost: rates[t], sell, margin: sell != null ? sell - rates[t] : null,
           source: "excel_upload", note: batchNote,
         });
       });
@@ -643,36 +954,61 @@ export function buildRateHistoryRowsFromUpload(parsed, period, fData, note) {
 
   if (parsed.format === "RENTAL") {
     Object.entries(parsed.bases || {}).forEach(([rentalPol, base]) => {
-      Object.entries(PDF_DROP).forEach(([city, [d20, d40]]) => {
-        if (base.c20 != null) {
-          rows.push({
-            carrier: "RENTAL", area: "OTHERS", pol: rentalPol, route: `${rentalPol} > ${city}`,
-            rate_type: "r20", period, category: "rental", cost: base.c20 + d20, sell: null, margin: null,
-            source: "excel_upload", note: batchNote,
-          });
-        }
-        if (base.c40 != null) {
-          rows.push({
-            carrier: "RENTAL", area: "OTHERS", pol: rentalPol, route: `${rentalPol} > ${city}`,
-            rate_type: "r40", period, category: "rental", cost: base.c40 + d40, sell: null, margin: null,
-            source: "excel_upload", note: batchNote,
-          });
-        }
-      });
+      if (isPerCityBase(base)) {
+        Object.keys(PDF_DROP).forEach((city) => {
+          const excelCity = PDF_CITY_TO_EXCEL[city] || city;
+          const cityData = base[excelCity];
+          if (!cityData) return;
+          if (cityData.c20 != null) {
+            rows.push({
+              carrier: "RENTAL", area: "OTHERS", pol: rentalPol, route: `${rentalPol} > ${city}`,
+              rate_type: "r20", period, category: "rental", cost: cityData.c20, sell: null, margin: null,
+              source: "excel_upload", note: batchNote,
+            });
+          }
+          const c40 = cityData.c40dv ?? cityData.c40hc;
+          if (c40 != null) {
+            rows.push({
+              carrier: "RENTAL", area: "OTHERS", pol: rentalPol, route: `${rentalPol} > ${city}`,
+              rate_type: "r40", period, category: "rental", cost: c40, sell: null, margin: null,
+              source: "excel_upload", note: batchNote,
+            });
+          }
+        });
+      } else {
+        const bucket = rentalBaseToCityBucket(base);
+        Object.keys(PDF_DROP).forEach((city) => {
+          if (bucket.c20 != null) {
+            rows.push({
+              carrier: "RENTAL", area: "OTHERS", pol: rentalPol, route: `${rentalPol} > ${city}`,
+              rate_type: "r20", period, category: "rental", cost: bucket.c20, sell: null, margin: null,
+              source: "excel_upload", note: batchNote,
+            });
+          }
+          const c40 = bucket.c40dv ?? bucket.c40hc ?? bucket.c40;
+          if (c40 != null) {
+            rows.push({
+              carrier: "RENTAL", area: "OTHERS", pol: rentalPol, route: `${rentalPol} > ${city}`,
+              rate_type: "r40", period, category: "rental", cost: c40, sell: null, margin: null,
+              source: "excel_upload", note: batchNote,
+            });
+          }
+        });
+      }
     });
     return rows;
   }
 
   if (parsed.format === "DY") {
-    pushOcean("DY", parsed.oceanRows, {});
+    pushOcean("DY", parsed.oceanRows, parsed.sellRows);
     return rows;
   }
 
   if (parsed.format === "YSL") {
-    pushOcean(parsed.carrier, parsed.netRows, parsed.marginRows);
+    pushOcean(parsed.carrier, parsed.netRows, parsed.sellRows);
     return rows;
   }
 
-  pushOcean(parsed.carrier, parsed.netRows, parsed.marginRows);
+  pushOcean(parsed.carrier, parsed.netRows, parsed.sellRows);
   return rows;
 }
