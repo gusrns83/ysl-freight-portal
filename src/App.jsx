@@ -900,7 +900,7 @@ const RENTAL_CITY_ALIASES = {
 const normalizeRentalCityName = (raw) => {
   const s = String(raw ?? "").trim();
   if (!s) return "";
-  const key = s.toUpperCase().replace(/[^A-Z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+  const key = s.toUpperCase().replace(/[-]/g, " ").replace(/[^A-Z0-9\s]/g, "").replace(/\s+/g, " ").trim();
   if (RENTAL_CITY_ALIASES[key]) return RENTAL_CITY_ALIASES[key];
   return s.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 };
@@ -3180,7 +3180,8 @@ function detectRentalUploadGrid(rows) {
     const cityRowIdx = r > 0 ? r - 1 : 0;
     const cityNames = rows[cityRowIdx] || [];
     const cities = [];
-    for (let c = 3; c < sub.length; c += 3) {
+    const firstCityCol = dvIdx - 1; // 40'DV 바로 앞 col = 첫 도시의 20' col
+    for (let c = firstCityCol; c < sub.length; c += 3) {
       const cityRaw = cityNames[c];
       if (!cityRaw) continue;
       const city = normalizeRentalCityName(cityRaw);
