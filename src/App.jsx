@@ -7605,44 +7605,17 @@ export default function App() {
     </div>
   );
 
-  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", compact = false}) => {
-    const combos = [d20, d40dv, d40hc];
-    const labels = RENT_COMBO_SHORT.map((s, i) => (prefix ? `${prefix} ${s}` : s));
-    if (compact) {
-      return (
-        <div className="guest-rent-triple guest-rent-triple--rows">
-          <div className="guest-rent-row guest-rent-row--sizes">
-            {labels.map((lbl, i) => (
-              <span key={lbl} className="guest-rent-size">{lbl}</span>
-            ))}
-          </div>
-          <div className="guest-rent-row guest-rent-row--vals">
-            {combos.map((d, i) => (
-              <span key={RENT_COMBO_SHORT[i]} className={`guest-rent-val guest-price-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>
-                {d.sell != null ? `$${n(d.sell)}` : "—"}
-              </span>
-            ))}
-          </div>
-          <div className="guest-rent-row guest-rent-row--tags">
-            {combos.map((d, i) => (
-              <span key={`tag-${RENT_COMBO_SHORT[i]}`} className="guest-rent-tag">{d.cr ? <Bg k={d.cr}/> : null}</span>
-            ))}
-          </div>
+  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = ""}) => (
+    <div className="guest-price-pair guest-rent-triple">
+      {[d20, d40dv, d40hc].map((d, i) => (
+        <div key={RENT_COMBO_SHORT[i]} className="guest-price-col">
+          <div className="guest-price-lbl">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
+          <div className={`guest-price-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
+          {d.cr && <Bg k={d.cr}/>}
         </div>
-      );
-    }
-    return (
-      <div className="guest-rent-triple">
-        {combos.map((d, i) => (
-          <div key={RENT_COMBO_SHORT[i]} className="guest-rent-col">
-            <div className="guest-rent-size">{labels[i]}</div>
-            <div className={`guest-price-val guest-rent-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
-            {d.cr && <Bg k={d.cr}/>}
-          </div>
-        ))}
-      </div>
-    );
-  };
+      ))}
+    </div>
+  );
 
   const AdminRentTriple = ({d20, d40dv, d40hc, prefix = "", editable, onCost20, onCost40dv, onCost40hc}) => {
     const combos = [d20, d40dv, d40hc];
@@ -8614,10 +8587,10 @@ export default function App() {
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
         <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
-          <div className={isAdmin?"admin-card-top":`route-card-head route-card-head--rent rent-guest-row${!isAdmin?" route-card-head--guest":""}`}>
+          <div className={isAdmin?"admin-card-top":"route-card-head"}>
             <RouteCardLabel area={row.area} pol={row.displayPol || row.pol}/>
-            {!isAdmin && <GuestRentTriple compact d20={d20} d40dv={d40dv} d40hc={d40hc}/>}
-            <span className="route-card-chevron rent-guest-row-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
+            {!isAdmin && <GuestRentTriple d20={d20} d40dv={d40dv} d40hc={d40hc}/>}
+            <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
           </div>
           {isAdmin && (
             <div className="admin-card-prices">
@@ -8646,18 +8619,12 @@ export default function App() {
               const fp=PM[row.pol],fr=fp?fMap[fp]:null;
               return (
                 <div key={city}>
-                  <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":"rent-city-row-btn rent-guest-row"} style={{background:cOpen?"#faf5ff":"none",borderBottom:"1px solid #f9fafb"}}>
-                    {isAdmin ? (
-                      <div className="admin-card-top">
-                        <span className="rent-city-label">{cityLabel}</span>
-                      </div>
-                    ) : (
-                      <>
-                        <span className="rent-guest-row-city">{cityLabel}</span>
-                        <GuestRentTriple compact d20={cd20} d40dv={cd40dv} d40hc={cd40hc}/>
-                        <span className="route-card-chevron rent-guest-row-chevron" style={{transform:cOpen?"rotate(180deg)":"none"}}>&#8964;</span>
-                      </>
-                    )}
+                  <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 12px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
+                    <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
+                      <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
+                      {!isAdmin && <GuestRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc}/>}
+                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+                    </div>
                     {isAdmin && (
                       <div className="admin-card-prices">
                         <AdminRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc} editable
