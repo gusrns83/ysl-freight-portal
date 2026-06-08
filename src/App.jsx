@@ -4385,7 +4385,7 @@ export default function App() {
       });
   };
 
-  const loadRateHistory = async () => {
+  const loadRateHistory = async (overrides = {}) => {
     setRhLoading(true);
     setRhError("");
     try {
@@ -4437,8 +4437,8 @@ export default function App() {
       }
 
       const data = await api(buildRateHistoryQuery({
-        scope: rhScope,
-        carrier: rhCarrier,
+        scope: overrides.scope ?? rhScope,
+        carrier: overrides.carrier ?? rhCarrier,
         area: rhArea,
         period: rhPeriod,
         category: rhCategory,
@@ -4527,7 +4527,7 @@ export default function App() {
     }
     if (tab === "history") {
       setRhScope("freight");
-      loadRateHistory();
+      loadRateHistory({ scope: "freight" });
     }
   };
 
@@ -4541,7 +4541,7 @@ export default function App() {
             setFreightAdminTab(id);
             if (id === "history") {
               setRhScope("freight");
-              loadRateHistory();
+              loadRateHistory({ scope: "freight" });
             }
             if (id === "grid" && !saveBusy) {
               ensurePolCostSellsBackfill().then(filled => {
@@ -4573,7 +4573,7 @@ export default function App() {
             if (id === "history") {
               setRhScope("rental");
               setRhCarrier("RENTAL");
-              loadRateHistory();
+              loadRateHistory({ scope: "rental", carrier: "RENTAL" });
             }
           }}
           style={{
