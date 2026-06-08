@@ -4389,29 +4389,32 @@ export default function App() {
     setRhLoading(true);
     setRhError("");
     try {
+      // 서비스外 자동 정리는 백그라운드로 실행해 화면 로딩을 블로킹하지 않음
       if (isAdmin && !rhAutoPruneRef.current) {
         rhAutoPruneRef.current = true;
-        try {
-          const base = pricingSaveRef.current;
-          const pruned = await pruneRateHistoryOutsideService(fData, base, rData);
-          if (pruned.historyCleared > 0) {
-            if (pruned.polCostsChanged) {
-              setPolCostO(pruned.polCostO);
-              pricingSaveRef.current = {
-                ...base,
-                polCostO: pruned.polCostO,
-                carrierDropRates: pruned.dropChanged ? pruned.carrierDropRates : base.carrierDropRates,
-                rentalRates: pruned.rentalChanged ? pruned.rentalRates : base.rentalRates,
-              };
-              skipAutoSaveRef.current = true;
-              await saveOceanPolCostsBundle(pruned.polCostO);
-              setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+        (async () => {
+          try {
+            const base = pricingSaveRef.current;
+            const pruned = await pruneRateHistoryOutsideService(fData, base, rData);
+            if (pruned.historyCleared > 0) {
+              if (pruned.polCostsChanged) {
+                setPolCostO(pruned.polCostO);
+                pricingSaveRef.current = {
+                  ...base,
+                  polCostO: pruned.polCostO,
+                  carrierDropRates: pruned.dropChanged ? pruned.carrierDropRates : base.carrierDropRates,
+                  rentalRates: pruned.rentalChanged ? pruned.rentalRates : base.rentalRates,
+                };
+                skipAutoSaveRef.current = true;
+                await saveOceanPolCostsBundle(pruned.polCostO);
+                setTimeout(() => { skipAutoSaveRef.current = false; }, 2000);
+              }
+              setRhSelectMsg(`✅ 서비스外 ${pruned.historyCleared}건 자동 정리${pruned.dbCleared ? ` · 운임 DB ${pruned.dbCleared}셀` : ""}`);
             }
-            setRhSelectMsg(`✅ 서비스外 ${pruned.historyCleared}건 자동 정리${pruned.dbCleared ? ` · 운임 DB ${pruned.dbCleared}셀` : ""}`);
+          } catch (e) {
+            console.warn("rate_history 서비스外 자동 정리 skip", e);
           }
-        } catch (e) {
-          console.warn("rate_history 서비스外 자동 정리 skip", e);
-        }
+        })();
       }
 
       const costsForHydrate = pricingSaveRef.current?.polCostO ?? polCostO;
@@ -7605,11 +7608,13 @@ export default function App() {
     </div>
   );
 
-  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = ""}) => (
-    <div className="guest-price-pair guest-rent-triple">
+  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", hideLabels = false}) => (
+    <div className={`guest-price-pair guest-rent-triple${hideLabels ? " guest-rent-triple--no-lbl" : ""}`}>
       {[d20, d40dv, d40hc].map((d, i) => (
         <div key={RENT_COMBO_SHORT[i]} className="guest-price-col">
-          <div className="guest-price-lbl">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
+          {!hideLabels && (
+            <div className="guest-price-lbl">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
+          )}
           <div className={`guest-price-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
           {d.cr && <Bg k={d.cr}/>}
         </div>
@@ -8682,7 +8687,7 @@ export default function App() {
                               <col className="cvt-col-price"/>
                             </colgroup>
                             <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #ede9fe"}}>
-                              <th className="cvt-carrier" style={{textAlign:"left",padding:"6px 0",fontWeight:500}}>Carrier</th>
+                              <th className="cvt-carrier" style={{textAlign:"left",padding:"6px 0",fontWeight:500}} aria-hidden="true"></th>
                               <th className="cvt-validity" style={{padding:"6px 0",fontWeight:500}}>Validity</th>
                               {RENT_COMBO_SHORT.map(label => (
                                 <th key={label} className="cvt-price" style={{padding:"6px 0",fontWeight:500}}>{label}</th>
