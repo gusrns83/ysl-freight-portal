@@ -1132,6 +1132,7 @@
 .guest-rent-triple--no-lbl.guest-price-pair {
   gap: 4px;
 }
+.rent-guest-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(168px, 42%) 16px;
   align-items: center;
