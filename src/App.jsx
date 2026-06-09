@@ -1790,12 +1790,14 @@ const parsePricingFromSettings = (s) => {
       }
     } catch (e) {}
   } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined || s.validity_rental !== undefined) {
-    snap.validityInfo = {
-      SNK: normalizeValidityCarrier({ ...snap.validityInfo.SNK, current: s.validity_snk ?? snap.validityInfo.SNK?.current }),
-      DY: normalizeValidityCarrier({ ...snap.validityInfo.DY, current: s.validity_dy ?? snap.validityInfo.DY?.current }),
-      CK: normalizeValidityCarrier({ ...snap.validityInfo.CK, current: s.validity_ck ?? snap.validityInfo.CK?.current }),
-      RENTAL: normalizeValidityCarrier({ ...snap.validityInfo.RENTAL, current: s.validity_rental ?? snap.validityInfo.RENTAL?.current }),
-    };
+    if (s.validity_snk !== undefined)
+      snap.validityInfo.SNK = normalizeValidityCarrier({ ...snap.validityInfo.SNK, current: s.validity_snk });
+    if (s.validity_dy !== undefined)
+      snap.validityInfo.DY = normalizeValidityCarrier({ ...snap.validityInfo.DY, current: s.validity_dy });
+    if (s.validity_ck !== undefined)
+      snap.validityInfo.CK = normalizeValidityCarrier({ ...snap.validityInfo.CK, current: s.validity_ck });
+    if (s.validity_rental !== undefined)
+      snap.validityInfo.RENTAL = normalizeValidityCarrier({ ...snap.validityInfo.RENTAL, current: s.validity_rental });
   }
   if (s.carrier_rates_json) {
     try {
