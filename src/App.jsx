@@ -1789,15 +1789,22 @@ const parsePricingFromSettings = (s) => {
         );
       }
     } catch (e) {}
-  } else if (s.validity_snk !== undefined || s.validity_dy !== undefined || s.validity_ck !== undefined || s.validity_rental !== undefined) {
-    if (s.validity_snk !== undefined)
+  } else {
+    // 각 carrier별로 해당 키가 정의된 경우에만 업데이트
+    // validity_info_json이 없는 부분 로드(2차 RENTAL_DB_KEYS 등)에서
+    // 다른 carrier들이 빈값으로 덮어씌워지지 않도록 보호
+    if (s.validity_snk !== undefined) {
       snap.validityInfo.SNK = normalizeValidityCarrier({ ...snap.validityInfo.SNK, current: s.validity_snk });
-    if (s.validity_dy !== undefined)
+    }
+    if (s.validity_dy !== undefined) {
       snap.validityInfo.DY = normalizeValidityCarrier({ ...snap.validityInfo.DY, current: s.validity_dy });
-    if (s.validity_ck !== undefined)
+    }
+    if (s.validity_ck !== undefined) {
       snap.validityInfo.CK = normalizeValidityCarrier({ ...snap.validityInfo.CK, current: s.validity_ck });
-    if (s.validity_rental !== undefined)
+    }
+    if (s.validity_rental !== undefined) {
       snap.validityInfo.RENTAL = normalizeValidityCarrier({ ...snap.validityInfo.RENTAL, current: s.validity_rental });
+    }
   }
   if (s.carrier_rates_json) {
     try {
@@ -6050,8 +6057,7 @@ export default function App() {
 
   const applyPricingSnapshot = (snap, s = {}) => {
     if (!snap) return;
-    if (settingBundleHas(s, "validity_info_json")
-      || ["validity_snk", "validity_dy", "validity_ck", "validity_rental"].some(k => settingBundleHas(s, k))) {
+    if (settingBundleHas(s, "validity_info_json")) {
       setValidityInfo(snap.validityInfo);
     }
     if (settingBundleHas(s, "carrier_rates_json")) setCarrierRates(snap.carrierRates);
