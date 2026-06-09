@@ -5742,27 +5742,33 @@ export default function App() {
     return entry;
   };
 
-  const updateValiditySlot = (carrier, period, field, value) => {
+  const updateValiditySlot = async (carrier, period, field, value) => {
     const entry = normalizeValidityCarrier(validityInfo[carrier] || {});
     patchValiditySlot(entry, period, field, value);
     const next = { ...validityInfo, [carrier]: normalizeValidityCarrier(entry) };
+
+    // 1. 화면 state + ref 업데이트
     setValidityInfo(next);
-    // pricingSaveRef도 동기화
     pricingSaveRef.current = { ...pricingSaveRef.current, validityInfo: next };
-    // Supabase에 즉시 저장 (enqueueNetworkWrite 큐 사용)
+
+    // 2. 캐시 즉시 업데이트 (새로고침 대비)
+    const cachedNow = readStoredPricingCache() || { v: 1 };
+    writePricingCache({ ...cachedNow, validityInfo: next, pricingSavedAt: Date.now() });
+
+    // 3. 서버 저장
     const serialized = serializeValidityInfo(next);
     const saves = [["validity_info_json", serialized]];
     const legacyKey = LEGACY_VALIDITY_KEY[carrier];
     if (legacyKey) saves.push([legacyKey, formatValiditySlotLabel(next[carrier]?.current)]);
-    (async () => {
-      try {
-        for (const [k, v] of saves) await saveSettingValue(k, v);
-        flashSaveFeedback("ok", "Validity 저장됨");
-      } catch (e) {
-        console.warn("validity save failed", e);
-        flashSaveFeedback("error", "Validity 저장 실패");
-      }
-    })();
+    try {
+      for (const [k, v] of saves) await saveSettingValue(k, v);
+      // 4. 서버 저장 성공 시 캐시에 serverSyncedAt 갱신
+      writePricingCache({ ...readStoredPricingCache(), serverSyncedAt: Date.now() });
+      flashSaveFeedback("ok", "Validity 저장됨");
+    } catch (e) {
+      console.warn("validity save failed", e);
+      flashSaveFeedback("error", `Validity 저장 실패: ${e?.message ?? e}`);
+    }
   };
 
   const syncExcelValidityDraft = useCallback(() => {
