@@ -8413,8 +8413,9 @@ export default function App() {
           <div className={isAdmin?"admin-card-top":"route-card-head"}>
             <RouteCardLabel area={row.area} pol={row.pol}/>
             {!isAdmin && (
-              <div style={{display:"flex",flexDirection:"column",gap:2}}>
+              <div style={{display:"flex",flexDirection:"row",gap:8,alignItems:"center"}}>
                 {hasCoc && <GuestPricePair d20={cocD20} d40={cocD40} prefix="COC"/>}
+                {hasCoc && hasSoc && <div style={{width:1,alignSelf:"stretch",background:"#e5e7eb"}}/>}
                 {hasSoc && <GuestPricePair d20={socD20} d40={socD40} prefix="SOC"/>}
                 {!hasCoc && !hasSoc && <GuestPricePair d20={cocD20} d40={cocD40}/>}
               </div>
@@ -8464,10 +8465,11 @@ export default function App() {
                   ); })}
               </div>
             ) : (
-            <>
-              {renderGuestTable("coc20","coc40","COC · Carrier Owned","#1e40af")}
-              {renderGuestTable("soc20","soc40","SOC · Shipper Owned","#7c3aed")}
-            </>
+            <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+              <div style={{flex:1,minWidth:0}}>{renderGuestTable("coc20","coc40","COC · Carrier Owned","#1e40af")}</div>
+              <div style={{width:1,alignSelf:"stretch",background:"#f3f4f6",flexShrink:0}}/>
+              <div style={{flex:1,minWidth:0}}>{renderGuestTable("soc20","soc40","SOC · Shipper Owned","#7c3aed")}</div>
+            </div>
             )}
             </div>
           </div>
