@@ -5752,7 +5752,22 @@ export default function App() {
     const saves = [["validity_info_json", serialized]];
     const legacyKey = LEGACY_VALIDITY_KEY[carrier];
     if (legacyKey) saves.push([legacyKey, formatValiditySlotLabel(next[carrier]?.current)]);
-    saveSettingsEntriesDirect(saves).catch(e => console.warn("validity auto-save failed", e));
+    (async () => {
+      const MAX_RETRY = 3;
+      let lastErr;
+      for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 1000));
+        try {
+          await saveSettingsEntriesDirect(saves);
+          flashSaveFeedback("ok", "Validity 저장됨");
+          return;
+        } catch (e) {
+          lastErr = e;
+        }
+      }
+      console.warn("validity auto-save failed", lastErr);
+      flashSaveFeedback("error", "Validity 저장 실패 - 다시 시도해 주세요");
+    })();
   };
 
   const syncExcelValidityDraft = useCallback(() => {
