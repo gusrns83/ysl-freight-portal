@@ -8483,7 +8483,8 @@ export default function App() {
         <button onClick={()=>{setExp(open?null:`d${idx}`);setDoCityOpen(null);}} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
           <div className={isAdmin?"admin-card-top":"route-card-head"}>
             <RouteCardLabel area={row.area} pol={row.pol}/>
-            {!isAdmin && d20.sell!=null && <GuestPricePair d20={d20} d40={d40} prefix="MOW"/>}
+            <span style={{fontSize:10,fontWeight:700,color:"#fff",background:"#2563eb",padding:"2px 8px",borderRadius:4,flexShrink:0}}>MOW</span>
+            {!isAdmin && d20.sell!=null && <GuestPricePair d20={d20} d40={d40}/>}
             <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
           </div>
           {isAdmin && (
