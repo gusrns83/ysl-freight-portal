@@ -5747,26 +5747,19 @@ export default function App() {
     setValidityInfo(next);
     // pricingSaveRef도 동기화
     pricingSaveRef.current = { ...pricingSaveRef.current, validityInfo: next };
-    // Supabase에 즉시 저장
+    // Supabase에 즉시 저장 (enqueueNetworkWrite 큐 사용)
     const serialized = serializeValidityInfo(next);
     const saves = [["validity_info_json", serialized]];
     const legacyKey = LEGACY_VALIDITY_KEY[carrier];
     if (legacyKey) saves.push([legacyKey, formatValiditySlotLabel(next[carrier]?.current)]);
     (async () => {
-      const MAX_RETRY = 3;
-      let lastErr;
-      for (let attempt = 0; attempt < MAX_RETRY; attempt++) {
-        if (attempt > 0) await new Promise(r => setTimeout(r, 1000));
-        try {
-          await saveSettingsEntriesDirect(saves);
-          flashSaveFeedback("ok", "Validity 저장됨");
-          return;
-        } catch (e) {
-          lastErr = e;
-        }
+      try {
+        for (const [k, v] of saves) await saveSettingValue(k, v);
+        flashSaveFeedback("ok", "Validity 저장됨");
+      } catch (e) {
+        console.warn("validity save failed", e);
+        flashSaveFeedback("error", "Validity 저장 실패");
       }
-      console.warn("validity auto-save failed", lastErr);
-      flashSaveFeedback("error", "Validity 저장 실패 - 다시 시도해 주세요");
     })();
   };
 
@@ -5778,6 +5771,16 @@ export default function App() {
   useEffect(() => {
     if (showFreightAdmin && freightAdminTab === "upload") syncExcelValidityDraft();
   }, [showFreightAdmin, freightAdminTab, syncExcelValidityDraft]);
+
+  // validityInfo 변경 시 탭과 무관하게 독립적으로 저장 (1초 debounce)
+  useEffect(() => {
+    if (!isAdmin || skipAutoSaveRef.current) return;
+    const timer = setTimeout(() => {
+      saveSettingValue("validity_info_json", serializeValidityInfo(validityInfo))
+        .catch(e => console.warn("validity debounce save failed", e));
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [validityInfo, isAdmin]);
 
   const updateExcelValidityDraft = (_carrier, period, field, value) => {
     setExcelValidityDraft(prev => {
