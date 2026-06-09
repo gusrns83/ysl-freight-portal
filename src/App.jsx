@@ -5744,7 +5744,14 @@ export default function App() {
     setValidityInfo(p => {
       const entry = normalizeValidityCarrier(p[carrier] || {});
       patchValiditySlot(entry, period, field, value);
-      return { ...p, [carrier]: normalizeValidityCarrier(entry) };
+      const next = { ...p, [carrier]: normalizeValidityCarrier(entry) };
+      // Supabase에 즉시 저장
+      const serialized = serializeValidityInfo(next);
+      const saves = [["validity_info_json", serialized]];
+      const legacyKey = LEGACY_VALIDITY_KEY[carrier];
+      if (legacyKey) saves.push([legacyKey, formatValiditySlotLabel(next[carrier]?.current)]);
+      saveSettingsEntriesDirect(saves).catch(e => console.warn("validity auto-save failed", e));
+      return next;
     });
   };
 
