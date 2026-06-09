@@ -4260,7 +4260,7 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [areaF, setAreaF] = useState("ALL");
   const [tab, setTab] = useState("ocean");
-  const [ctype, setCtype] = useState("coc");
+  // ctype 제거됨 — COC/SOC 동시 표시
   const [exp, setExp] = useState(null);
   const [cityOpen, setCityOpen] = useState(null);
   const [doCityOpen, setDoCityOpen] = useState(null);
@@ -7602,7 +7602,7 @@ export default function App() {
         {d20.cr&&<Bg k={d20.cr}/>}
       </div>
       <div className="guest-price-col">
-        <div className="guest-price-lbl">40'</div>
+        <div className="guest-price-lbl">{prefix?`${prefix} 40'`:"40'"}</div>
         <div className={`guest-price-val${ratePeriod==="future"?" guest-price-val--future":""}`}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>
         {d40.cr&&<Bg k={d40.cr}/>}
       </div>
@@ -8368,33 +8368,74 @@ export default function App() {
 
   // ── CARDS ──
   const OCard = ({row,idx}) => {
-    const types = ctype==="coc"?["coc20","coc40"]:["soc20","soc40"];
     const open = exp===`o${idx}`;
-    const d20=oceanDetail(row,types[0]),d40=oceanDetail(row,types[1]);
-    const t20=types[0],t40=types[1];
+    // 어드민: COC 고정 (운임 편집)
+    const t20="coc20", t40="coc40";
+    const cocD20=oceanDetail(row,"coc20"),cocD40=oceanDetail(row,"coc40");
+    const socD20=oceanDetail(row,"soc20"),socD40=oceanDetail(row,"soc40");
+    const hasCoc=!isAdmin&&(cocD20.sell!=null||cocD40.sell!=null);
+    const hasSoc=!isAdmin&&(socD20.sell!=null||socD40.sell!=null);
+    const renderGuestTable = (type20,type40,label,color) => {
+      const b20=bNet(row,type20),b40=bNet(row,type40);
+      const priceColor=ratePeriod==="future"?"#b45309":"#1d4ed8";
+      const rows=CRS.map(k=>{
+        const v20=getCarrierRate(row,k,type20),v40=getCarrierRate(row,k,type40);
+        if(v20==null&&v40==null)return null;
+        const s20=v20!=null?getGuestCarrierSell(row.pol,k,type20,ratePeriod,v20,row.area):null;
+        const s40=v40!=null?getGuestCarrierSell(row.pol,k,type40,ratePeriod,v40,row.area):null;
+        const best20=b20.val!=null?getGuestCarrierSell(row.pol,b20.cr,type20,ratePeriod,b20.val,row.area):null;
+        const best40=b40.val!=null?getGuestCarrierSell(row.pol,b40.cr,type40,ratePeriod,b40.val,row.area):null;
+        return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
+          <td className="cvt-carrier" style={{padding:"8px 0"}}><Bg k={k}/></td>
+          <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={k}/></td>
+          <td className="cvt-price" style={{padding:"8px 0",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,type20,row.pol+" > VVO")}>{s20!=null?`$${n(s20)}`:"—"}</td>
+          <td className="cvt-price" style={{padding:"8px 0",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&openSC(k,type40,row.pol+" > VVO")}>{s40!=null?`$${n(s40)}`:"—"}</td>
+        </tr>;
+      }).filter(Boolean);
+      if(!rows.length)return null;
+      return <>
+        <div style={{fontSize:10,fontWeight:700,color,marginTop:14,marginBottom:4}}>{label}</div>
+        <table className="carrier-validity-table" style={{marginTop:2,fontSize:12}}>
+          <colgroup><col className="cvt-col-carrier"/><col className="cvt-col-validity"/><col className="cvt-col-price"/><col className="cvt-col-price"/></colgroup>
+          <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
+            <th className="cvt-carrier" style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Carrier</th>
+            <th className="cvt-validity" style={{padding:"4px 0",fontWeight:500}}>Validity</th>
+            <th className="cvt-price" style={{padding:"4px 0",fontWeight:500}}>20'</th>
+            <th className="cvt-price" style={{padding:"4px 0",fontWeight:500}}>40'</th>
+          </tr></thead>
+          <tbody>{rows}</tbody>
+        </table>
+      </>;
+    };
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
         <button onClick={()=>setExp(open?null:`o${idx}`)} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
           <div className={isAdmin?"admin-card-top":"route-card-head"}>
             <RouteCardLabel area={row.area} pol={row.pol}/>
-            {!isAdmin && <GuestPricePair d20={d20} d40={d40}/>}
+            {!isAdmin && (
+              <div style={{display:"flex",flexDirection:"column",gap:2}}>
+                {hasCoc && <GuestPricePair d20={cocD20} d40={cocD40} prefix="COC"/>}
+                {hasSoc && <GuestPricePair d20={socD20} d40={socD40} prefix="SOC"/>}
+                {!hasCoc && !hasSoc && <GuestPricePair d20={cocD20} d40={cocD40}/>}
+              </div>
+            )}
             <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
           </div>
           {isAdmin && (
             <div className="admin-card-prices">
-              <AdminPriceCols d20={d20} d40={d40} editable
-                onCost20={v=>d20.cr&&applyCarrierRate(row.pol,d20.cr,t20,v)}
-                onCost40={v=>d40.cr&&applyCarrierRate(row.pol,d40.cr,t40,v)}/>
+              <AdminPriceCols d20={cocD20} d40={cocD40} editable
+                onCost20={v=>cocD20.cr&&applyCarrierRate(row.pol,cocD20.cr,t20,v)}
+                onCost40={v=>cocD40.cr&&applyCarrierRate(row.pol,cocD40.cr,t40,v)}/>
             </div>
           )}
         </button>
         {open && (
           <div style={{borderTop:"1px solid #f3f4f6"}}>
-            {isAdmin && <PolAdjustBar pol={row.pol} area={row.area} types={types} onClearCost={()=>clearPolCost(row.pol,"carrier")}/>}
+            {isAdmin && <PolAdjustBar pol={row.pol} area={row.area} types={[t20,t40]} onClearCost={()=>clearPolCost(row.pol,"carrier")}/>}
             <div style={{padding:"0 16px 16px"}}>
             {isAdmin ? (
               <div style={{marginTop:12}}>
-                {CRS.map(k=>{ 
+                {CRS.map(k=>{
                   const cv20=getCarrierRate(row,k,t20,"current"),cv40=getCarrierRate(row,k,t40,"current");
                   const fv20=getCarrierRate(row,k,t20,"future"),fv40=getCarrierRate(row,k,t40,"future");
                   if(cv20==null&&cv40==null&&fv20==null&&fv40==null)return null;
@@ -8423,36 +8464,10 @@ export default function App() {
                   ); })}
               </div>
             ) : (
-            <table className="carrier-validity-table" style={{marginTop:12,fontSize:12}}>
-              <colgroup>
-                <col className="cvt-col-carrier"/>
-                <col className="cvt-col-validity"/>
-                <col className="cvt-col-price"/>
-                <col className="cvt-col-price"/>
-              </colgroup>
-              <thead><tr style={{color:"#9ca3af",borderBottom:"1px solid #f3f4f6"}}>
-                <th className="cvt-carrier" style={{textAlign:"left",padding:"4px 0",fontWeight:500}}>Carrier</th>
-                <th className="cvt-validity" style={{padding:"4px 0",fontWeight:500}}>Validity</th>
-                <th className="cvt-price" style={{padding:"4px 0",fontWeight:500}}>20'</th>
-                <th className="cvt-price" style={{padding:"4px 0",fontWeight:500}}>40'</th>
-              </tr></thead>
-              <tbody>
-                {CRS.map(k=>{ const v20=getCarrierRate(row,k,t20),v40=getCarrierRate(row,k,t40); if(v20==null&&v40==null)return null; const b20=bNet(row,t20),b40=bNet(row,t40);
-                  const priceColor = ratePeriod==="future"?"#b45309":"#1d4ed8";
-                  const s20=v20!=null?getGuestCarrierSell(row.pol,k,t20,ratePeriod,v20,row.area):null;
-                  const s40=v40!=null?getGuestCarrierSell(row.pol,k,t40,ratePeriod,v40,row.area):null;
-                  const best20=b20.val!=null?getGuestCarrierSell(row.pol,b20.cr,t20,ratePeriod,b20.val,row.area):null;
-                  const best40=b40.val!=null?getGuestCarrierSell(row.pol,b40.cr,t40,ratePeriod,b40.val,row.area):null;
-                  return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
-                    <td className="cvt-carrier" style={{padding:"8px 0"}}>
-                      <Bg k={k}/>
-                    </td>
-                    <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={k}/></td>
-                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,t20,row.pol+" > VVO")}>{s20!=null?`$${n(s20)}`:"—"}</td>
-                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&openSC(k,t40,row.pol+" > VVO")}>{s40!=null?`$${n(s40)}`:"—"}</td>
-                  </tr>; })}
-              </tbody>
-            </table>
+            <>
+              {renderGuestTable("coc20","coc40","COC · Carrier Owned","#1e40af")}
+              {renderGuestTable("soc20","soc40","SOC · Shipper Owned","#7c3aed")}
+            </>
             )}
             </div>
           </div>
@@ -8803,15 +8818,8 @@ export default function App() {
         <CarrierPortGuide/>
       </div>
 
-      {/* COC/SOC TOGGLE */}
       {tab==="ocean" && (
         <div style={{maxWidth:640,margin:"0 auto",padding:"10px 16px 12px"}}>
-          <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
-            {["coc","soc"].map(t=>(
-              <button key={t} onClick={()=>setCtype(t)} style={{padding:"6px 16px",fontSize:11,fontWeight:600,borderRadius:6,background:ctype===t?"#fff":"transparent",border:"none",cursor:"pointer",color:ctype===t?"#111":"#9ca3af"}}>{t.toUpperCase()}</button>
-            ))}
-          </div>
-          <span style={{fontSize:10,color:"#9ca3af",marginLeft:8}}>{ctype==="coc"?"Carrier Owned":"Shipper Owned"}</span>
           <RatePeriodToggle/>
         </div>
       )}
