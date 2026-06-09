@@ -7594,20 +7594,24 @@ export default function App() {
     </div>
   );
 
-  const GuestPricePair = ({d20,d40,prefix=""}) => (
-    <div className="guest-price-pair">
-      <div className="guest-price-col">
-        <div className="guest-price-lbl">{prefix?`${prefix} 20'`:"20'"}</div>
-        <div className={`guest-price-val${ratePeriod==="future"?" guest-price-val--future":""}`}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>
-        {d20.cr&&<Bg k={d20.cr}/>}
+  const GuestPricePair = ({d20,d40,prefix=""}) => {
+    const lbl20 = prefix ? `${prefix.charAt(0)}20` : "20'";
+    const lbl40 = prefix ? `${prefix.charAt(0)}40` : "40'";
+    return (
+      <div className="guest-price-pair">
+        <div className="guest-price-col">
+          <div className="guest-price-lbl">{lbl20}</div>
+          <div className={`guest-price-val${ratePeriod==="future"?" guest-price-val--future":""}`}>{d20.sell!=null?`$${n(d20.sell)}`:"—"}</div>
+          {d20.cr&&<Bg k={d20.cr}/>}
+        </div>
+        <div className="guest-price-col">
+          <div className="guest-price-lbl">{lbl40}</div>
+          <div className={`guest-price-val${ratePeriod==="future"?" guest-price-val--future":""}`}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>
+          {d40.cr&&<Bg k={d40.cr}/>}
+        </div>
       </div>
-      <div className="guest-price-col">
-        <div className="guest-price-lbl">{prefix?`${prefix} 40'`:"40'"}</div>
-        <div className={`guest-price-val${ratePeriod==="future"?" guest-price-val--future":""}`}>{d40.sell!=null?`$${n(d40.sell)}`:"—"}</div>
-        {d40.cr&&<Bg k={d40.cr}/>}
-      </div>
-    </div>
-  );
+    );
+  };
 
   const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", hideLabels = false}) => (
     <div className={`guest-price-pair guest-rent-triple${hideLabels ? " guest-rent-triple--no-lbl" : ""}`}>
