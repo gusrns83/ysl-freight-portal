@@ -5741,18 +5741,18 @@ export default function App() {
   };
 
   const updateValiditySlot = (carrier, period, field, value) => {
-    setValidityInfo(p => {
-      const entry = normalizeValidityCarrier(p[carrier] || {});
-      patchValiditySlot(entry, period, field, value);
-      const next = { ...p, [carrier]: normalizeValidityCarrier(entry) };
-      // Supabase에 즉시 저장
-      const serialized = serializeValidityInfo(next);
-      const saves = [["validity_info_json", serialized]];
-      const legacyKey = LEGACY_VALIDITY_KEY[carrier];
-      if (legacyKey) saves.push([legacyKey, formatValiditySlotLabel(next[carrier]?.current)]);
-      saveSettingsEntriesDirect(saves).catch(e => console.warn("validity auto-save failed", e));
-      return next;
-    });
+    const entry = normalizeValidityCarrier(validityInfo[carrier] || {});
+    patchValiditySlot(entry, period, field, value);
+    const next = { ...validityInfo, [carrier]: normalizeValidityCarrier(entry) };
+    setValidityInfo(next);
+    // pricingSaveRef도 동기화
+    pricingSaveRef.current = { ...pricingSaveRef.current, validityInfo: next };
+    // Supabase에 즉시 저장
+    const serialized = serializeValidityInfo(next);
+    const saves = [["validity_info_json", serialized]];
+    const legacyKey = LEGACY_VALIDITY_KEY[carrier];
+    if (legacyKey) saves.push([legacyKey, formatValiditySlotLabel(next[carrier]?.current)]);
+    saveSettingsEntriesDirect(saves).catch(e => console.warn("validity auto-save failed", e));
   };
 
   const syncExcelValidityDraft = useCallback(() => {
