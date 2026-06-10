@@ -58,7 +58,7 @@ function FooterAdSlot({ ads, dismissed, onDismiss }) {
             type="button"
             className="app-ad-close"
             onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDismiss(); }}
-            aria-label="광고 닫기"
+            aria-label="Close ad"
           >
             ×
           </button>
@@ -265,7 +265,7 @@ const TabIconRental = ({active}) => (
 function RatesLoading() {
   return (
     <div className="rates-loading" role="status" aria-live="polite">
-      운임 정보 불러오는 중…
+      Loading rates…
     </div>
   );
 }
