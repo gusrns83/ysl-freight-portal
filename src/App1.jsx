@@ -175,6 +175,171 @@ function QuoteRequestModal({ info, onClose }) {
   );
 }
 
+const QUOTE_STATUS_OPTIONS = ["new", "replied", "closed"];
+
+function QuoteAdminScreen({ onClose, onSaveStaffEmails }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [showStaffEditor, setShowStaffEditor] = useState(false);
+  const [staffInput, setStaffInput] = useState("");
+  const [staffSaving, setStaffSaving] = useState(false);
+  const [staffMsg, setStaffMsg] = useState("");
+
+  const load = async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await api("quote_requests?select=*&order=created_at.desc&limit=200");
+      setRows(Array.isArray(data) ? data : []);
+    } catch (e) {
+      setError(`목록 로드 실패: ${e.message || e}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    load();
+    (async () => {
+      try {
+        const sRows = await fetchSettingsInKeys(["quote_staff_emails"]);
+        const raw = sRows?.find(r => r.key === "quote_staff_emails")?.value;
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) setStaffInput(parsed.join(", "));
+        }
+      } catch {}
+    })();
+  }, []);
+
+  const updateStatus = async (id, status) => {
+    const prev = rows;
+    setRows(rs => rs.map(r => r.id === id ? { ...r, status } : r));
+    try {
+      await api(`quote_requests?id=eq.${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status }),
+        headers: { Prefer: "return=minimal" },
+      });
+    } catch (e) {
+      setRows(prev);
+      setError(`상태 변경 실패: ${e.message || e}`);
+    }
+  };
+
+  const saveStaff = async () => {
+    setStaffSaving(true);
+    setStaffMsg("");
+    try {
+      const arr = staffInput.split(",").map(s => s.trim()).filter(Boolean);
+      await onSaveStaffEmails(arr);
+      setStaffMsg(`✅ 저장 완료 (${arr.length}명)`);
+    } catch (e) {
+      setStaffMsg(`❌ 저장 실패: ${e.message || e}`);
+    } finally {
+      setStaffSaving(false);
+    }
+  };
+
+  const fmtDt = (iso) => {
+    try { return new Date(iso).toLocaleString("ko-KR", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }); }
+    catch { return iso; }
+  };
+
+  return (
+    <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:"'Pretendard','Noto Sans KR',-apple-system,sans-serif"}}>
+      <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
+        <button onClick={onClose} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+        <div style={{fontSize:14,fontWeight:700,color:"#0f766e"}}>견적 요청 관리</div>
+        <button onClick={load} disabled={loading} style={{fontSize:11,fontWeight:700,padding:"6px 10px",borderRadius:8,background:loading?"#99f6e4":"#0d9488",color:"#fff",border:"none",cursor:loading?"not-allowed":"pointer"}}>
+          {loading ? "…" : "새로고침"}
+        </button>
+      </div>
+      <div style={{maxWidth:960,margin:"0 auto",padding:"16px 16px 80px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:12,flexWrap:"wrap"}}>
+          <span style={{fontSize:11,color:"#6b7280"}}>
+            {rows.length}건 · 미처리(new) <strong style={{color:"#dc2626"}}>{rows.filter(r=>r.status==="new").length}</strong>건
+          </span>
+          <button
+            type="button"
+            onClick={() => setShowStaffEditor(v => !v)}
+            style={{marginLeft:"auto",fontSize:11,fontWeight:600,padding:"6px 12px",borderRadius:8,border:"1px solid #99f6e4",background:"#f0fdfa",color:"#0f766e",cursor:"pointer"}}
+          >
+            직원 이메일 설정
+          </button>
+        </div>
+        {showStaffEditor && (
+          <div style={{background:"#fff",border:"1px solid #99f6e4",borderRadius:10,padding:12,marginBottom:12}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#0f766e",marginBottom:6}}>견적 요청 수신 직원 이메일 (쉼표로 구분)</div>
+            <input
+              type="text"
+              value={staffInput}
+              onChange={e=>setStaffInput(e.target.value)}
+              placeholder="kevin@yslagency.com, chkun@yslagency.com"
+              style={{display:"block",width:"100%",padding:"9px 10px",fontSize:13,border:"1px solid #d1d5db",borderRadius:8,boxSizing:"border-box",marginBottom:8}}
+            />
+            <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <button type="button" onClick={saveStaff} disabled={staffSaving}
+                style={{fontSize:11,fontWeight:700,padding:"7px 14px",borderRadius:8,border:"none",background:staffSaving?"#99f6e4":"#0d9488",color:"#fff",cursor:staffSaving?"not-allowed":"pointer"}}>
+                {staffSaving ? "저장 중…" : "저장"}
+              </button>
+              {staffMsg && <span style={{fontSize:11,color:staffMsg.startsWith("✅")?"#166534":"#dc2626"}}>{staffMsg}</span>}
+            </div>
+            <div style={{fontSize:10,color:"#9ca3af",marginTop:6}}>
+              ※ Resend 도메인 인증 전에는 계정 이메일(gusrns83@gmail.com)로만 발송됩니다.
+            </div>
+          </div>
+        )}
+        {error && (
+          <div style={{fontSize:12,color:"#dc2626",background:"#fef2f2",border:"1px solid #fecaca",borderRadius:8,padding:10,marginBottom:12}}>{error}</div>
+        )}
+        <div style={{overflowX:"auto",background:"#fff",border:"1px solid #e5e7eb",borderRadius:12}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:820}}>
+            <thead>
+              <tr style={{background:"#f0fdfa",borderBottom:"1px solid #e5e7eb"}}>
+                {["일시","고객 이메일","POL","POD","선사","수량","화물명","Target","현재운임","상태"].map(h => (
+                  <th key={h} style={{padding:"8px 6px",textAlign:"left",fontWeight:700,color:"#0f766e",whiteSpace:"nowrap"}}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 && !loading && (
+                <tr><td colSpan={10} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>견적 요청 없음</td></tr>
+              )}
+              {rows.map(r => (
+                <tr key={r.id} style={{borderBottom:"1px solid #f3f4f6",background:r.status==="new"?"#fffbeb":"#fff"}}>
+                  <td style={{padding:"7px 6px",whiteSpace:"nowrap",color:"#374151"}}>{fmtDt(r.created_at)}</td>
+                  <td style={{padding:"7px 6px",fontWeight:600}}>{r.customer_email}</td>
+                  <td style={{padding:"7px 6px"}}>{r.pol || "—"}</td>
+                  <td style={{padding:"7px 6px"}}>{r.pod || "—"}</td>
+                  <td style={{padding:"7px 6px"}}>{CN_KR[r.carrier] || r.carrier || "—"}</td>
+                  <td style={{padding:"7px 6px"}}>{r.container_qty || "—"}</td>
+                  <td style={{padding:"7px 6px"}}>{r.cargo_name || "—"}</td>
+                  <td style={{padding:"7px 6px",textAlign:"right"}}>{r.target_rate || "—"}</td>
+                  <td style={{padding:"7px 6px",fontSize:10,color:"#6b7280"}}>{r.current_rate || "—"}</td>
+                  <td style={{padding:"7px 6px",whiteSpace:"nowrap"}}>
+                    {r.status === "new" && (
+                      <span style={{display:"inline-block",fontSize:9,fontWeight:700,color:"#fff",background:"#dc2626",padding:"1px 6px",borderRadius:4,marginRight:4}}>NEW</span>
+                    )}
+                    <select
+                      value={r.status || "new"}
+                      onChange={e => updateStatus(r.id, e.target.value)}
+                      style={{fontSize:10,padding:"3px 4px",border:"1px solid #d1d5db",borderRadius:5,background:"#fff"}}
+                    >
+                      {QUOTE_STATUS_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const fData = useMemo(() => FR.map(r => ({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})), []);
   const rData = useMemo(() => RN.map(r => {
@@ -328,6 +493,7 @@ export default function App() {
   const [doCityOpen, setDoCityOpen] = useState(null);
   const [sc, setSc] = useState(null);
   const [quoteReq, setQuoteReq] = useState(null);
+  const [showQuoteAdmin, setShowQuoteAdmin] = useState(false);
   const quoteBtnEl = (info) => (
     <button
       type="button"
@@ -3624,6 +3790,16 @@ export default function App() {
     );
   }
 
+  // ── QUOTE REQUEST ADMIN ──
+  if (showQuoteAdmin && isAdmin) {
+    return (
+      <QuoteAdminScreen
+        onClose={() => setShowQuoteAdmin(false)}
+        onSaveStaffEmails={(arr) => saveSetting("quote_staff_emails", JSON.stringify(arr))}
+      />
+    );
+  }
+
   // ── CONTACT ADMIN ──
   if (showContactAdmin && isAdmin) {
     const patchContact = (idx, patch) => setScContacts(prev => prev.map((c, i) => i === idx ? { ...c, ...patch } : c));
@@ -5121,6 +5297,7 @@ export default function App() {
                 <button onClick={()=>setShowNoticeAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#faf5ff",color:"#7c3aed",border:"1px solid #e9d5ff",cursor:"pointer",whiteSpace:"nowrap"}}>Notice</button>
                 <button onClick={()=>setShowAdAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#fff7ed",color:"#c2410c",border:"1px solid #fed7aa",cursor:"pointer",whiteSpace:"nowrap"}}>광고</button>
                 <button onClick={()=>{setShowMgr(true);loadClients();}} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#eff6ff",color:"#2563eb",border:"1px solid #bfdbfe",cursor:"pointer",whiteSpace:"nowrap"}}>Clients</button>
+                <button onClick={()=>setShowQuoteAdmin(true)} style={{fontSize:11,fontWeight:600,padding:"6px 10px",borderRadius:20,background:"#f0fdfa",color:"#0f766e",border:"1px solid #99f6e4",cursor:"pointer",whiteSpace:"nowrap"}}>견적요청</button>
               </>
             )}
             {(isClient || isAdmin) ? (
