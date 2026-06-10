@@ -3723,7 +3723,7 @@ export default function App() {
   const RatePeriodToggle = ({showCocSoc=false}) => (
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginTop:10}}>
       <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
-        {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
+        {[["current","Current Rates"],["future","Upcoming Rates"]].map(([k,l])=>(
           <button key={k} type="button" onClick={()=>setRatePeriod(k)}
             style={{padding:"6px 14px",fontSize:11,fontWeight:600,borderRadius:6,border:"none",cursor:"pointer",
               background:ratePeriod===k?"#fff":"transparent",
@@ -4516,11 +4516,11 @@ export default function App() {
                       <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:8,flexWrap:"wrap"}}>
                         <Bg k={k}/><span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[k]}</span>
                       </div>
-                      <div style={{fontSize:9,fontWeight:700,color:"#166534",marginBottom:4}}>현재 운임 · {formatValiditySlotLabel(validityInfo[k]?.current) || "—"}</div>
+                      <div style={{fontSize:9,fontWeight:700,color:"#166534",marginBottom:4}}>Current Rates · {formatValiditySlotLabel(validityInfo[k]?.current) || "—"}</div>
                       <AdminPriceCols d20={cd20} d40={cd40} editable
                         onCost20={v=>applyCarrierRate(row.pol,k,t20,v,"current")}
                         onCost40={v=>applyCarrierRate(row.pol,k,t40,v,"current")}/>
-                      <div style={{fontSize:9,fontWeight:700,color:"#b45309",margin:"10px 0 4px"}}>향후 운임 · {formatValiditySlotLabel(validityInfo[k]?.future) || "—"}</div>
+                      <div style={{fontSize:9,fontWeight:700,color:"#b45309",margin:"10px 0 4px"}}>Upcoming Rates · {formatValiditySlotLabel(validityInfo[k]?.future) || "—"}</div>
                       <AdminPriceCols d20={fd20} d40={fd40} editable
                         onCost20={v=>applyCarrierRate(row.pol,k,t20,v,"future")}
                         onCost40={v=>applyCarrierRate(row.pol,k,t40,v,"future")}/>
@@ -4632,11 +4632,11 @@ export default function App() {
                               <Bg k={cr}/><span style={{fontSize:11,color:"#6b7280",fontWeight:600}}>{CN[cr]}</span>
                               <ValidityCell carrierKey={cr} compact/>
                             </div>
-                            <div style={{fontSize:9,fontWeight:700,color:"#166534",marginBottom:4}}>현재 운임</div>
+                            <div style={{fontSize:9,fontWeight:700,color:"#166534",marginBottom:4}}>Current Rates</div>
                             <AdminPriceCols d20={cdC20} d40={cdC40} editable
                               onCost20={v=>applyCarrierRate(row.pol,cr,"coc20",v,"current")}
                               onCost40={v=>applyCarrierRate(row.pol,cr,"coc40",v,"current")}/>
-                            <div style={{fontSize:9,fontWeight:700,color:"#b45309",margin:"8px 0 4px"}}>향후 운임</div>
+                            <div style={{fontSize:9,fontWeight:700,color:"#b45309",margin:"8px 0 4px"}}>Upcoming Rates</div>
                             <AdminPriceCols d20={fdC20} d40={fdC40} editable
                               onCost20={v=>applyCarrierRate(row.pol,cr,"coc20",v,"future")}
                               onCost40={v=>applyCarrierRate(row.pol,cr,"coc40",v,"future")}/>
