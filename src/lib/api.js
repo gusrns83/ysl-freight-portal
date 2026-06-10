@@ -47,6 +47,7 @@ const RENTAL_DB_KEYS = [
 ];
 const MISC_SETTINGS_KEYS = [
   "notices_json", "notice_text", "notice_on", "notice_file_url", "ad_banners_json", "ad_banner_json",
+  "sc_contacts_json",
 ];
 const ALL_PRICING_DB_KEYS = [...new Set([...OCEAN_DB_KEYS, ...DROP_DB_KEYS, ...RENTAL_DB_KEYS])];
 
