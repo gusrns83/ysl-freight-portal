@@ -180,6 +180,9 @@ export default function App() {
   const [rhSelectedIds, setRhSelectedIds] = useState([]);
   const [rhDuplicateIds, setRhDuplicateIds] = useState(() => new Set());
   const [rhShowDuplicatesOnly, setRhShowDuplicatesOnly] = useState(false);
+  const RH_COL_FILTERS_EMPTY = { carrier: "ALL", area: "ALL", pol: "", type: "ALL", period: "ALL", validity: "ALL" };
+  const [rhColFilters, setRhColFilters] = useState(RH_COL_FILTERS_EMPTY);
+  const [rhSort, setRhSort] = useState({ key: "", dir: 1 });
   const [rhSelectMsg, setRhSelectMsg] = useState("");
   const [carrierAdminCr, setCarrierAdminCr] = useState("SNK");
   const [carrierAdminPeriod, setCarrierAdminPeriod] = useState("current");
@@ -3009,18 +3012,52 @@ export default function App() {
       }
       return label;
     };
-    const rhDisplayRows = sortRateHistoryRowsByCity(
-      rhShowDuplicatesOnly && rhDuplicateIds.size
-        ? rhRows.filter(r => rhDuplicateIds.has(r.id))
-        : rhRows,
-    );
-    const rhAllSelected = rhDisplayRows.length > 0 && rhSelectedIds.length === rhDisplayRows.length;
     const rhValidityForRow = (row) => {
       const cr = row.carrier;
       if (!VALIDITY_KEYS.includes(cr)) return "—";
       const slot = validityInfo[cr]?.[row.period === "future" ? "future" : "current"];
       return formatValidityCompact(slot) || formatValiditySlotLabel(slot) || "—";
     };
+    const rhTypeLabel = (row) => (row.category === "dropoff"
+      ? (row.rate_type === "drop40" ? "40' Drop" : "20' Drop")
+      : row.rate_type);
+    const rhBaseRows = rhShowDuplicatesOnly && rhDuplicateIds.size
+      ? rhRows.filter(r => rhDuplicateIds.has(r.id))
+      : rhRows;
+    const rhColOptions = {
+      carrier: [...new Set(rhBaseRows.map(r => r.carrier).filter(Boolean))].sort(),
+      area: [...new Set(rhBaseRows.map(r => r.area || "—"))].sort(),
+      type: [...new Set(rhBaseRows.map(rhTypeLabel).filter(Boolean))].sort(),
+      validity: [...new Set(rhBaseRows.map(rhValidityForRow))].sort(),
+    };
+    const rhColFilterActive = rhColFilters.carrier !== "ALL" || rhColFilters.area !== "ALL"
+      || rhColFilters.pol.trim() !== "" || rhColFilters.type !== "ALL"
+      || rhColFilters.period !== "ALL" || rhColFilters.validity !== "ALL";
+    const rhPolQuery = rhColFilters.pol.trim().toUpperCase();
+    const rhFilteredRows = rhBaseRows.filter(r =>
+      (rhColFilters.carrier === "ALL" || r.carrier === rhColFilters.carrier)
+      && (rhColFilters.area === "ALL" || (r.area || "—") === rhColFilters.area)
+      && (!rhPolQuery
+        || String(r.pol || "").toUpperCase().includes(rhPolQuery)
+        || String(r.route || "").toUpperCase().includes(rhPolQuery))
+      && (rhColFilters.type === "ALL" || rhTypeLabel(r) === rhColFilters.type)
+      && (rhColFilters.period === "ALL" || (r.period === "future" ? "future" : "current") === rhColFilters.period)
+      && (rhColFilters.validity === "ALL" || rhValidityForRow(r) === rhColFilters.validity));
+    let rhDisplayRows = sortRateHistoryRowsByCity(rhFilteredRows);
+    if (rhSort.key) {
+      rhDisplayRows = [...rhDisplayRows].sort((a, b) => {
+        const av = a[rhSort.key]; const bv = b[rhSort.key];
+        if (av == null && bv == null) return 0;
+        if (av == null) return 1;
+        if (bv == null) return -1;
+        return (Number(av) - Number(bv)) * rhSort.dir;
+      });
+    }
+    const toggleRhSort = (key) => {
+      setRhSort(prev => (prev.key !== key ? { key, dir: -1 } : prev.dir === -1 ? { key, dir: 1 } : { key: "", dir: 1 }));
+    };
+    const rhSortMark = (key) => (rhSort.key !== key ? "" : rhSort.dir === -1 ? " ▼" : " ▲");
+    const rhAllSelected = rhDisplayRows.length > 0 && rhSelectedIds.length === rhDisplayRows.length;
     const toggleRhRowSelect = (id) => {
       setRhSelectMsg("");
       setRhSelectedIds(prev => (prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]));
@@ -3099,7 +3136,9 @@ export default function App() {
             <span style={{ fontSize: 11, color: "#6b7280" }}>
               {rhLoading ? "불러오는 중…" : rhShowDuplicatesOnly
                 ? `중복 ${rhDisplayRows.length}건 / 전체 ${rhRows.length}건`
-                : `${rhRows.length}건 (최대 400건)`}
+                : rhColFilterActive
+                  ? `필터 ${rhDisplayRows.length}건 / 전체 ${rhRows.length}건`
+                  : `${rhRows.length}건 (최대 400건)`}
             </span>
             <span style={{ fontSize: 11, color: rhSelectedIds.length ? "#b45309" : "#9ca3af", fontWeight: rhSelectedIds.length ? 700 : 400 }}>
               선택 {rhSelectedIds.length}건
@@ -3197,9 +3236,18 @@ export default function App() {
             <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11, minWidth: 860 }}>
               <thead>
                 <tr style={{ background: "#f0fdfa", borderBottom: "1px solid #e5e7eb" }}>
-                  {["일시", "선사", "Area", "POL/구간", "타입", "기간", "Validity", "매입", "매출", "마진", "출처"].map(h => (
+                  {["일시", "선사", "Area", "POL/구간", "타입", "기간", "Validity"].map(h => (
                     <th key={h} style={{ padding: "8px 6px", textAlign: h === "Validity" ? "center" : "left", fontWeight: 700, color: "#0f766e", whiteSpace: "nowrap" }}>{h}</th>
                   ))}
+                  {[["cost", "매입"], ["sell", "매출"], ["margin", "마진"]].map(([key, h]) => (
+                    <th
+                      key={key}
+                      onClick={() => toggleRhSort(key)}
+                      title="클릭하여 정렬 (▼ 큰순 → ▲ 작은순 → 해제)"
+                      style={{ padding: "8px 6px", textAlign: "right", fontWeight: 700, color: rhSort.key === key ? "#b45309" : "#0f766e", whiteSpace: "nowrap", cursor: "pointer", userSelect: "none" }}
+                    >{h}{rhSortMark(key)}</th>
+                  ))}
+                  <th style={{ padding: "8px 6px", textAlign: "left", fontWeight: 700, color: "#0f766e", whiteSpace: "nowrap" }}>출처</th>
                   <th style={{ padding: "8px 6px", textAlign: "center", fontWeight: 700, color: "#0f766e", width: 44 }}>
                     <input
                       type="checkbox"
@@ -3210,6 +3258,61 @@ export default function App() {
                       style={{ width: 16, height: 16, cursor: rhDisplayRows.length ? "pointer" : "not-allowed" }}
                     />
                   </th>
+                </tr>
+                <tr style={{ background: "#fafdfb", borderBottom: "1px solid #e5e7eb" }}>
+                  <td style={{ padding: "4px 6px" }} />
+                  <td style={{ padding: "4px 4px" }}>
+                    <select value={rhColFilters.carrier} onChange={e => setRhColFilters(f => ({ ...f, carrier: e.target.value }))} style={{ width: "100%", fontSize: 10, padding: "3px 2px", border: `1px solid ${rhColFilters.carrier !== "ALL" ? "#f59e0b" : "#d1d5db"}`, borderRadius: 5, background: rhColFilters.carrier !== "ALL" ? "#fffbeb" : "#fff" }}>
+                      <option value="ALL">전체</option>
+                      {rhColOptions.carrier.map(c => <option key={c} value={c}>{CN_KR[c] || c}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ padding: "4px 4px" }}>
+                    <select value={rhColFilters.area} onChange={e => setRhColFilters(f => ({ ...f, area: e.target.value }))} style={{ width: "100%", fontSize: 10, padding: "3px 2px", border: `1px solid ${rhColFilters.area !== "ALL" ? "#f59e0b" : "#d1d5db"}`, borderRadius: 5, background: rhColFilters.area !== "ALL" ? "#fffbeb" : "#fff" }}>
+                      <option value="ALL">전체</option>
+                      {rhColOptions.area.map(a => <option key={a} value={a}>{a}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ padding: "4px 4px" }}>
+                    <input
+                      type="text"
+                      value={rhColFilters.pol}
+                      onChange={e => setRhColFilters(f => ({ ...f, pol: e.target.value }))}
+                      placeholder="검색…"
+                      style={{ width: "100%", fontSize: 10, padding: "3px 5px", border: `1px solid ${rhColFilters.pol.trim() ? "#f59e0b" : "#d1d5db"}`, borderRadius: 5, boxSizing: "border-box", background: rhColFilters.pol.trim() ? "#fffbeb" : "#fff" }}
+                    />
+                  </td>
+                  <td style={{ padding: "4px 4px" }}>
+                    <select value={rhColFilters.type} onChange={e => setRhColFilters(f => ({ ...f, type: e.target.value }))} style={{ width: "100%", fontSize: 10, padding: "3px 2px", border: `1px solid ${rhColFilters.type !== "ALL" ? "#f59e0b" : "#d1d5db"}`, borderRadius: 5, background: rhColFilters.type !== "ALL" ? "#fffbeb" : "#fff" }}>
+                      <option value="ALL">전체</option>
+                      {rhColOptions.type.map(t => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </td>
+                  <td style={{ padding: "4px 4px" }}>
+                    <select value={rhColFilters.period} onChange={e => setRhColFilters(f => ({ ...f, period: e.target.value }))} style={{ width: "100%", fontSize: 10, padding: "3px 2px", border: `1px solid ${rhColFilters.period !== "ALL" ? "#f59e0b" : "#d1d5db"}`, borderRadius: 5, background: rhColFilters.period !== "ALL" ? "#fffbeb" : "#fff" }}>
+                      <option value="ALL">전체</option>
+                      <option value="current">현재</option>
+                      <option value="future">향후</option>
+                    </select>
+                  </td>
+                  <td style={{ padding: "4px 4px" }}>
+                    <select value={rhColFilters.validity} onChange={e => setRhColFilters(f => ({ ...f, validity: e.target.value }))} style={{ width: "100%", fontSize: 10, padding: "3px 2px", border: `1px solid ${rhColFilters.validity !== "ALL" ? "#f59e0b" : "#d1d5db"}`, borderRadius: 5, background: rhColFilters.validity !== "ALL" ? "#fffbeb" : "#fff" }}>
+                      <option value="ALL">전체</option>
+                      {rhColOptions.validity.map(v => <option key={v} value={v}>{v}</option>)}
+                    </select>
+                  </td>
+                  <td colSpan={4} style={{ padding: "4px 6px", textAlign: "right" }}>
+                    {(rhColFilterActive || rhSort.key) && (
+                      <button
+                        type="button"
+                        onClick={() => { setRhColFilters(RH_COL_FILTERS_EMPTY); setRhSort({ key: "", dir: 1 }); }}
+                        style={{ fontSize: 10, fontWeight: 600, padding: "3px 8px", borderRadius: 5, border: "1px solid #fcd34d", background: "#fffbeb", color: "#b45309", cursor: "pointer", whiteSpace: "nowrap" }}
+                      >
+                        ✕ 필터 초기화
+                      </button>
+                    )}
+                  </td>
+                  <td />
                 </tr>
               </thead>
               <tbody>
