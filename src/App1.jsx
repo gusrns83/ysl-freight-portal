@@ -2720,8 +2720,19 @@ export default function App() {
     }
     return mkPrice(cost, getM(row.pol, row.area, t, period) + dropM, cr);
   };
+  const SC_NUMBER_ENABLED = false; // S/C 번호 표시 — 향후 사용 예정 (true 로 변경 시 재활성화)
+  const SC_CONTACTS = [
+    { city: "Seoul", email: "Kevin@yslagency.com" },
+    { city: "MOW", email: "chkun@yslagency.com" },
+    { city: "VVO", email: "dennis.roh@yslfe.com" },
+  ];
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
+  const copyScContact = (email) => {
+    try{const t=document.createElement("textarea");t.value=email;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){}
+    setSc(prev => prev ? { ...prev, copiedEmail: email } : prev);
+    setTimeout(() => setSc(prev => prev && prev.copiedEmail === email ? { ...prev, copiedEmail: null } : prev), 1500);
+  };
 
   const filt = useMemo(()=>{ let d=fData; if(areaF!=="ALL")d=d.filter(r=>r.area===areaF); if(search)d=d.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())); return d; },[fData,areaF,search]);
   const rFilt = useMemo(()=>{
@@ -5079,11 +5090,27 @@ export default function App() {
         <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center",background:"rgba(0,0,0,0.3)"}} onClick={()=>setSc(null)}>
           <div style={{width:"100%",maxWidth:480,background:"#fff",borderRadius:"20px 20px 0 0",padding:"20px 20px 32px",boxShadow:"0 -20px 60px rgba(0,0,0,0.2)"}} onClick={e=>e.stopPropagation()}>
             <div style={{width:40,height:4,background:"#e5e7eb",borderRadius:2,margin:"0 auto 16px"}}/>
-            <div style={{fontSize:10,color:"#9ca3af",fontWeight:500,marginBottom:4}}>S/C NUMBER · {sc.k} · {sc.size}</div>
+            <div style={{fontSize:10,color:"#9ca3af",fontWeight:500,marginBottom:4}}>CONTACT · {sc.k} · {sc.size}</div>
             <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>{sc.route}</div>
-            <div style={{display:"flex",alignItems:"center",gap:8,background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:12}}>
-              <span style={{flex:1,fontSize:18,fontFamily:"monospace",fontWeight:700,color:"#111",letterSpacing:2}}>{sc.sc}</span>
-              <button onClick={copySC} style={{padding:"8px 16px",fontSize:12,fontWeight:600,color:"#fff",background:sc.copied?"#16a34a":"#111827",border:"none",borderRadius:8,cursor:"pointer"}}>{sc.copied?"Copied":"Copy"}</button>
+            {SC_NUMBER_ENABLED && (
+              <div style={{display:"flex",alignItems:"center",gap:8,background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:12,marginBottom:8}}>
+                <span style={{flex:1,fontSize:18,fontFamily:"monospace",fontWeight:700,color:"#111",letterSpacing:2}}>{sc.sc}</span>
+                <button onClick={copySC} style={{padding:"8px 16px",fontSize:12,fontWeight:600,color:"#fff",background:sc.copied?"#16a34a":"#111827",border:"none",borderRadius:8,cursor:"pointer"}}>{sc.copied?"Copied":"Copy"}</button>
+              </div>
+            )}
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {SC_CONTACTS.map(({city,email}) => (
+                <div key={city} style={{display:"flex",alignItems:"center",gap:8,background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:12}}>
+                  <span style={{fontSize:11,fontWeight:700,color:"#1D2B4F",width:44,flexShrink:0}}>{city}</span>
+                  <span style={{flex:1,fontSize:13,fontWeight:600,color:"#111",wordBreak:"break-all"}}>{email}</span>
+                  <button
+                    onClick={() => copyScContact(email)}
+                    style={{padding:"8px 16px",fontSize:12,fontWeight:600,color:"#fff",background:sc.copiedEmail===email?"#16a34a":"#111827",border:"none",borderRadius:8,cursor:"pointer",flexShrink:0}}
+                  >
+                    {sc.copiedEmail===email?"Copied":"Copy"}
+                  </button>
+                </div>
+              ))}
             </div>
           </div>
         </div>
