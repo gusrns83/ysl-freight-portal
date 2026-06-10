@@ -190,6 +190,7 @@ export default function App() {
   const [carrierAdminPolFilter, setCarrierAdminPolFilter] = useState("");
   const [carrierEditCell, setCarrierEditCell] = useState(null);
   const [gridEditUnlocked, setGridEditUnlocked] = useState(false);
+  const gridEditSnapshotRef = useRef(null);
   const [rentalAdminPeriod, setRentalAdminPeriod] = useState("current");
   const [selReturnCity, setSelReturnCity] = useState("");
   const [rentalEditCell, setRentalEditCell] = useState(null);
@@ -4282,6 +4283,24 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => {
+                      const snap = gridEditSnapshotRef.current;
+                      if (snap) {
+                        setPolCostO(snap.polCostO);
+                        setPolM(snap.polM);
+                        setPolMFuture(snap.polMFuture);
+                      }
+                      gridEditSnapshotRef.current = null;
+                      setGridEditUnlocked(false);
+                      setCarrierEditCell(null);
+                    }}
+                    style={{fontSize:11,fontWeight:600,padding:"6px 14px",borderRadius:8,border:"1px solid #d1d5db",background:"#fff",color:"#374151",cursor:"pointer"}}
+                  >
+                    취소
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      gridEditSnapshotRef.current = null;
                       setGridEditUnlocked(false);
                       setCarrierEditCell(null);
                       saveCarrierPricing();
@@ -4295,7 +4314,10 @@ export default function App() {
               ) : (
                 <button
                   type="button"
-                  onClick={() => setGridEditUnlocked(true)}
+                  onClick={() => {
+                    gridEditSnapshotRef.current = { polCostO, polM, polMFuture };
+                    setGridEditUnlocked(true);
+                  }}
                   style={{fontSize:11,fontWeight:700,padding:"6px 14px",borderRadius:8,border:"1px solid #fcd34d",background:"#fffbeb",color:"#b45309",cursor:"pointer"}}
                 >
                   ✏️ 단가 수정
