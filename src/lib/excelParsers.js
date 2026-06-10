@@ -1,5 +1,5 @@
 import { normalizeRentalCityBucket } from "../config.js";
-import { CRS, DOC_RC, RATE_TYPES, formatValiditySlotLabel, normalizeRentalCityName, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, syncFromAfterTill } from "../data/staticData.js";
+import { CRS, DOC_RC, PM, RATE_TYPES, formatValiditySlotLabel, normalizeRentalCityName, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, syncFromAfterTill } from "../data/staticData.js";
 import { DROP_CITY_LABELS, marginNum, resolveCarrierEffectiveSell, resolveCarrierExplicitSell } from "./pricing.js";
 
 // ── Excel upload (inlined — GitHub App.jsx 단일 배포) ──
