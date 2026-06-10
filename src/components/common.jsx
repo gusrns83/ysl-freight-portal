@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { AD_ROTATE_MS } from "../config.js";
-import { CARRIER_CALL_PORTS, CRS, FURTHER_NOTICE_LABEL, formatValidityDate, normalizeValiditySlot, parseValidityToISO } from "../data/staticData.js";
+import { CARRIER_CALL_PORTS, CN, CRS, FURTHER_NOTICE_LABEL, formatValidityDate, normalizeValiditySlot, parseValidityToISO } from "../data/staticData.js";
 
 function FooterAdSlot({ ads, dismissed, onDismiss }) {
   const slotRef = useRef(null);
