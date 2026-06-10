@@ -281,30 +281,30 @@ const TabIconDropoff = ({ active }) => (
 const TabIconRental = ({ active }) => (
   <svg width="90" height="74" viewBox="0 0 90 74" fill="none" aria-hidden style={tabIconStyle(active)}>
     {/* 앞면 */}
-    <rect x="4" y="12" width="68" height="38" rx="2" fill={active ? "#92400E" : "#A16207"}/>
+    <rect x="4" y="12" width="68" height="38" rx="2" fill={active ? "#1E3A5F" : "#94A3B8"}/>
     {/* 골(corrugation) */}
     {[15,26,37,48,59].map(x => (
       <line key={x} x1={x} y1="12" x2={x} y2="50"
-            stroke={active ? "#78350F" : "#854D0E"} strokeWidth="1.5"/>
+            stroke={active ? "#475569" : "#CBD5E1"} strokeWidth="1.5"/>
     ))}
     {/* 윗면 */}
-    <path d="M 4,12 L 16,3 L 84,3 L 72,12 Z" fill={active ? "#B45309" : "#CA8A04"}/>
+    <path d="M 4,12 L 16,3 L 84,3 L 72,12 Z" fill={active ? "#475569" : "#CBD5E1"}/>
     {/* 옆면 */}
-    <path d="M 72,12 L 84,3 L 84,41 L 72,50 Z" fill={active ? "#78350F" : "#854D0E"}/>
+    <path d="M 72,12 L 84,3 L 84,41 L 72,50 Z" fill={active ? "#1E293B" : "#64748B"}/>
     {/* 도어 분리선 */}
-    <line x1="38" y1="12" x2="38" y2="50" stroke={active ? "#451A03" : "#713F12"} strokeWidth="1.2"/>
+    <line x1="38" y1="12" x2="38" y2="50" stroke={active ? "#0F172A" : "#64748B"} strokeWidth="1.2"/>
     {/* YSL Agency 라벨 */}
-    <rect x="8" y="16" width="58" height="14" rx="2" fill={active ? "#FEF3C7" : "#FEF9C3"}/>
+    <rect x="8" y="16" width="58" height="14" rx="2" fill={active ? "#E2E8F0" : "#F1F5F9"}/>
     <text x="22" y="26" textAnchor="middle"
           fontFamily="Arial" fontWeight="700" fontSize="8"
-          fill={active ? "#78350F" : "#92400E"}>YSL</text>
+          fill={active ? "#1E3A5F" : "#64748B"}>YSL</text>
     <line x1="34" y1="17" x2="34" y2="29"
-          stroke={active ? "#D97706" : "#B45309"} strokeWidth="0.8"/>
+          stroke={active ? "#64748B" : "#94A3B8"} strokeWidth="0.8"/>
     <text x="49" y="26" textAnchor="middle"
           fontFamily="Arial" fontWeight="400" fontSize="7"
-          fill={active ? "#92400E" : "#A16207"}>Agency</text>
+          fill={active ? "#334155" : "#94A3B8"}>Agency</text>
     {/* 하단 레일 */}
-    <rect x="4" y="48" width="68" height="3" rx="1" fill={active ? "#78350F" : "#854D0E"}/>
+    <rect x="4" y="48" width="68" height="3" rx="1" fill={active ? "#1E293B" : "#64748B"}/>
     {/* 소형 배 실루엣 */}
     <g transform="translate(48,56)" opacity="0.5">
       <path d="M 0,8 L 0,14 L 30,14 L 35,9 L 0,8 Z"
