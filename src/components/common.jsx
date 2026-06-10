@@ -211,54 +211,110 @@ const CarrierPortGuide = () => (
 
 const tabIconStyle = (active) => ({ opacity: active ? 1 : 0.72, display: "block" });
 
-const TabIconOcean = ({active}) => (
-  <svg width="34" height="28" viewBox="0 0 34 28" fill="none" aria-hidden style={tabIconStyle(active)}>
-    <path d="M2 24h30" stroke="#38BDF8" strokeWidth="2" strokeLinecap="round"/>
-    <path d="M5 24l1.5-5.5h19L27 24" fill="#1D4ED8" stroke="#1E3A8A" strokeWidth="1.2"/>
-    <rect x="7" y="14" width="4" height="4" rx="0.3" fill="#EF4444" stroke="#B91C1C" strokeWidth="0.8"/>
-    <rect x="12" y="14" width="4" height="4" rx="0.3" fill="#3B82F6" stroke="#1D4ED8" strokeWidth="0.8"/>
-    <rect x="17" y="14" width="4" height="4" rx="0.3" fill="#FBBF24" stroke="#D97706" strokeWidth="0.8"/>
-    <rect x="10" y="10" width="4" height="3.5" rx="0.3" fill="#22C55E" stroke="#15803D" strokeWidth="0.8"/>
-    <rect x="15" y="10" width="4" height="3.5" rx="0.3" fill="#F97316" stroke="#C2410C" strokeWidth="0.8"/>
-    <path d="M22.5 11h3.5v8.5h-3.5" fill="#64748B" stroke="#475569" strokeWidth="1"/>
-    <path d="M23.5 9.5h1.8v1.8h-1.8" fill="#94A3B8" stroke="#475569" strokeWidth="0.8"/>
+const TabIconOcean = ({ active }) => (
+  <svg width="54" height="44" viewBox="0 0 54 44" fill="none" aria-hidden style={tabIconStyle(active)}>
+    {/* 굴뚝 */}
+    <rect x="33" y="2" width="7" height="18" rx="2" fill={active ? "#1E3A5F" : "#94A3B8"}/>
+    <rect x="31" y="2" width="11" height="5" rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
+    {/* 컨테이너 2열 */}
+    <rect x="2"  y="8"  width="13" height="9" rx="1" fill={active ? "#1E3A5F" : "#94A3B8"}/>
+    <rect x="16" y="8"  width="13" height="9" rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
+    <line x1="8"  y1="8" x2="8"  y2="17" stroke={active ? "#475569" : "#E2E8F0"} strokeWidth="0.8"/>
+    <line x1="22" y1="8" x2="22" y2="17" stroke={active ? "#475569" : "#E2E8F0"} strokeWidth="0.8"/>
+    {/* 컨테이너 1열 */}
+    <rect x="0"  y="18" width="13" height="10" rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
+    <rect x="14" y="18" width="13" height="10" rx="1" fill={active ? "#1E3A5F" : "#94A3B8"}/>
+    <rect x="28" y="18" width="13" height="10" rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
+    <line x1="6"  y1="18" x2="6"  y2="28" stroke={active ? "#475569" : "#E2E8F0"} strokeWidth="0.8"/>
+    <line x1="20" y1="18" x2="20" y2="28" stroke={active ? "#475569" : "#E2E8F0"} strokeWidth="0.8"/>
+    <line x1="34" y1="18" x2="34" y2="28" stroke={active ? "#475569" : "#E2E8F0"} strokeWidth="0.8"/>
+    {/* 선체 */}
+    <path d="M -2,28 L -2,38 L 44,38 L 52,30 L -2,28 Z" fill={active ? "#1E3A5F" : "#94A3B8"}/>
+    <line x1="2" y1="33" x2="44" y2="33" stroke={active ? "#475569" : "#CBD5E1"} strokeWidth="0.8"/>
+    <path d="M 44,38 L 52,30 L 52,38 Z" fill={active ? "#334155" : "#CBD5E1"}/>
+    {/* 수면 */}
+    <path d="M -6,38 Q 8,41 22,38 Q 36,35 50,38 Q 58,40 60,38"
+          fill="none" stroke={active ? "#93C5FD" : "#BAE6FD"} strokeWidth="1.5"/>
   </svg>
 );
-const TabIconDropoff = ({active}) => (
-  <svg width="42" height="28" viewBox="0 0 42 28" fill="none" aria-hidden style={tabIconStyle(active)}>
-    <path d="M1 24h16" stroke="#38BDF8" strokeWidth="1.5" strokeLinecap="round"/>
-    <path d="M2.5 24l1-4.5h11l1 4.5" fill="#1D4ED8" stroke="#1E3A8A" strokeWidth="1"/>
-    <rect x="3.5" y="16" width="2.8" height="2.8" rx="0.2" fill="#EF4444" stroke="#B91C1C" strokeWidth="0.6"/>
-    <rect x="7" y="16" width="2.8" height="2.8" rx="0.2" fill="#3B82F6" stroke="#1D4ED8" strokeWidth="0.6"/>
-    <rect x="10.5" y="16" width="2.8" height="2.8" rx="0.2" fill="#FBBF24" stroke="#D97706" strokeWidth="0.6"/>
-    <path d="M12.5 13h2v5.5h-2" fill="#64748B" stroke="#475569" strokeWidth="0.8"/>
-    <path d="M19 24h3" stroke="#94A3B8" strokeWidth="1.2" strokeLinecap="round"/>
-    <path d="M22 24l1.2-1.2 1.2 1.2" stroke="#94A3B8" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round"/>
-    <path d="M24 15.5h3.5l1 2v4.5H20v-6.5z" fill="#F97316" stroke="#C2410C" strokeWidth="1"/>
-    <rect x="27.5" y="11" width="11" height="7.5" rx="0.4" fill="#14B8A6" stroke="#0F766E" strokeWidth="1"/>
-    <line x1="29.5" y1="11" x2="29.5" y2="18.5" stroke="#0D9488" strokeWidth="0.7"/>
-    <line x1="32" y1="11" x2="32" y2="18.5" stroke="#0D9488" strokeWidth="0.7"/>
-    <line x1="34.5" y1="11" x2="34.5" y2="18.5" stroke="#0D9488" strokeWidth="0.7"/>
-    <line x1="37" y1="11" x2="37" y2="18.5" stroke="#0D9488" strokeWidth="0.7"/>
-    <rect x="27.5" y="11" width="11" height="2" fill="#2DD4BF"/>
-    <path d="M21.5 22h16" stroke="#475569" strokeWidth="1.5" strokeLinecap="round"/>
-    <circle cx="26" cy="23" r="1.6" fill="#1F2937"/><circle cx="37" cy="23" r="1.6" fill="#1F2937"/>
+
+const TabIconDropoff = ({ active }) => (
+  <svg width="100" height="40" viewBox="0 0 100 40" fill="none" aria-hidden style={tabIconStyle(active)}>
+    {/* 소형 선박 */}
+    <g transform="scale(0.62)">
+      <rect x="0"  y="10" width="10" height="7" rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
+      <rect x="11" y="10" width="10" height="7" rx="1" fill={active ? "#1E3A5F" : "#94A3B8"}/>
+      <rect x="22" y="10" width="10" height="7" rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
+      <rect x="5"  y="4"  width="10" height="7" rx="1" fill={active ? "#1E3A5F" : "#94A3B8"}/>
+      <rect x="16" y="4"  width="10" height="7" rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
+      <rect x="28" y="0"  width="5"  height="17" rx="1" fill={active ? "#1E3A5F" : "#94A3B8"}/>
+      <path d="M -2,17 L -2,25 L 34,25 L 40,19 L -2,17 Z" fill={active ? "#1E3A5F" : "#94A3B8"}/>
+      <path d="M -4,25 Q 6,28 18,25 Q 30,22 42,25"
+            fill="none" stroke={active ? "#93C5FD" : "#BAE6FD"} strokeWidth="1.5"/>
+    </g>
+    {/* + 기호 */}
+    <text x="32" y="19" textAnchor="middle"
+          fontSize="11" fill={active ? "#64748B" : "#CBD5E1"}>+</text>
+    {/* 트럭 */}
+    <g transform="translate(40, 4)">
+      {/* 컨테이너 트레일러 */}
+      <rect x="0" y="0" width="38" height="20" rx="2" fill={active ? "#334155" : "#CBD5E1"}/>
+      <line x1="9"  y1="0" x2="9"  y2="20" stroke={active ? "#475569" : "#E2E8F0"} strokeWidth="0.8"/>
+      <line x1="19" y1="0" x2="19" y2="20" stroke={active ? "#475569" : "#E2E8F0"} strokeWidth="0.8"/>
+      <line x1="29" y1="0" x2="29" y2="20" stroke={active ? "#475569" : "#E2E8F0"} strokeWidth="0.8"/>
+      <rect x="0" y="0" width="38" height="3" rx="1" fill={active ? "#475569" : "#E2E8F0"}/>
+      {/* 운전석 */}
+      <rect x="38" y="5"  width="20" height="15" rx="2" fill={active ? "#1E3A5F" : "#94A3B8"}/>
+      <rect x="42" y="7"  width="12" height="8"  rx="1" fill={active ? "#64748B" : "#CBD5E1"} opacity="0.7"/>
+      <rect x="40" y="2"  width="16" height="5"  rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
+      {/* 바퀴 */}
+      <circle cx="10" cy="23" r="4" fill={active ? "#1E293B" : "#94A3B8"}/>
+      <circle cx="10" cy="23" r="2" fill={active ? "#475569" : "#CBD5E1"}/>
+      <circle cx="28" cy="23" r="4" fill={active ? "#1E293B" : "#94A3B8"}/>
+      <circle cx="28" cy="23" r="2" fill={active ? "#475569" : "#CBD5E1"}/>
+      <circle cx="50" cy="23" r="4" fill={active ? "#1E293B" : "#94A3B8"}/>
+      <circle cx="50" cy="23" r="2" fill={active ? "#475569" : "#CBD5E1"}/>
+    </g>
   </svg>
 );
-const TabIconRental = ({active}) => (
-  <svg width="34" height="24" viewBox="0 0 36 24" fill="none" aria-hidden style={tabIconStyle(active)}>
-    <rect x="2" y="5" width="32" height="15" rx="1" fill="#8B5CF6" fillOpacity="0.2" stroke="#7C3AED" strokeWidth="1.5"/>
-    <line x1="2" y1="5" x2="2" y2="20" stroke="#6D28D9" strokeWidth="2"/>
-    <line x1="34" y1="5" x2="34" y2="20" stroke="#6D28D9" strokeWidth="2"/>
-    <line x1="9" y1="5" x2="9" y2="20" stroke="#A78BFA" strokeWidth="1"/>
-    <line x1="16" y1="5" x2="16" y2="20" stroke="#A78BFA" strokeWidth="1"/>
-    <line x1="23" y1="5" x2="23" y2="20" stroke="#A78BFA" strokeWidth="1"/>
-    <line x1="30" y1="5" x2="30" y2="20" stroke="#A78BFA" strokeWidth="1"/>
-    <rect x="2" y="5" width="32" height="3.5" fill="#A78BFA"/>
-    <rect x="5" y="9" width="6" height="4" rx="0.3" fill="#F59E0B" stroke="#D97706" strokeWidth="0.8"/>
-    <rect x="13" y="9" width="6" height="4" rx="0.3" fill="#3B82F6" stroke="#1D4ED8" strokeWidth="0.8"/>
-    <rect x="21" y="9" width="6" height="4" rx="0.3" fill="#EF4444" stroke="#B91C1C" strokeWidth="0.8"/>
-    <circle cx="7" cy="22" r="1.8" fill="#1F2937"/><circle cx="29" cy="22" r="1.8" fill="#1F2937"/>
+
+const TabIconRental = ({ active }) => (
+  <svg width="90" height="74" viewBox="0 0 90 74" fill="none" aria-hidden style={tabIconStyle(active)}>
+    {/* 앞면 */}
+    <rect x="4" y="12" width="68" height="38" rx="2" fill={active ? "#92400E" : "#A16207"}/>
+    {/* 골(corrugation) */}
+    {[15,26,37,48,59].map(x => (
+      <line key={x} x1={x} y1="12" x2={x} y2="50"
+            stroke={active ? "#78350F" : "#854D0E"} strokeWidth="1.5"/>
+    ))}
+    {/* 윗면 */}
+    <path d="M 4,12 L 16,3 L 84,3 L 72,12 Z" fill={active ? "#B45309" : "#CA8A04"}/>
+    {/* 옆면 */}
+    <path d="M 72,12 L 84,3 L 84,41 L 72,50 Z" fill={active ? "#78350F" : "#854D0E"}/>
+    {/* 도어 분리선 */}
+    <line x1="38" y1="12" x2="38" y2="50" stroke={active ? "#451A03" : "#713F12"} strokeWidth="1.2"/>
+    {/* YSL Agency 라벨 */}
+    <rect x="8" y="16" width="58" height="14" rx="2" fill={active ? "#FEF3C7" : "#FEF9C3"}/>
+    <text x="22" y="26" textAnchor="middle"
+          fontFamily="Arial" fontWeight="700" fontSize="8"
+          fill={active ? "#78350F" : "#92400E"}>YSL</text>
+    <line x1="34" y1="17" x2="34" y2="29"
+          stroke={active ? "#D97706" : "#B45309"} strokeWidth="0.8"/>
+    <text x="49" y="26" textAnchor="middle"
+          fontFamily="Arial" fontWeight="400" fontSize="7"
+          fill={active ? "#92400E" : "#A16207"}>Agency</text>
+    {/* 하단 레일 */}
+    <rect x="4" y="48" width="68" height="3" rx="1" fill={active ? "#78350F" : "#854D0E"}/>
+    {/* 소형 배 실루엣 */}
+    <g transform="translate(48,56)" opacity="0.5">
+      <path d="M 0,8 L 0,14 L 30,14 L 35,9 L 0,8 Z"
+            fill={active ? "#475569" : "#94A3B8"}/>
+      <rect x="3"  y="2" width="8" height="7" rx="0.5" fill={active ? "#475569" : "#94A3B8"}/>
+      <rect x="13" y="2" width="8" height="7" rx="0.5" fill={active ? "#475569" : "#94A3B8"}/>
+      <rect x="23" y="0" width="4" height="9" rx="0.5" fill={active ? "#475569" : "#94A3B8"}/>
+      <path d="M -2,14 Q 8,17 18,14 Q 26,11 36,14"
+            fill="none" stroke={active ? "#93C5FD" : "#BAE6FD"} strokeWidth="1.2"/>
+    </g>
   </svg>
 );
 
