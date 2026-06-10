@@ -1,5 +1,5 @@
 import { API_TIMEOUT_MS, DEFAULT_MARGINS, RATE_HISTORY_UPLOAD_TIMEOUT_MS, RENT_COMBO_KEYS, normalizeRentalCityBucket, readStoredPricingCache, rentComboMarginType } from "../config.js";
-import { CRS, DOC_RC, RATE_TYPES, RENTAL_RATE_TYPES, VALIDITY_KEYS, buildDefaultRentalRates, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, normalizeRentalMargins, normalizeValidityCarrier } from "../data/staticData.js";
+import { CRS, DO, DOC_RC, PM, RATE_TYPES, RC, RENTAL_RATE_TYPES, VALIDITY_KEYS, buildDefaultRentalRates, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, normalizeRentalMargins, normalizeValidityCarrier } from "../data/staticData.js";
 import { RENTAL_DB_KEYS, api, mergePortalOverridesIntoPolCostO, withTimeout } from "./api.js";
 import { applyRateHistoryDeletesToStores, buildRateHistoryRowsFromUpload, carrierUploadServesRate, enrichRateHistoryRowsWithCosts, rateHistoryScopeFromUpload } from "./excelParsers.js";
 
