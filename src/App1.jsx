@@ -8,6 +8,165 @@ import { DROP_DB_KEYS, EXCEL_UPLOAD_MAX_MS, MISC_SETTINGS_KEYS, OCEAN_DB_KEYS, R
 import { JAPAN_POL_SET, LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, snkJapanReferenceMargins, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
 import { bootPricingFromCache, buildBuyingGriCosts, buildCopyCurrentToFutureCosts, buildRateHistoryQuery, buildSellingGriSells, copyCarrierDropRatesPeriod, copyCarrierRatesPeriod, deleteRateHistoryByIds, diffRateHistoryRows, displayMarginFromPrices, fetchRateHistoryExcelUploadOcean, flattenRateSnapshot, getPolStoredMargin, griPeriodLabel, marginNowTs, marginNum, mergePolCostODeep, parsePricingFromSettings, pickLatestMargin, pickRateHistoryDuplicatesToRemove, postRateHistoryRows, pricingCacheFromSnapshot, rateHistoryEntryKey, resolveCarrierEffectiveSell, resolveCarrierExplicitSell, resolveMarginCandidates, settingBundleHas, sortRateHistoryRowsByCity } from "./lib/pricing.js";
 
+const QUOTE_FN_URL = `${SB_URL}/functions/v1/send-quote-request`;
+const QUOTE_COOLDOWN_MS = 60000;
+
+function QuoteRequestModal({ info, onClose }) {
+  const [email, setEmail] = useState("");
+  const [qty, setQty] = useState("");
+  const [cargo, setCargo] = useState("");
+  const [target, setTarget] = useState("");
+  const [etdFrom, setEtdFrom] = useState("");
+  const [etdTo, setEtdTo] = useState("");
+  const [sending, setSending] = useState(false);
+  const [status, setStatus] = useState(null); // {type:"ok"|"err", msg}
+  const [cooldownUntil, setCooldownUntil] = useState(0);
+  const [nowTick, setNowTick] = useState(Date.now());
+
+  useEffect(() => {
+    if (!cooldownUntil) return undefined;
+    const t = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [cooldownUntil]);
+
+  const cooldownLeft = Math.max(0, Math.ceil((cooldownUntil - nowTick) / 1000));
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+
+  const submit = async () => {
+    if (!emailValid) { setStatus({ type: "err", msg: "올바른 이메일 주소를 입력하세요." }); return; }
+    if (cooldownLeft > 0 || sending) return;
+    setSending(true);
+    setStatus(null);
+    try {
+      // staffEmails: settings.quote_staff_emails (JSON 배열, 없으면 빈 배열)
+      let staffEmails = [];
+      try {
+        const rows = await fetchSettingsInKeys(["quote_staff_emails"]);
+        const raw = rows?.find(r => r.key === "quote_staff_emails")?.value;
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) staffEmails = parsed.filter(e => typeof e === "string" && e.trim());
+        }
+      } catch {}
+
+      const payload = {
+        customerEmail: email.trim(),
+        containerQty: qty.trim(),
+        cargoName: cargo.trim(),
+        targetRate: target.trim(),
+        pol: info.pol,
+        pod: info.pod || "",
+        etdFrom: etdFrom || "",
+        etdTo: etdTo || "",
+        carrier: info.carrier,
+        rateType: info.rateType,
+        currentRate: info.currentRate,
+        staffEmails,
+      };
+
+      const insertRow = {
+        customer_email: payload.customerEmail,
+        container_qty: payload.containerQty || null,
+        cargo_name: payload.cargoName || null,
+        target_rate: payload.targetRate || null,
+        pol: payload.pol || null,
+        pod: payload.pod || null,
+        carrier: payload.carrier || null,
+        rate_type: payload.rateType || null,
+        current_rate: payload.currentRate || null,
+        etd_from: etdFrom || null,
+        etd_to: etdTo || null,
+      };
+
+      const [, fnRes] = await Promise.all([
+        api("quote_requests", {
+          method: "POST",
+          body: JSON.stringify([insertRow]),
+          headers: { Prefer: "return=minimal" },
+        }),
+        fetch(QUOTE_FN_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        }).then(r => r.json()),
+      ]);
+
+      if (fnRes && (fnRes.id || fnRes.error == null && fnRes.statusCode == null)) {
+        setStatus({ type: "ok", msg: "견적 요청이 접수되었습니다. 담당자가 곧 연락드리겠습니다." });
+        setCooldownUntil(Date.now() + QUOTE_COOLDOWN_MS);
+        setNowTick(Date.now());
+      } else {
+        setStatus({ type: "err", msg: `메일 발송 실패: ${fnRes?.message || fnRes?.error || "알 수 없는 오류"}` });
+      }
+    } catch (e) {
+      setStatus({ type: "err", msg: `발송 실패: ${e.message || e}` });
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const fieldStyle = { display: "block", width: "100%", marginTop: 4, padding: "9px 10px", fontSize: 13, border: "1px solid #d1d5db", borderRadius: 8, boxSizing: "border-box" };
+  const labelStyle = { fontSize: 11, color: "#6b7280", display: "block", marginBottom: 10 };
+
+  return (
+    <div style={{position:"fixed",inset:0,zIndex:60,background:"rgba(0,0,0,0.45)",display:"flex",alignItems:"center",justifyContent:"center",padding:20}} onClick={onClose}>
+      <div style={{background:"#fff",borderRadius:16,width:"100%",maxWidth:420,maxHeight:"90vh",overflowY:"auto",boxShadow:"0 20px 60px rgba(0,0,0,0.25)"}} onClick={e=>e.stopPropagation()}>
+        <div style={{background:"#1D2B4F",padding:"14px 20px",display:"flex",alignItems:"center",justifyContent:"space-between",borderRadius:"16px 16px 0 0"}}>
+          <span style={{fontSize:14,fontWeight:700,color:"#fff"}}>📋 Request Quote</span>
+          <button onClick={onClose} style={{color:"#9ca3af",background:"none",border:"none",cursor:"pointer",fontSize:20,lineHeight:1}}>✕</button>
+        </div>
+        <div style={{padding:"16px 20px 20px"}}>
+          <div style={{background:"#f8fafc",border:"1px solid #e5e7eb",borderRadius:10,padding:12,marginBottom:14,fontSize:12,color:"#374151",lineHeight:1.7}}>
+            <div><b>POL</b> · {info.pol}{info.pod ? <> → <b>{info.pod}</b></> : null}</div>
+            <div><b>Carrier</b> · {CN[info.carrier] || info.carrier}</div>
+            <div><b>Type</b> · {info.rateType}</div>
+            <div><b>Current Rate</b> · {info.currentRate}</div>
+          </div>
+          <label style={labelStyle}>Email <span style={{color:"#dc2626"}}>*</span>
+            <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@email.com"
+              style={{...fieldStyle, borderColor: email && !emailValid ? "#fca5a5" : "#d1d5db"}}/>
+          </label>
+          <label style={labelStyle}>Container Q'ty
+            <input type="text" value={qty} onChange={e=>setQty(e.target.value)} placeholder="20'x2, 40'x1" style={fieldStyle}/>
+          </label>
+          <label style={labelStyle}>Cargo
+            <input type="text" value={cargo} onChange={e=>setCargo(e.target.value)} placeholder="Frozen fish, General cargo…" style={fieldStyle}/>
+          </label>
+          <label style={labelStyle}>Target Rate (USD)
+            <input type="text" inputMode="numeric" value={target} onChange={e=>setTarget(e.target.value)} placeholder="1800" style={fieldStyle}/>
+          </label>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:10}}>
+            <label style={{...labelStyle,marginBottom:0}}>ETD From
+              <input type="date" value={etdFrom} onChange={e=>setEtdFrom(e.target.value)} style={fieldStyle}/>
+            </label>
+            <label style={{...labelStyle,marginBottom:0}}>ETD To
+              <input type="date" value={etdTo} onChange={e=>setEtdTo(e.target.value)} min={etdFrom || undefined} style={fieldStyle}/>
+            </label>
+          </div>
+          {status && (
+            <div style={{fontSize:12,padding:10,borderRadius:8,marginBottom:10,
+              color: status.type === "ok" ? "#166534" : "#dc2626",
+              background: status.type === "ok" ? "#f0fdf4" : "#fef2f2",
+              border: `1px solid ${status.type === "ok" ? "#bbf7d0" : "#fecaca"}`}}>
+              {status.msg}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={submit}
+            disabled={sending || cooldownLeft > 0}
+            style={{width:"100%",padding:"12px",fontSize:13,fontWeight:700,color:"#fff",
+              background: sending || cooldownLeft > 0 ? "#94a3b8" : "#1D2B4F",
+              border:"none",borderRadius:10,cursor: sending || cooldownLeft > 0 ? "not-allowed" : "pointer"}}
+          >
+            {sending ? "발송 중…" : cooldownLeft > 0 ? `재발송 가능까지 ${cooldownLeft}초` : "발송 (Send)"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const fData = useMemo(() => FR.map(r => ({area:r[0],pol:r[1],rates:{SNK:{coc20:r[2],coc40:r[3],soc20:r[4],soc40:r[5]},DY:{coc20:r[6],coc40:r[7],soc20:r[8],soc40:r[9]},CK:{coc20:r[10],coc40:r[11],soc20:r[12],soc40:r[13]}}})), []);
   const rData = useMemo(() => RN.map(r => {
@@ -160,6 +319,17 @@ export default function App() {
   const [cityOpen, setCityOpen] = useState(null);
   const [doCityOpen, setDoCityOpen] = useState(null);
   const [sc, setSc] = useState(null);
+  const [quoteReq, setQuoteReq] = useState(null);
+  const quoteBtnEl = (info) => (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); setQuoteReq(info); }}
+      title="Request quote"
+      style={{display:"block",marginTop:3,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,border:"1px solid #bfdbfe",background:"#eff6ff",color:"#1d4ed8",cursor:"pointer"}}
+    >
+      견적
+    </button>
+  );
 
   // Client mgmt
   const [showMgr, setShowMgr] = useState(false);
@@ -4629,6 +4799,7 @@ export default function App() {
                   return <tr key={k} style={{borderBottom:"1px solid #f9fafb"}}>
                     <td className="cvt-carrier" style={{padding:"8px 0"}}>
                       <Bg k={k}/>
+                      {(s20!=null||s40!=null) && quoteBtnEl({pol:row.pol,pod:"VVO",carrier:k,rateType:`${t20}/${t40}`,currentRate:`20' ${s20!=null?`$${n(s20)}`:"—"} / 40' ${s40!=null?`$${n(s40)}`:"—"}`})}
                     </td>
                     <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={k}/></td>
                     <td className="cvt-price" style={{padding:"8px 0",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,t20,row.pol+" > VVO")}>{s20!=null?`$${n(s20)}`:"—"}</td>
@@ -4742,6 +4913,7 @@ export default function App() {
                                 <tr key={cr} style={{borderBottom:"1px solid #e0f2fe"}}>
                                   <td className="cvt-carrier" style={{padding:"8px 0"}}>
                                     <Bg k={cr}/>
+                                    {(pd20.sell||pd40.sell) && quoteBtnEl({pol:row.pol,pod:l,carrier:cr,rateType:"coc20/coc40 (Ocean+Drop)",currentRate:`20' ${pd20.sell?`$${n(pd20.sell)}`:"—"} / 40' ${pd40.sell?`$${n(pd40.sell)}`:"—"}`})}
                                   </td>
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={cr}/></td>
                                   <td className="cvt-price" style={{padding:"8px 0",cursor:pd20.sell?"pointer":"default",color:pd20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd20.sell?"underline":"none"}} onClick={()=>pd20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
@@ -4890,6 +5062,7 @@ export default function App() {
                                 <tr key={c.k} style={{borderBottom:"1px solid #ede9fe"}}>
                                   <td className="cvt-carrier" style={{padding:"8px 0"}}>
                                     <Bg k={c.k}/>
+                                    {(c.t20||c.t40dv||c.t40hc) && quoteBtnEl({pol:row.pol,pod:city,carrier:c.k,rateType:"SOC+Rental",currentRate:`20' ${c.t20?`$${n(c.t20)}`:"—"} / 40'DV ${c.t40dv?`$${n(c.t40dv)}`:"—"} / 40'HC ${c.t40hc?`$${n(c.t40hc)}`:"—"}`})}
                                   </td>
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={c.k}/></td>
                                   {combos.map(({ total, soc, rental, comboIdx }) => (
@@ -5155,6 +5328,9 @@ export default function App() {
           </div>
         </div>
       )}
+
+      {/* QUOTE REQUEST MODAL */}
+      {quoteReq && <QuoteRequestModal info={quoteReq} onClose={() => setQuoteReq(null)} />}
 
       {/* S/C POPUP */}
       {sc && (
