@@ -189,6 +189,7 @@ export default function App() {
   const [carrierAdminMode, setCarrierAdminMode] = useState("ocean");
   const [carrierAdminPolFilter, setCarrierAdminPolFilter] = useState("");
   const [carrierEditCell, setCarrierEditCell] = useState(null);
+  const [gridEditUnlocked, setGridEditUnlocked] = useState(false);
   const [rentalAdminPeriod, setRentalAdminPeriod] = useState("current");
   const [selReturnCity, setSelReturnCity] = useState("");
   const [rentalEditCell, setRentalEditCell] = useState(null);
@@ -2220,6 +2221,11 @@ export default function App() {
   useEffect(() => {
     if (skipAutoSaveRef.current || !isAdmin || saveBusy) return;
     if (showFreightAdmin && freightAdminTab !== "grid") return;
+    // 단가 수정 모드 중에는 자동 저장 보류 — 💾 저장 버튼으로만 저장
+    if (gridEditUnlocked && showFreightAdmin && freightAdminTab === "grid") {
+      writePricingCache(buildPricingCache());
+      return;
+    }
     writePricingCache(buildPricingCache());
     clearTimeout(autoSaveTimerRef.current);
     autoSaveTimerRef.current = setTimeout(() => {
@@ -2261,6 +2267,7 @@ export default function App() {
     freightAdminTab,
     showRentalAdmin,
     carrierAdminMode,
+    gridEditUnlocked,
     polCostO,
     margins,
     areaM,
@@ -4082,7 +4089,13 @@ export default function App() {
               <button type="button" className="cg-close" onClick={() => setCarrierEditCell(null)}>닫기</button>
             </div>
           ) : (
-            <button type="button" className="cg-box" onClick={() => setCarrierEditCell(cellKey)}>
+            <button
+              type="button"
+              className="cg-box"
+              onClick={() => { if (gridEditUnlocked) setCarrierEditCell(cellKey); }}
+              title={gridEditUnlocked ? undefined : "단가 수정 버튼을 눌러 수정 모드로 전환하세요"}
+              style={gridEditUnlocked ? undefined : { cursor: "default" }}
+            >
               <div className="cg-pair-row cg-row-cost">
                 <span className="cg-lbl cg-lbl-cost">매입</span>
                 <span className="cg-val cg-val-cost">{cost != null ? n(cost) : "—"}</span>
@@ -4259,8 +4272,36 @@ export default function App() {
               validityInfo={validityInfo} onUpdate={updateValiditySlot}
               futureFromMin={getFutureFromMinDate(caCr)} />
           </div>
-          <div style={{fontSize:10,color:"#6b7280",marginBottom:8}}>
-            셀 클릭 → 매입·매출 조정 · {gridFilterLabel}
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+            <div style={{fontSize:10,color:"#6b7280"}}>
+              {gridEditUnlocked ? "수정 모드 · 셀 클릭 → 매입·매출 조정" : "조회 모드 · 수정하려면 단가 수정 클릭"} · {gridFilterLabel}
+            </div>
+            <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+              {gridEditUnlocked ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setGridEditUnlocked(false);
+                      setCarrierEditCell(null);
+                      saveCarrierPricing();
+                    }}
+                    disabled={saveBusy}
+                    style={{fontSize:11,fontWeight:700,padding:"6px 14px",borderRadius:8,border:"none",background:saveBusy?"#93c5fd":"#2563eb",color:"#fff",cursor:saveBusy?"not-allowed":"pointer"}}
+                  >
+                    {saveBusy ? "저장 중…" : "💾 저장"}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setGridEditUnlocked(true)}
+                  style={{fontSize:11,fontWeight:700,padding:"6px 14px",borderRadius:8,border:"1px solid #fcd34d",background:"#fffbeb",color:"#b45309",cursor:"pointer"}}
+                >
+                  ✏️ 단가 수정
+                </button>
+              )}
+            </div>
           </div>
           <div className="carrier-grid-wrap">
             <table className="carrier-grid">
