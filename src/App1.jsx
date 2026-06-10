@@ -112,7 +112,19 @@ export default function App() {
   const [rentalRates, setRentalRates] = useState(() => pricingBoot?.rentalRates ?? buildDefaultRentalRates());
   const [ratePeriod, setRatePeriod] = useState("current"); // current | future
   const [notices, setNotices] = useState(mkNotices);
-  const [dismissedNotices, setDismissedNotices] = useState(() => new Set());
+  const NOTICE_HIDE_TODAY_KEY = "ysl_notice_hide_today";
+  const noticeTodayStr = () => new Date().toLocaleDateString("sv-SE");
+  const [dismissedNotices, setDismissedNotices] = useState(() => {
+    try {
+      const raw = localStorage.getItem(NOTICE_HIDE_TODAY_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved?.date === noticeTodayStr() && Array.isArray(saved.ids)) return new Set(saved.ids);
+      }
+    } catch {}
+    return new Set();
+  });
+  const [noticeHideToday, setNoticeHideToday] = useState(false);
   const [noticeAdminTab, setNoticeAdminTab] = useState(0);
   const [uploadLoading, setUploadLoading] = useState(false);
   const [uploadMsg, setUploadMsg] = useState("");
@@ -2746,7 +2758,14 @@ export default function App() {
   const adVisible = activeAds.length > 0 && !adDismissed;
   const currentNoticePopup = activeNoticeQueue.find(n => !dismissedNotices.has(n.i));
   const dismissCurrentNotice = () => {
-    if (currentNoticePopup) setDismissedNotices(prev => new Set([...prev, currentNoticePopup.i]));
+    if (!currentNoticePopup) return;
+    const next = new Set([...dismissedNotices, currentNoticePopup.i]);
+    setDismissedNotices(next);
+    if (noticeHideToday) {
+      try {
+        localStorage.setItem(NOTICE_HIDE_TODAY_KEY, JSON.stringify({ date: noticeTodayStr(), ids: [...next] }));
+      } catch {}
+    }
   };
 
   const saveNoticesOnly = () => runSave("공지", () => saveNoticeSettings());
@@ -4573,7 +4592,7 @@ export default function App() {
             {isAdmin && <PolAdjustBar pol={row.pol} area={row.area} types={doTypes} costHint="Moscow 합계 매입가 (아래 도시·선사 행에서도 수정)"
               onCost20={v=>applyDropCityCost(row.pol,"mow",0,v)} onCost40={v=>applyDropCityCost(row.pol,"mow",1,v)}
               onClearCost={()=>clearPolCost(row.pol,"drop",null,"mow")}/>}
-            <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Drop off · City 선택</div>
+            <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Drop off · Select City</div>
             {DOC.map(({k,l})=>{
               const cd20=doDetail(row,k,0),cd40=doDetail(row,k,1);
               const cityKey=`${idx}-${k}`,cOpen=doCityOpen===cityKey;
@@ -4701,7 +4720,7 @@ export default function App() {
               onCost40dv={v=>applyRentCityCost(freightPol,"Moscow",1,v)}
               onCost40hc={v=>applyRentCityCost(freightPol,"Moscow",2,v)}
               onClearCost={()=>clearPolCost(freightPol,"rent",null,"Moscow")}/>}
-            <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Rental · Return City (Drop off 순서)</div>
+            <div style={{padding:"12px 16px 4px",fontSize:11,fontWeight:700,color:"#6b7280"}}>Ocean + Rental · Return City (Drop off order)</div>
             {RENT_CITY_ORDER.map(city=>{
               const cd20=rentDetail(row.pol,city,row,0);
               const cd40dv=rentDetail(row.pol,city,row,1);
@@ -5034,11 +5053,20 @@ export default function App() {
               {renderNoticeFile(currentNoticePopup.fileUrl, currentNoticePopup.title)}
             </div>
             <div style={{padding:"12px 20px",borderTop:"1px solid #f3f4f6",flexShrink:0}}>
+              <label style={{display:"flex",alignItems:"center",gap:8,fontSize:12,color:"#6b7280",cursor:"pointer",marginBottom:10,userSelect:"none"}}>
+                <input
+                  type="checkbox"
+                  checked={noticeHideToday}
+                  onChange={e => setNoticeHideToday(e.target.checked)}
+                  style={{width:16,height:16,cursor:"pointer"}}
+                />
+                Don&apos;t show again today
+              </label>
               <button onClick={dismissCurrentNotice}
                 style={{width:"100%",padding:"11px",fontSize:13,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
                 {(() => {
                   const idx = activeNoticeQueue.findIndex(n => n.i === currentNoticePopup.i);
-                  return idx >= 0 && idx < activeNoticeQueue.length - 1 ? "다음" : "확인";
+                  return idx >= 0 && idx < activeNoticeQueue.length - 1 ? "Next" : "OK";
                 })()}
               </button>
             </div>
