@@ -11,7 +11,10 @@ import { bootPricingFromCache, buildBuyingGriCosts, buildCopyCurrentToFutureCost
 const QUOTE_FN_URL = `${SB_URL}/functions/v1/send-quote-request`;
 const QUOTE_COOLDOWN_MS = 60000;
 
+const QUOTE_POD_OPTIONS = ["VMTP", "Fishery", "pacific-logistic", "VMPP"];
+
 function QuoteRequestModal({ info, onClose }) {
+  const [pod, setPod] = useState(() => (QUOTE_POD_OPTIONS.includes(info.pod) ? info.pod : QUOTE_POD_OPTIONS[0]));
   const [email, setEmail] = useState("");
   const [qty, setQty] = useState("");
   const [cargo, setCargo] = useState("");
@@ -55,7 +58,7 @@ function QuoteRequestModal({ info, onClose }) {
         cargoName: cargo.trim(),
         targetRate: target.trim(),
         pol: info.pol,
-        pod: info.pod || "",
+        pod,
         etdFrom: etdFrom || "",
         etdTo: etdTo || "",
         carrier: info.carrier,
@@ -117,11 +120,16 @@ function QuoteRequestModal({ info, onClose }) {
         </div>
         <div style={{padding:"16px 20px 20px"}}>
           <div style={{background:"#f8fafc",border:"1px solid #e5e7eb",borderRadius:10,padding:12,marginBottom:14,fontSize:12,color:"#374151",lineHeight:1.7}}>
-            <div><b>POL</b> · {info.pol}{info.pod ? <> → <b>{info.pod}</b></> : null}</div>
+            <div><b>POL</b> · {info.pol}</div>
             <div><b>Carrier</b> · {CN[info.carrier] || info.carrier}</div>
             <div><b>Type</b> · {info.rateType}</div>
             <div><b>Current Rate</b> · {info.currentRate}</div>
           </div>
+          <label style={labelStyle}>POD
+            <select value={pod} onChange={e=>setPod(e.target.value)} style={fieldStyle}>
+              {QUOTE_POD_OPTIONS.map(p => <option key={p} value={p}>{p}</option>)}
+            </select>
+          </label>
           <label style={labelStyle}>Email <span style={{color:"#dc2626"}}>*</span>
             <input type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="your@email.com"
               style={{...fieldStyle, borderColor: email && !emailValid ? "#fca5a5" : "#d1d5db"}}/>
