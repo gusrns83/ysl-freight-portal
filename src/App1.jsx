@@ -112,6 +112,13 @@ export default function App() {
   const [rentalRates, setRentalRates] = useState(() => pricingBoot?.rentalRates ?? buildDefaultRentalRates());
   const [ratePeriod, setRatePeriod] = useState("current"); // current | future
   const [notices, setNotices] = useState(mkNotices);
+  const DEFAULT_SC_CONTACTS = [
+    { city: "Seoul", email: "Kevin@yslagency.com" },
+    { city: "MOW", email: "chkun@yslagency.com" },
+    { city: "VVO", email: "dennis.roh@yslfe.com" },
+  ];
+  const [scContacts, setScContacts] = useState(DEFAULT_SC_CONTACTS);
+  const [showContactAdmin, setShowContactAdmin] = useState(false);
   const NOTICE_HIDE_TODAY_KEY = "ysl_notice_hide_today";
   const noticeTodayStr = () => new Date().toLocaleDateString("sv-SE");
   const [dismissedNotices, setDismissedNotices] = useState(() => {
@@ -2065,6 +2072,16 @@ export default function App() {
     if (s.ad_banners_json || s.ad_banner_json) {
       setAdBanners(parseAdsFromSettings(s));
     }
+    if (s.sc_contacts_json) {
+      try {
+        const parsed = JSON.parse(s.sc_contacts_json);
+        if (Array.isArray(parsed) && parsed.length) {
+          setScContacts(parsed
+            .filter(c => c && typeof c === "object")
+            .map(c => ({ city: String(c.city ?? ""), email: String(c.email ?? "") })));
+        }
+      } catch (e) {}
+    }
   };
 
   const applySettingsBundle = (s, opts = {}) => {
@@ -2721,11 +2738,6 @@ export default function App() {
     return mkPrice(cost, getM(row.pol, row.area, t, period) + dropM, cr);
   };
   const SC_NUMBER_ENABLED = false; // S/C 번호 표시 — 향후 사용 예정 (true 로 변경 시 재활성화)
-  const SC_CONTACTS = [
-    { city: "Seoul", email: "Kevin@yslagency.com" },
-    { city: "MOW", email: "chkun@yslagency.com" },
-    { city: "VVO", email: "dennis.roh@yslfe.com" },
-  ];
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
   const copyScContact = (email) => {
@@ -2780,6 +2792,7 @@ export default function App() {
   };
 
   const saveNoticesOnly = () => runSave("공지", () => saveNoticeSettings());
+  const saveScContacts = () => runSave("연락처", () => saveSetting("sc_contacts_json", JSON.stringify(scContacts)));
 
   const saveCarrierPricing = () => {
     if (carrierAdminMode === "dropoff") {
@@ -3428,6 +3441,60 @@ export default function App() {
               <>행 클릭·체크박스로 선택 · <strong>더블클릭</strong> → 현재 운임 탭에서 해당 POL 편집 · Drop 이력 <strong>20'/40' Drop</strong> = Admin Drop off 표의 매입·매출(해상운임 합산 아님) · <strong>Drop 누락 보완</strong> = Admin에 있는데 이력에 없는 Drop 셀 등록 · <strong>중복 찾기</strong> · <strong>이력만 삭제</strong>는 DB 유지.</>
             )}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── CONTACT ADMIN ──
+  if (showContactAdmin && isAdmin) {
+    const patchContact = (idx, patch) => setScContacts(prev => prev.map((c, i) => i === idx ? { ...c, ...patch } : c));
+    return (
+      <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+        {adminSaveToastEl}
+        <div style={{position:"sticky",top:0,background:"#fff",borderBottom:"1px solid #e5e7eb",padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between",zIndex:30}}>
+          <button onClick={()=>setShowContactAdmin(false)} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+          <div style={{fontSize:14,fontWeight:700,color:"#0e7490"}}>연락처 관리</div>
+          <button type="button" onClick={saveScContacts} disabled={saveBusy}
+            style={{fontSize:11,fontWeight:700,padding:"6px 12px",borderRadius:8,background:saveBusy?"#a5f3fc":"#0891b2",color:"#fff",border:"none",cursor:saveBusy?"not-allowed":"pointer"}}>
+            {saveBusy ? "저장 중…" : "💾 저장"}
+          </button>
+        </div>
+        <div style={{maxWidth:600,margin:"0 auto",padding:"16px 16px 80px"}}>
+          <div style={{fontSize:11,color:"#6b7280",marginBottom:12,lineHeight:1.6}}>
+            운임 금액 클릭 시 뜨는 팝업의 연락처 목록입니다. 수정 후 <strong>💾 저장</strong>을 눌러야 반영됩니다.
+          </div>
+          {scContacts.map((c, i) => (
+            <div key={i} style={{display:"flex",gap:8,alignItems:"center",background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:12,marginBottom:8}}>
+              <input
+                value={c.city}
+                onChange={e=>patchContact(i,{city:e.target.value})}
+                placeholder="도시 (예: Seoul)"
+                style={{width:90,padding:"8px 10px",fontSize:12,fontWeight:700,border:"1px solid #d1d5db",borderRadius:8,boxSizing:"border-box"}}
+              />
+              <input
+                value={c.email}
+                onChange={e=>patchContact(i,{email:e.target.value})}
+                placeholder="email@example.com"
+                style={{flex:1,padding:"8px 10px",fontSize:13,border:"1px solid #d1d5db",borderRadius:8,boxSizing:"border-box"}}
+              />
+              <button
+                type="button"
+                onClick={()=>setScContacts(prev=>prev.filter((_,x)=>x!==i))}
+                title="삭제"
+                style={{flexShrink:0,width:30,height:30,fontSize:14,border:"1px solid #fecaca",background:"#fef2f2",color:"#dc2626",borderRadius:8,cursor:"pointer"}}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+          <button
+            type="button"
+            onClick={()=>setScContacts(prev=>[...prev,{city:"",email:""}])}
+            style={{width:"100%",padding:"10px",fontSize:12,fontWeight:600,border:"1px dashed #94a3b8",background:"#f8fafc",color:"#475569",borderRadius:10,cursor:"pointer"}}
+          >
+            + 연락처 추가
+          </button>
         </div>
       </div>
     );
@@ -4957,6 +5024,10 @@ export default function App() {
             style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#ea580c",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
             하단 광고 배너 관리 (최대 3개)
           </button>
+          <button type="button" onClick={()=>setShowContactAdmin(true)}
+            style={{width:"100%",padding:"12px 14px",marginBottom:8,fontSize:13,fontWeight:700,color:"#fff",background:"#0891b2",border:"none",borderRadius:10,cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",gap:8}}>
+            연락처 관리 (운임 클릭 팝업)
+          </button>
           </>
           )}
         </div>
@@ -5099,7 +5170,7 @@ export default function App() {
               </div>
             )}
             <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {SC_CONTACTS.map(({city,email}) => (
+              {scContacts.map(({city,email}) => (
                 <div key={city} style={{display:"flex",alignItems:"center",gap:8,background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:12}}>
                   <span style={{fontSize:11,fontWeight:700,color:"#1D2B4F",width:44,flexShrink:0}}>{city}</span>
                   <span style={{flex:1,fontSize:13,fontWeight:600,color:"#111",wordBreak:"break-all"}}>{email}</span>
