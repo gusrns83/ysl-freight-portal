@@ -1112,12 +1112,18 @@
   text-decoration: underline;
 }
 
+/* 단가 표시 공통 (Ocean Freight / Ocean+Drop off / Rental+Ocean 카드 모두 공유)
+   — 컬럼 폭·폰트는 Rental+Ocean 기준으로 통일 */
 .guest-price-pair {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 6px;
   flex-shrink: 0;
   white-space: nowrap;
+}
+.guest-price-lbl {
+  font-size: 9px;
+  line-height: 1.15;
 }
 /* Rental+Ocean — GuestPricePair 와 동일 3열 (20' / 40'DV / 40'HC) */
 .guest-price-pair.guest-rent-triple {
@@ -1133,25 +1139,6 @@
 }
 .route-card-head .guest-price-pair.guest-rent-triple .guest-price-lbl {
   display: block;
-  font-size: 9px;
-  line-height: 1.15;
-}
-.guest-price-pair.guest-rent-triple .guest-price-col {
-  min-width: 0;
-  max-width: 52px;
-  flex: 0 0 auto;
-  text-align: right;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 1px;
-}
-.route-card-head .guest-price-pair.guest-rent-triple .guest-price-col {
-  max-width: 56px;
-}
-.guest-price-pair.guest-rent-triple .guest-price-val {
-  font-size: 11px;
-  line-height: 1.2;
 }
 .guest-rent-triple--no-lbl.guest-price-pair {
   gap: 4px;
@@ -1329,10 +1316,15 @@
   text-align: right;
   min-width: 0;
   flex: 0 0 auto;
-  max-width: 72px;
+  max-width: 56px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
 }
 .guest-price-val {
-  font-size: clamp(11px, 3vw, 14px);
+  font-size: 11px;
+  line-height: 1.2;
   font-weight: 700;
   color: #1d4ed8;
   font-variant-numeric: tabular-nums;
