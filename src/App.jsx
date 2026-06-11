@@ -141,6 +141,11 @@ export default function App() {
   const [cityOpen, setCityOpen] = useState(null);
   const [doCityOpen, setDoCityOpen] = useState(null);
   const [sc, setSc] = useState(null);
+  const [quoteModal, setQuoteModal] = useState(null); // {pol, carrier, rateType, currentRate}
+  const [quoteForm, setQuoteForm] = useState({customerEmail:"",containerQty:"",cargoName:"",targetRate:""});
+  const [quoteLoading, setQuoteLoading] = useState(false);
+  const [quoteResult, setQuoteResult] = useState(null); // "success" | "error"
+  const [quoteError, setQuoteError] = useState("");
 
   // Client mgmt
   const [showMgr, setShowMgr] = useState(false);
@@ -2699,6 +2704,40 @@ export default function App() {
   };
   const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
   const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
+  const openQuoteModal = (carrier, rateType, pol, currentRate) => {
+    setQuoteModal({pol, carrier, rateType, currentRate});
+    setQuoteForm({customerEmail:"",containerQty:"",cargoName:"",targetRate:""});
+    setQuoteResult(null);
+    setQuoteError("");
+  };
+  const submitQuote = async () => {
+    if(!quoteForm.customerEmail) return;
+    setQuoteLoading(true);
+    setQuoteError("");
+    try {
+      const res = await fetch("https://mmswsopevmyreoygovpa.supabase.co/functions/v1/send-quote-request", {
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({
+          customerEmail: quoteForm.customerEmail,
+          containerQty: quoteForm.containerQty,
+          cargoName: quoteForm.cargoName,
+          targetRate: quoteForm.targetRate,
+          pol: quoteModal.pol,
+          carrier: quoteModal.carrier,
+          rateType: quoteModal.rateType,
+          currentRate: quoteModal.currentRate,
+        }),
+      });
+      if(!res.ok) throw new Error("서버 오류 "+res.status);
+      setQuoteResult("success");
+    } catch(e) {
+      setQuoteError(e.message||"요청 실패");
+      setQuoteResult("error");
+    } finally {
+      setQuoteLoading(false);
+    }
+  };
 
   const filt = useMemo(()=>{ let d=fData; if(areaF!=="ALL")d=d.filter(r=>r.area===areaF); if(search)d=d.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())); return d; },[fData,areaF,search]);
   const rFilt = useMemo(()=>{
@@ -4368,8 +4407,8 @@ export default function App() {
                       <Bg k={k}/>
                     </td>
                     <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={k}/></td>
-                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,t20,row.pol+" > VVO")}>{s20!=null?`$${n(s20)}`:"—"}</td>
-                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&openSC(k,t40,row.pol+" > VVO")}>{s40!=null?`$${n(s40)}`:"—"}</td>
+                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openQuoteModal(k,t20,row.pol,s20)}>{s20!=null?`$${n(s20)}`:"—"}</td>
+                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&openQuoteModal(k,t40,row.pol,s40)}>{s40!=null?`$${n(s40)}`:"—"}</td>
                   </tr>; })}
               </tbody>
             </table>
@@ -4481,10 +4520,10 @@ export default function App() {
                                     <Bg k={cr}/>
                                   </td>
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={cr}/></td>
-                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd20.sell?"pointer":"default",color:pd20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd20.sell?"underline":"none"}} onClick={()=>pd20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd20.sell?"pointer":"default",color:pd20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd20.sell?"underline":"none"}} onClick={()=>pd20.sell&&openQuoteModal(cr,"coc20",row.pol,pd20.sell)}>
                                     {pd20.sell?`$${n(pd20.sell)}`:"—"}
                                   </td>
-                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd40.sell?"pointer":"default",color:pd40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd40.sell?"underline":"none"}} onClick={()=>pd40.sell&&openSC(cr,"coc40",row.pol+" > "+l)}>
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd40.sell?"pointer":"default",color:pd40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd40.sell?"underline":"none"}} onClick={()=>pd40.sell&&openQuoteModal(cr,"coc40",row.pol,pd40.sell)}>
                                     {pd40.sell?`$${n(pd40.sell)}`:"—"}
                                   </td>
                                 </tr>
@@ -4630,7 +4669,7 @@ export default function App() {
                                   </td>
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={c.k}/></td>
                                   {combos.map(({ total, soc, rental, comboIdx }) => (
-                                    <td key={comboIdx} className="cvt-price" style={{padding:"8px 0",cursor:total?"pointer":"default",color:total?rentPriceColor:"#d1d5db",textDecoration:total?"underline":"none"}} onClick={()=>total&&openSC(c.k,soc,row.pol+" > "+city)}>
+                                    <td key={comboIdx} className="cvt-price" style={{padding:"8px 0",cursor:total?"pointer":"default",color:total?rentPriceColor:"#d1d5db",textDecoration:total?"underline":"none"}} onClick={()=>total&&openQuoteModal(c.k,soc,row.pol,total)}>
                                       <div className="cvt-price-main">{total?`$${n(total)}`:"—"}</div>
                                     </td>
                                   ))}
@@ -4891,6 +4930,69 @@ export default function App() {
               <span style={{flex:1,fontSize:18,fontFamily:"monospace",fontWeight:700,color:"#111",letterSpacing:2}}>{sc.sc}</span>
               <button onClick={copySC} style={{padding:"8px 16px",fontSize:12,fontWeight:600,color:"#fff",background:sc.copied?"#16a34a":"#111827",border:"none",borderRadius:8,cursor:"pointer"}}>{sc.copied?"Copied":"Copy"}</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 견적 요청 모달 */}
+      {quoteModal && (
+        <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center",background:"rgba(0,0,0,0.4)"}} onClick={()=>{ if(!quoteLoading){ setQuoteModal(null); } }}>
+          <div style={{width:"100%",maxWidth:480,background:"#fff",borderRadius:"20px 20px 0 0",padding:"20px 20px 32px",boxShadow:"0 -20px 60px rgba(0,0,0,0.2)",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+            <div style={{width:40,height:4,background:"#e5e7eb",borderRadius:2,margin:"0 auto 16px"}}/>
+            <div style={{fontSize:16,fontWeight:700,color:"#111",marginBottom:16}}>견적 요청</div>
+
+            {/* 선택 운임 정보 */}
+            <div style={{background:"#f8fafc",border:"1px solid #e2e8f0",borderRadius:10,padding:"12px 14px",marginBottom:16,display:"flex",flexWrap:"wrap",gap:"8px 16px"}}>
+              <div style={{fontSize:12}}><span style={{color:"#9ca3af"}}>POL </span><span style={{fontWeight:600,color:"#1d2b4f"}}>{quoteModal.pol}</span></div>
+              <div style={{fontSize:12}}><span style={{color:"#9ca3af"}}>선사 </span><span style={{fontWeight:600,color:"#1d2b4f"}}>{quoteModal.carrier}</span></div>
+              <div style={{fontSize:12}}><span style={{color:"#9ca3af"}}>운임유형 </span><span style={{fontWeight:600,color:"#1d2b4f"}}>{quoteModal.rateType.toUpperCase()}</span></div>
+              <div style={{fontSize:12}}><span style={{color:"#9ca3af"}}>현재단가 </span><span style={{fontWeight:700,color:"#0369a1"}}>${n(quoteModal.currentRate)}</span></div>
+            </div>
+
+            {quoteResult === "success" ? (
+              <div style={{textAlign:"center",padding:"24px 0"}}>
+                <div style={{fontSize:32,marginBottom:8}}>✅</div>
+                <div style={{fontSize:15,fontWeight:600,color:"#16a34a",marginBottom:6}}>견적 요청이 접수되었습니다</div>
+                <div style={{fontSize:13,color:"#6b7280",marginBottom:20}}>담당자가 확인 후 연락드리겠습니다.</div>
+                <button onClick={()=>setQuoteModal(null)} style={{padding:"11px 32px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>닫기</button>
+              </div>
+            ) : (
+              <>
+                <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:16}}>
+                  <div>
+                    <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>고객 이메일 <span style={{color:"#ef4444"}}>*</span></label>
+                    <input type="email" value={quoteForm.customerEmail} onChange={e=>setQuoteForm(f=>({...f,customerEmail:e.target.value}))}
+                      placeholder="example@company.com"
+                      style={{width:"100%",boxSizing:"border-box",padding:"10px 12px",fontSize:14,border:"1px solid #d1d5db",borderRadius:8,outline:"none"}}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>컨테이너 수량</label>
+                    <input type="number" min="1" value={quoteForm.containerQty} onChange={e=>setQuoteForm(f=>({...f,containerQty:e.target.value}))}
+                      placeholder="예) 2"
+                      style={{width:"100%",boxSizing:"border-box",padding:"10px 12px",fontSize:14,border:"1px solid #d1d5db",borderRadius:8,outline:"none"}}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>화물명</label>
+                    <input type="text" value={quoteForm.cargoName} onChange={e=>setQuoteForm(f=>({...f,cargoName:e.target.value}))}
+                      placeholder="예) 전자제품"
+                      style={{width:"100%",boxSizing:"border-box",padding:"10px 12px",fontSize:14,border:"1px solid #d1d5db",borderRadius:8,outline:"none"}}/>
+                  </div>
+                  <div>
+                    <label style={{fontSize:12,fontWeight:600,color:"#374151",display:"block",marginBottom:4}}>Target 운임 (USD)</label>
+                    <input type="number" min="0" value={quoteForm.targetRate} onChange={e=>setQuoteForm(f=>({...f,targetRate:e.target.value}))}
+                      placeholder="예) 500"
+                      style={{width:"100%",boxSizing:"border-box",padding:"10px 12px",fontSize:14,border:"1px solid #d1d5db",borderRadius:8,outline:"none"}}/>
+                  </div>
+                </div>
+                {quoteError && <div style={{fontSize:12,color:"#ef4444",marginBottom:10}}>{quoteError}</div>}
+                <button
+                  onClick={submitQuote}
+                  disabled={quoteLoading || !quoteForm.customerEmail}
+                  style={{width:"100%",padding:"13px",fontSize:14,fontWeight:600,color:"#fff",background:quoteLoading||!quoteForm.customerEmail?"#9ca3af":"#1D2B4F",border:"none",borderRadius:10,cursor:quoteLoading||!quoteForm.customerEmail?"not-allowed":"pointer"}}>
+                  {quoteLoading ? "전송 중..." : "견적 요청 보내기"}
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
