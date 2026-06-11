@@ -491,7 +491,6 @@ export default function App() {
   const [exp, setExp] = useState(null);
   const [cityOpen, setCityOpen] = useState(null);
   const [doCityOpen, setDoCityOpen] = useState(null);
-  const [sc, setSc] = useState(null);
   const [quoteReq, setQuoteReq] = useState(null);
   const [showQuoteAdmin, setShowQuoteAdmin] = useState(false);
   const quoteBtnEl = (info) => (
@@ -3081,14 +3080,6 @@ export default function App() {
     }
     return mkPrice(cost, getM(row.pol, row.area, t, period) + dropM, cr);
   };
-  const SC_NUMBER_ENABLED = false; // S/C 번호 표시 — 향후 사용 예정 (true 로 변경 시 재활성화)
-  const openSC = (k,type,route) => setSc({sc:`${k}-${type.includes("coc")?"COC":"SOC"}-123456`,k,route,size:type.includes("20")?"20'":"40'"});
-  const copySC = () => { try{const t=document.createElement("textarea");t.value=sc.sc;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){} setSc({...sc,copied:true}); setTimeout(()=>setSc(null),1500); };
-  const copyScContact = (email) => {
-    try{const t=document.createElement("textarea");t.value=email;t.style.cssText="position:fixed;left:-9999px";document.body.appendChild(t);t.select();document.execCommand("copy");document.body.removeChild(t);}catch(e){}
-    setSc(prev => prev ? { ...prev, copiedEmail: email } : prev);
-    setTimeout(() => setSc(prev => prev && prev.copiedEmail === email ? { ...prev, copiedEmail: null } : prev), 1500);
-  };
 
   const filt = useMemo(()=>{ let d=fData; if(areaF!=="ALL")d=d.filter(r=>r.area===areaF); if(search)d=d.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())); return d; },[fData,areaF,search]);
   const rFilt = useMemo(()=>{
@@ -4986,8 +4977,8 @@ export default function App() {
                       {(s20!=null||s40!=null) && quoteBtnEl({pol:row.pol,pod:"VVO",carrier:k,rateType:`${t20}/${t40}`,currentRate:`20' ${s20!=null?`$${n(s20)}`:"—"} / 40' ${s40!=null?`$${n(s40)}`:"—"}`})}
                     </td>
                     <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={k}/></td>
-                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&openSC(k,t20,row.pol+" > VVO")}>{s20!=null?`$${n(s20)}`:"—"}</td>
-                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&openSC(k,t40,row.pol+" > VVO")}>{s40!=null?`$${n(s40)}`:"—"}</td>
+                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s20===best20?700:400,color:s20!=null?(s20===best20?priceColor:"#6b7280"):"#d1d5db",cursor:s20?"pointer":"default"}} onClick={()=>s20&&setQuoteReq({pol:row.pol,pod:"VVO",carrier:k,rateType:t20,currentRate:`20' $${n(s20)}`})}>{s20!=null?`$${n(s20)}`:"—"}</td>
+                    <td className="cvt-price" style={{padding:"8px 0",fontWeight:s40===best40?700:400,color:s40!=null?(s40===best40?priceColor:"#6b7280"):"#d1d5db",cursor:s40?"pointer":"default"}} onClick={()=>s40&&setQuoteReq({pol:row.pol,pod:"VVO",carrier:k,rateType:t40,currentRate:`40' $${n(s40)}`})}>{s40!=null?`$${n(s40)}`:"—"}</td>
                   </tr>; })}
               </tbody>
             </table>
@@ -5100,10 +5091,10 @@ export default function App() {
                                     {(pd20.sell||pd40.sell) && quoteBtnEl({pol:row.pol,pod:l,carrier:cr,rateType:"coc20/coc40 (Ocean+Drop)",currentRate:`20' ${pd20.sell?`$${n(pd20.sell)}`:"—"} / 40' ${pd40.sell?`$${n(pd40.sell)}`:"—"}`})}
                                   </td>
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={cr}/></td>
-                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd20.sell?"pointer":"default",color:pd20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd20.sell?"underline":"none"}} onClick={()=>pd20.sell&&openSC(cr,"coc20",row.pol+" > "+l)}>
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd20.sell?"pointer":"default",color:pd20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd20.sell?"underline":"none"}} onClick={()=>pd20.sell&&setQuoteReq({pol:row.pol,pod:l,carrier:cr,rateType:"coc20 (Ocean+Drop)",currentRate:`20' $${n(pd20.sell)}`})}>
                                     {pd20.sell?`$${n(pd20.sell)}`:"—"}
                                   </td>
-                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd40.sell?"pointer":"default",color:pd40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd40.sell?"underline":"none"}} onClick={()=>pd40.sell&&openSC(cr,"coc40",row.pol+" > "+l)}>
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd40.sell?"pointer":"default",color:pd40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd40.sell?"underline":"none"}} onClick={()=>pd40.sell&&setQuoteReq({pol:row.pol,pod:l,carrier:cr,rateType:"coc40 (Ocean+Drop)",currentRate:`40' $${n(pd40.sell)}`})}>
                                     {pd40.sell?`$${n(pd40.sell)}`:"—"}
                                   </td>
                                 </tr>
@@ -5250,7 +5241,7 @@ export default function App() {
                                   </td>
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={c.k}/></td>
                                   {combos.map(({ total, soc, rental, comboIdx }) => (
-                                    <td key={comboIdx} className="cvt-price" style={{padding:"8px 0",cursor:total?"pointer":"default",color:total?rentPriceColor:"#d1d5db",textDecoration:total?"underline":"none"}} onClick={()=>total&&openSC(c.k,soc,row.pol+" > "+city)}>
+                                    <td key={comboIdx} className="cvt-price" style={{padding:"8px 0",cursor:total?"pointer":"default",color:total?rentPriceColor:"#d1d5db",textDecoration:total?"underline":"none"}} onClick={()=>total&&setQuoteReq({pol:row.pol,pod:city,carrier:c.k,rateType:`SOC+Rental (${RENT_COMBO_SHORT[comboIdx]})`,currentRate:`${RENT_COMBO_SHORT[comboIdx]} $${n(total)}`})}>
                                       <div className="cvt-price-main">{total?`$${n(total)}`:"—"}</div>
                                     </td>
                                   ))}
@@ -5517,36 +5508,6 @@ export default function App() {
       {/* QUOTE REQUEST MODAL */}
       {quoteReq && <QuoteRequestModal info={quoteReq} onClose={() => setQuoteReq(null)} />}
 
-      {/* S/C POPUP */}
-      {sc && (
-        <div style={{position:"fixed",inset:0,zIndex:50,display:"flex",alignItems:"flex-end",justifyContent:"center",background:"rgba(0,0,0,0.3)"}} onClick={()=>setSc(null)}>
-          <div style={{width:"100%",maxWidth:480,background:"#fff",borderRadius:"20px 20px 0 0",padding:"20px 20px 32px",boxShadow:"0 -20px 60px rgba(0,0,0,0.2)"}} onClick={e=>e.stopPropagation()}>
-            <div style={{width:40,height:4,background:"#e5e7eb",borderRadius:2,margin:"0 auto 16px"}}/>
-            <div style={{fontSize:10,color:"#9ca3af",fontWeight:500,marginBottom:4}}>CONTACT · {sc.k} · {sc.size}</div>
-            <div style={{fontSize:12,color:"#6b7280",marginBottom:12}}>{sc.route}</div>
-            {SC_NUMBER_ENABLED && (
-              <div style={{display:"flex",alignItems:"center",gap:8,background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:12,marginBottom:8}}>
-                <span style={{flex:1,fontSize:18,fontFamily:"monospace",fontWeight:700,color:"#111",letterSpacing:2}}>{sc.sc}</span>
-                <button onClick={copySC} style={{padding:"8px 16px",fontSize:12,fontWeight:600,color:"#fff",background:sc.copied?"#16a34a":"#111827",border:"none",borderRadius:8,cursor:"pointer"}}>{sc.copied?"Copied":"Copy"}</button>
-              </div>
-            )}
-            <div style={{display:"flex",flexDirection:"column",gap:8}}>
-              {scContacts.map(({city,email}) => (
-                <div key={city} style={{display:"flex",alignItems:"center",gap:8,background:"#f9fafb",border:"1px solid #e5e7eb",borderRadius:10,padding:12}}>
-                  <span style={{fontSize:11,fontWeight:700,color:"#1D2B4F",width:44,flexShrink:0}}>{city}</span>
-                  <span style={{flex:1,fontSize:13,fontWeight:600,color:"#111",wordBreak:"break-all"}}>{email}</span>
-                  <button
-                    onClick={() => copyScContact(email)}
-                    style={{padding:"8px 16px",fontSize:12,fontWeight:600,color:"#fff",background:sc.copiedEmail===email?"#16a34a":"#111827",border:"none",borderRadius:8,cursor:"pointer",flexShrink:0}}
-                  >
-                    {sc.copiedEmail===email?"Copied":"Copy"}
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
