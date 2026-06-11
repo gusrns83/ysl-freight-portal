@@ -769,7 +769,8 @@ export default function App() {
   };
 
   const freightAdminTabBar = (
-    <div style={{ display: "flex", gap: 6, padding: "10px 16px 12px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
+    <div style={{ padding: "10px 0 12px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
+      <div className="carrier-admin-page" style={{ display: "flex", gap: 6, paddingTop: 0, paddingBottom: 0 }}>
       {[["grid", "현재 운임", "#1e40af"], ["history", "변경 이력", "#0f766e"], ["upload", "Excel 업로드", "#b45309"]].map(([id, label, color]) => (
         <button
           key={id}
@@ -796,11 +797,13 @@ export default function App() {
           {label}
         </button>
       ))}
+      </div>
     </div>
   );
 
   const rentalAdminTabBar = (
-    <div style={{ display: "flex", gap: 6, padding: "10px 16px 12px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
+    <div style={{ padding: "10px 0 12px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
+      <div className="carrier-admin-page" style={{ display: "flex", gap: 6, paddingTop: 0, paddingBottom: 0 }}>
       {[["grid", "현재 운임", "#7c3aed"], ["history", "변경 이력", "#6d28d9"]].map(([id, label, color]) => (
         <button
           key={id}
@@ -823,6 +826,7 @@ export default function App() {
           {label}
         </button>
       ))}
+      </div>
     </div>
   );
 
@@ -4559,23 +4563,23 @@ export default function App() {
                 </button>
               ))}
             </div>
-            <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:8}}>
-              {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
-                <button key={k} type="button" onClick={()=>{setCarrierAdminPeriod(k);setCarrierEditCell(null);}}
-                  style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
-                    background:carrierAdminPeriod===k?"#fff":"transparent",
-                    color:carrierAdminPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
-                  {l}
-                </button>
-              ))}
-            </div>
-            <div style={{display:"flex",background:"#ecfdf5",borderRadius:10,padding:3}}>
+            <div style={{display:"flex",background:"#ecfdf5",borderRadius:10,padding:3,marginBottom:8}}>
               {[["ocean","해상 운임"],["dropoff","Drop off"]].map(([k,l])=>(
                 <button key={k} type="button" onClick={()=>{setCarrierAdminMode(k);setCarrierEditCell(null);}}
                   style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
                     background:carrierAdminMode===k?"#fff":"transparent",
                     color:carrierAdminMode===k?"#047857":"#6ee7b7",
                     boxShadow:carrierAdminMode===k?"0 1px 3px rgba(0,0,0,0.08)":"none"}}>
+                  {l}
+                </button>
+              ))}
+            </div>
+            <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3}}>
+              {[["current","현재 운임"],["future","향후 운임"]].map(([k,l])=>(
+                <button key={k} type="button" onClick={()=>{setCarrierAdminPeriod(k);setCarrierEditCell(null);}}
+                  style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                    background:carrierAdminPeriod===k?"#fff":"transparent",
+                    color:carrierAdminPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
                   {l}
                 </button>
               ))}
