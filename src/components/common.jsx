@@ -279,7 +279,7 @@ const TabIconDropoff = ({ active }) => (
 );
 
 const TabIconRental = ({ active }) => (
-  <svg width="90" height="74" viewBox="0 0 90 74" fill="none" aria-hidden style={tabIconStyle(active)}>
+  <svg width="66" height="54" viewBox="0 0 90 74" fill="none" aria-hidden style={tabIconStyle(active)}>
     {/* 앞면 */}
     <rect x="4" y="12" width="68" height="38" rx="2" fill={active ? "#1E3A5F" : "#94A3B8"}/>
     {/* 골(corrugation) */}
