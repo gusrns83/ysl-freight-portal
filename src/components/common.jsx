@@ -212,7 +212,7 @@ const CarrierPortGuide = () => (
 const tabIconStyle = (active) => ({ opacity: active ? 1 : 0.72, display: "block" });
 
 const TabIconOcean = ({ active }) => (
-  <svg width="54" height="44" viewBox="0 0 54 44" fill="none" aria-hidden style={tabIconStyle(active)}>
+  <svg width="44" height="36" viewBox="0 0 54 44" fill="none" aria-hidden style={tabIconStyle(active)}>
     {/* 굴뚝 */}
     <rect x="33" y="2" width="7" height="18" rx="2" fill={active ? "#1E3A5F" : "#94A3B8"}/>
     <rect x="31" y="2" width="11" height="5" rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
@@ -239,7 +239,7 @@ const TabIconOcean = ({ active }) => (
 );
 
 const TabIconDropoff = ({ active }) => (
-  <svg width="100" height="40" viewBox="0 0 100 40" fill="none" aria-hidden style={tabIconStyle(active)}>
+  <svg width="90" height="36" viewBox="0 0 100 40" fill="none" aria-hidden style={tabIconStyle(active)}>
     {/* 소형 선박 */}
     <g transform="scale(0.62)">
       <rect x="0"  y="10" width="10" height="7" rx="1" fill={active ? "#334155" : "#CBD5E1"}/>
@@ -279,7 +279,7 @@ const TabIconDropoff = ({ active }) => (
 );
 
 const TabIconRental = ({ active }) => (
-  <svg width="66" height="54" viewBox="0 0 90 74" fill="none" aria-hidden style={tabIconStyle(active)}>
+  <svg width="44" height="36" viewBox="0 0 90 74" fill="none" aria-hidden style={tabIconStyle(active)}>
     {/* 앞면 */}
     <rect x="4" y="12" width="68" height="38" rx="2" fill={active ? "#1E3A5F" : "#94A3B8"}/>
     {/* 골(corrugation) */}

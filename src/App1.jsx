@@ -5332,7 +5332,7 @@ export default function App() {
             const color=active?"#111":"#9ca3af";
             return (
               <button key={id} onClick={()=>{setTab(id);setExp(null);setCityOpen(null);}} style={{flex:1,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:5,padding:"10px 4px 8px",fontSize:11,fontWeight:600,background:"none",border:"none",borderBottom:`2px solid ${active?"#111":"transparent"}`,color,cursor:"pointer"}}>
-                <span style={{height:55,display:"flex",alignItems:"center"}}><Icon active={active}/></span>
+                <span style={{height:36,display:"flex",alignItems:"center"}}><Icon active={active}/></span>
                 <span>{label}</span>
               </button>
             );
