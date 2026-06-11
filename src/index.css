@@ -485,6 +485,27 @@
   }
 }
 
+/* 모바일: COC/SOC 토글을 Current/Upcoming Rates 탭과 같은 줄 오른쪽 끝에 고정
+   (인라인 스타일을 덮어쓰기 위해 !important 사용 · 데스크탑은 그대로) */
+@media (max-width: 480px) {
+  .rate-period-row {
+    flex-wrap: nowrap !important;
+    gap: 6px !important;
+  }
+  .rate-period-toggle button {
+    padding: 6px 10px !important;
+    white-space: nowrap;
+  }
+  .coc-soc-toggle {
+    flex-shrink: 0;
+  }
+  .coc-soc-toggle button {
+    padding: 5px 9px !important;
+    font-size: 10px !important;
+    white-space: nowrap;
+  }
+}
+
 .carrier-port-guide-shell {
   max-width: 640px;
   margin: 8px auto 0;

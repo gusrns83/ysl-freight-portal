@@ -4153,8 +4153,8 @@ export default function App() {
   };
 
   const RatePeriodToggle = ({showCocSoc=false}) => (
-    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginTop:10}}>
-      <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
+    <div className="rate-period-row" style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:8,marginTop:10}}>
+      <div className="rate-period-toggle" style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
         {[["current","Current Rates"],["future","Upcoming Rates"]].map(([k,l])=>(
           <button key={k} type="button" onClick={()=>setRatePeriod(k)}
             style={{padding:"6px 14px",fontSize:11,fontWeight:600,borderRadius:6,border:"none",cursor:"pointer",
@@ -4166,7 +4166,7 @@ export default function App() {
         ))}
       </div>
       {showCocSoc && (
-        <div style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
+        <div className="coc-soc-toggle" style={{display:"inline-flex",background:"#f3f4f6",borderRadius:8,padding:2}}>
           {["coc","soc"].map(t=>(
             <button key={t} type="button" onClick={()=>setCtype(t)}
               style={{padding:"6px 14px",fontSize:11,fontWeight:600,borderRadius:6,border:"none",cursor:"pointer",
