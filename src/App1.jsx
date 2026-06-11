@@ -36,7 +36,7 @@ function QuoteRequestModal({ info, onClose }) {
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
   const submit = async () => {
-    if (!emailValid) { setStatus({ type: "err", msg: "올바른 이메일 주소를 입력하세요." }); return; }
+    if (!emailValid) { setStatus({ type: "err", msg: "Please enter a valid email address." }); return; }
     if (cooldownLeft > 0 || sending) return;
     setSending(true);
     setStatus(null);
@@ -95,14 +95,14 @@ function QuoteRequestModal({ info, onClose }) {
       ]);
 
       if (fnRes && (fnRes.id || fnRes.error == null && fnRes.statusCode == null)) {
-        setStatus({ type: "ok", msg: "견적 요청이 접수되었습니다. 담당자가 곧 연락드리겠습니다." });
+        setStatus({ type: "ok", msg: "Your quote request has been received. Our team will contact you shortly." });
         setCooldownUntil(Date.now() + QUOTE_COOLDOWN_MS);
         setNowTick(Date.now());
       } else {
-        setStatus({ type: "err", msg: `메일 발송 실패: ${fnRes?.message || fnRes?.error || "알 수 없는 오류"}` });
+        setStatus({ type: "err", msg: `Failed to send email: ${fnRes?.message || fnRes?.error || "unknown error"}` });
       }
     } catch (e) {
-      setStatus({ type: "err", msg: `발송 실패: ${e.message || e}` });
+      setStatus({ type: "err", msg: `Send failed: ${e.message || e}` });
     } finally {
       setSending(false);
     }
@@ -167,7 +167,7 @@ function QuoteRequestModal({ info, onClose }) {
               background: sending || cooldownLeft > 0 ? "#94a3b8" : "#1D2B4F",
               border:"none",borderRadius:10,cursor: sending || cooldownLeft > 0 ? "not-allowed" : "pointer"}}
           >
-            {sending ? "발송 중…" : cooldownLeft > 0 ? `재발송 가능까지 ${cooldownLeft}초` : "발송 (Send)"}
+            {sending ? "Sending…" : cooldownLeft > 0 ? `Resend available in ${cooldownLeft}s` : "Send"}
           </button>
         </div>
       </div>
@@ -493,7 +493,7 @@ export default function App() {
       title="Request quote"
       style={{display:"block",marginTop:3,fontSize:9,fontWeight:700,padding:"2px 6px",borderRadius:4,border:"1px solid #bfdbfe",background:"#eff6ff",color:"#1d4ed8",cursor:"pointer"}}
     >
-      견적
+      Quote
     </button>
   );
 
