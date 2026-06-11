@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef, useCallback } from "react";
+import { Fragment, useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { GriAdjustPanel, MarginPanel } from "./components/adminPanels.jsx";
 import { AdminSaveToast, Bg, CarrierPortGuide, FooterAdSlot, Logo, MAIN_TABS, RatesLoading, ValidityPeriodFields } from "./components/common.jsx";
@@ -62,7 +62,7 @@ function QuoteRequestModal({ info, onClose }) {
         etdFrom: etdFrom || "",
         etdTo: etdTo || "",
         carrier: info.carrier,
-        rateType: info.rateType,
+        rateType: info.dropCity ? `${info.rateType} · Drop off: ${info.dropCity}` : info.rateType,
         currentRate: info.currentRate,
         staffEmails,
       };
@@ -121,6 +121,7 @@ function QuoteRequestModal({ info, onClose }) {
         <div style={{padding:"16px 20px 20px"}}>
           <div style={{background:"#f8fafc",border:"1px solid #e5e7eb",borderRadius:10,padding:12,marginBottom:14,fontSize:12,color:"#374151",lineHeight:1.7}}>
             <div><b>POL</b> · {info.pol}</div>
+            {info.dropCity && <div><b>Drop off</b> · {info.dropCity}</div>}
             <div><b>Carrier</b> · {CN[info.carrier] || info.carrier}</div>
             <div><b>Type</b> · {info.rateType}</div>
             <div><b>Current Rate</b> · {info.currentRate}</div>
@@ -5020,13 +5021,13 @@ export default function App() {
                                 <tr key={cr} style={{borderBottom:"1px solid #e0f2fe"}}>
                                   <td className="cvt-carrier" style={{padding:"8px 0"}}>
                                     <Bg k={cr}/>
-                                    {(pd20.sell||pd40.sell) && quoteBtnEl({pol:row.pol,pod:l,carrier:cr,rateType:"coc20/coc40 (Ocean+Drop)",currentRate:`20' ${pd20.sell?`$${n(pd20.sell)}`:"—"} / 40' ${pd40.sell?`$${n(pd40.sell)}`:"—"}`})}
+                                    {(pd20.sell||pd40.sell) && quoteBtnEl({pol:row.pol,pod:l,dropCity:l,carrier:cr,rateType:"coc20/coc40 (Ocean+Drop)",currentRate:`20' ${pd20.sell?`$${n(pd20.sell)}`:"—"} / 40' ${pd40.sell?`$${n(pd40.sell)}`:"—"}`})}
                                   </td>
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={cr}/></td>
-                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd20.sell?"pointer":"default",color:pd20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd20.sell?"underline":"none"}} onClick={()=>pd20.sell&&setQuoteReq({pol:row.pol,pod:l,carrier:cr,rateType:"coc20 (Ocean+Drop)",currentRate:`20' $${n(pd20.sell)}`})}>
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd20.sell?"pointer":"default",color:pd20.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd20.sell?"underline":"none"}} onClick={()=>pd20.sell&&setQuoteReq({pol:row.pol,pod:l,dropCity:l,carrier:cr,rateType:"coc20 (Ocean+Drop)",currentRate:`20' $${n(pd20.sell)}`})}>
                                     {pd20.sell?`$${n(pd20.sell)}`:"—"}
                                   </td>
-                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd40.sell?"pointer":"default",color:pd40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd40.sell?"underline":"none"}} onClick={()=>pd40.sell&&setQuoteReq({pol:row.pol,pod:l,carrier:cr,rateType:"coc40 (Ocean+Drop)",currentRate:`40' $${n(pd40.sell)}`})}>
+                                  <td className="cvt-price" style={{padding:"8px 0",cursor:pd40.sell?"pointer":"default",color:pd40.sell?(ratePeriod==="future"?"#b45309":"#0369a1"):"#d1d5db",textDecoration:pd40.sell?"underline":"none"}} onClick={()=>pd40.sell&&setQuoteReq({pol:row.pol,pod:l,dropCity:l,carrier:cr,rateType:"coc40 (Ocean+Drop)",currentRate:`40' $${n(pd40.sell)}`})}>
                                     {pd40.sell?`$${n(pd40.sell)}`:"—"}
                                   </td>
                                 </tr>
@@ -5169,11 +5170,11 @@ export default function App() {
                                 <tr key={c.k} style={{borderBottom:"1px solid #ede9fe"}}>
                                   <td className="cvt-carrier" style={{padding:"8px 0"}}>
                                     <Bg k={c.k}/>
-                                    {(c.t20||c.t40dv||c.t40hc) && quoteBtnEl({pol:row.pol,pod:city,carrier:c.k,rateType:"SOC+Rental",currentRate:`20' ${c.t20?`$${n(c.t20)}`:"—"} / 40'DV ${c.t40dv?`$${n(c.t40dv)}`:"—"} / 40'HC ${c.t40hc?`$${n(c.t40hc)}`:"—"}`})}
+                                    {(c.t20||c.t40dv||c.t40hc) && quoteBtnEl({pol:row.pol,pod:city,dropCity:city,carrier:c.k,rateType:"SOC+Rental",currentRate:`20' ${c.t20?`$${n(c.t20)}`:"—"} / 40'DV ${c.t40dv?`$${n(c.t40dv)}`:"—"} / 40'HC ${c.t40hc?`$${n(c.t40hc)}`:"—"}`})}
                                   </td>
                                   <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={c.k}/></td>
                                   {combos.map(({ total, soc, rental, comboIdx }) => (
-                                    <td key={comboIdx} className="cvt-price" style={{padding:"8px 0",cursor:total?"pointer":"default",color:total?rentPriceColor:"#d1d5db",textDecoration:total?"underline":"none"}} onClick={()=>total&&setQuoteReq({pol:row.pol,pod:city,carrier:c.k,rateType:`SOC+Rental (${RENT_COMBO_SHORT[comboIdx]})`,currentRate:`${RENT_COMBO_SHORT[comboIdx]} $${n(total)}`})}>
+                                    <td key={comboIdx} className="cvt-price" style={{padding:"8px 0",cursor:total?"pointer":"default",color:total?rentPriceColor:"#d1d5db",textDecoration:total?"underline":"none"}} onClick={()=>total&&setQuoteReq({pol:row.pol,pod:city,dropCity:city,carrier:c.k,rateType:`SOC+Rental (${RENT_COMBO_SHORT[comboIdx]})`,currentRate:`${RENT_COMBO_SHORT[comboIdx]} $${n(total)}`})}>
                                       <div className="cvt-price-main">{total?`$${n(total)}`:"—"}</div>
                                     </td>
                                   ))}
@@ -5319,9 +5320,10 @@ export default function App() {
         ) : (
           <>
             <div style={{fontSize:10,color:"#9ca3af",marginBottom:8}}>{`${tab==="rental"?rFilt.length:filt.length} routes`}</div>
-            {tab==="ocean" && filt.map((row,i)=><OCard key={i} row={row} idx={i}/>)}
-            {tab==="dropoff" && filt.map((row,i)=><DOCrd key={i} row={row} idx={i}/>)}
-            {tab==="rental" && rFilt.map((row,i)=><RCrd key={i} row={row} idx={i}/>)}
+            {/* 함수 호출 렌더링 — 컴포넌트로 쓰면 매 렌더마다 타입이 바뀌어 전체 리마운트(스크롤 점프) 발생 */}
+            {tab==="ocean" && filt.map((row,i)=><Fragment key={i}>{OCard({row,idx:i})}</Fragment>)}
+            {tab==="dropoff" && filt.map((row,i)=><Fragment key={i}>{DOCrd({row,idx:i})}</Fragment>)}
+            {tab==="rental" && rFilt.map((row,i)=><Fragment key={i}>{RCrd({row,idx:i})}</Fragment>)}
           </>
         )}
       </div>
