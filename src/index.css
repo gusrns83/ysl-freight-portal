@@ -461,6 +461,30 @@
   }
 }
 
+/* Rental+Ocean 3단 드릴다운 — 데스크탑: 단가 컬럼 고정폭으로 오른쪽에 모으고
+   도시 요약 행(rent-city-row)의 단가와 세로 정렬 (모바일은 위 480px 규칙 그대로) */
+@media (min-width: 640px) {
+  .carrier-rent-table.carrier-rent-table--triple col.cvt-col-validity {
+    width: auto;
+  }
+  .carrier-rent-table.carrier-rent-table--triple col.cvt-col-price {
+    width: 108px;
+  }
+  .carrier-rent-table--triple .cvt-price,
+  .carrier-rent-table--triple th.cvt-price {
+    padding-right: 16px;
+  }
+  /* 도시 행: 100px 컬럼 + 8px 간격 = 108px 피치, 오른쪽 끝 32px 오프셋이
+     테이블(쉘 16px + 셀 16px)과 일치해 컬럼이 세로로 정렬됨 */
+  .rent-city-row .guest-price-pair.guest-rent-triple {
+    grid-template-columns: repeat(3, 100px);
+    gap: 8px;
+  }
+  .rent-city-row .guest-price-pair.guest-rent-triple .guest-price-col {
+    max-width: none;
+  }
+}
+
 .carrier-port-guide-shell {
   max-width: 640px;
   margin: 8px auto 0;

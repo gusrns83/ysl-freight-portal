@@ -5166,10 +5166,10 @@ export default function App() {
               return (
                 <div key={city}>
                   <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 12px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
-                    <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
+                    <div className={isAdmin?"admin-card-top":"rent-city-row"} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
                       <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
                       {!isAdmin && <GuestRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc} rentals={[getRentalBase(row.pol,city,0),getRentalBase(row.pol,city,1),getRentalBase(row.pol,city,2)]}/>}
-                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
+                      <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0,width:12,textAlign:"center"}}>&#8964;</span>
                     </div>
                     {isAdmin && (
                       <div className="admin-card-prices">
