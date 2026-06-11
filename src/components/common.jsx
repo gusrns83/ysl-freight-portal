@@ -54,14 +54,6 @@ function FooterAdSlot({ ads, dismissed, onDismiss }) {
     <section ref={slotRef} className="app-ad-slot" aria-label="Advertisement">
       <div className="app-ad-slot-inner">
         <div className="app-ad-media-wrap">
-          <button
-            type="button"
-            className="app-ad-close"
-            onClick={(e) => { e.preventDefault(); e.stopPropagation(); onDismiss(); }}
-            aria-label="Close ad"
-          >
-            ×
-          </button>
           {activeAds.length > 1 && (
             <div className="app-ad-dots" aria-hidden>
               {activeAds.map((_, i) => (
