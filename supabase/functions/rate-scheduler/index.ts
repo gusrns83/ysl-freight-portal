@@ -369,9 +369,9 @@ function buildAlertRows(settings: Record<string, string>, today: string): AlertR
       for (const city of Object.keys(bucket?.current || {})) {
         for (const sk of RENTAL_TYPES) {
           const cur = bucket.current[city]?.[sk];
-          if (cur == null || cur === "") continue;
+          if (cur == null || cur === "" || cur === "x") continue; // "x" = 명시적 미서비스
           const fut = bucket.future?.[city]?.[sk];
-          if (fut == null || fut === "") missing++;
+          if (fut == null || fut === "") missing++; // future "x" 는 입력된 것으로 간주
         }
       }
     }

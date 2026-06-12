@@ -2756,9 +2756,11 @@ export default function App() {
     if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo.RENTAL?.current)) return null;
     const sk = rentComboSk(comboIdx);
     const bucket = normalizeRentalCityBucket(rentalRates[rPol]?.[p]?.[city]);
+    if (bucket[sk] === "x") return null; // 명시적 미서비스 — 기본값 fallback 차단
     if (bucket[sk] != null && bucket[sk] !== "") return Number(bucket[sk]);
     if (p === "future") {
       const cur = normalizeRentalCityBucket(rentalRates[rPol]?.current?.[city]);
+      if (cur[sk] === "x") return null;
       if (cur[sk] != null && cur[sk] !== "") return Number(cur[sk]);
     }
     const row = rData.find(r => r.pol === rPol);
@@ -3253,9 +3255,13 @@ export default function App() {
       return {
         batch_id: batchId, carrier: "RENTAL", area, pol: fp, route: `${fp} > ${c.city}`,
         rate_type: c.type, period, category: "rental",
-        cost: c.next, sell: c.next + margin, margin,
+        cost: c.remove ? null : c.next,
+        sell: c.remove ? null : c.next + margin,
+        margin: c.remove ? null : margin,
         source: "excel-upload",
-        note: `Excel 업로드 (${fileName}): ${c.old ?? "—"} → ${c.next}`,
+        note: c.remove
+          ? `Excel 업로드 (${fileName}): ${c.old} → 미서비스(x) 삭제`
+          : `Excel 업로드 (${fileName}): ${c.old ?? "—"} → ${c.next}`,
       };
     });
     cancelPendingPricingSave();
@@ -4399,6 +4405,7 @@ export default function App() {
       const upChanges = rentalUpload?.changes || [];
       const upErrors = rentalUpload?.errors || [];
       const warnCount = upChanges.filter(c => c.bigJump || c.inverted).length;
+      const removeCount = upChanges.filter(c => c.remove).length;
       return (
         <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
           {adminSaveToastEl}
@@ -4476,6 +4483,9 @@ export default function App() {
                   {warnCount > 0 && (
                     <span style={{fontSize:10,fontWeight:700,color:"#b91c1c"}}>⚠️ 경고 {warnCount}건 (±30% 변동 또는 20&apos;&gt;40&apos;DV 역전)</span>
                   )}
+                  {removeCount > 0 && (
+                    <span style={{fontSize:10,fontWeight:700,color:"#9a3412"}}>🗑 미서비스(x) 삭제 {removeCount}건</span>
+                  )}
                 </div>
                 <div style={{overflowX:"auto"}}>
                   <table style={{borderCollapse:"collapse",fontSize:11,width:"100%"}}>
@@ -4494,17 +4504,17 @@ export default function App() {
                       {upChanges.map((c, i) => {
                         const { margin } = rentalUploadMargin(c.pol, c.type);
                         const warn = c.bigJump || c.inverted;
-                        const pct = c.old ? Math.round((c.next - c.old) / c.old * 100) : null;
+                        const pct = !c.remove && c.old ? Math.round((c.next - c.old) / c.old * 100) : null;
                         return (
-                          <tr key={i} style={{borderBottom:"1px solid #f9fafb",background:warn?"#fef2f2":i%2?"#fafafa":"#fff"}}>
+                          <tr key={i} style={{borderBottom:"1px solid #f9fafb",background:c.remove?"#fff7ed":warn?"#fef2f2":i%2?"#fafafa":"#fff"}}>
                             <td style={{padding:"4px 8px"}}>{RC_LABEL[c.city] || c.city}</td>
                             <td style={{padding:"4px 8px"}}>{c.pol}</td>
                             <td style={{padding:"4px 8px"}}>{c.sk === "c20" ? "20'" : c.sk === "c40dv" ? "40'DV" : "40'HC"}</td>
                             <td style={{padding:"4px 8px",textAlign:"right",color:"#9ca3af"}}>{c.old != null ? n(c.old) : "—"}</td>
-                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:"#1d4ed8"}}>{n(c.next)}</td>
-                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:"#047857"}}>{n(c.next + margin)} <span style={{fontWeight:400,color:"#9ca3af"}}>(+{n(margin)})</span></td>
-                            <td style={{padding:"4px 8px",fontSize:10,color:"#b91c1c",fontWeight:700}}>
-                              {c.bigJump ? `±30%↑ (${pct > 0 ? "+" : ""}${pct}%)` : ""}{c.bigJump && c.inverted ? " · " : ""}{c.inverted ? "20'>40'DV" : ""}
+                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:c.remove?"#9a3412":"#1d4ed8"}}>{c.remove ? "미서비스(x)" : n(c.next)}</td>
+                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:"#047857"}}>{c.remove ? "—" : <>{n(c.next + margin)} <span style={{fontWeight:400,color:"#9ca3af"}}>(+{n(margin)})</span></>}</td>
+                            <td style={{padding:"4px 8px",fontSize:10,color:c.remove?"#9a3412":"#b91c1c",fontWeight:700}}>
+                              {c.remove ? "🗑 삭제" : <>{c.bigJump ? `±30%↑ (${pct > 0 ? "+" : ""}${pct}%)` : ""}{c.bigJump && c.inverted ? " · " : ""}{c.inverted ? "20'>40'DV" : ""}</>}
                             </td>
                           </tr>
                         );

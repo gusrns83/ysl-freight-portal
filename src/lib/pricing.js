@@ -230,10 +230,12 @@ const flattenRateSnapshot = ({
           const rt = rentComboMarginType(ci);
           const bucket = normalizeRentalCityBucket(rentalRates[row.pol]?.[period]?.[city]);
           let cost = bucket?.[sk];
+          if (cost === "x") return; // 명시적 미서비스 — fallback 안 함
           if (cost == null || cost === "") {
             if (period === "future") {
               const cur = normalizeRentalCityBucket(rentalRates[row.pol]?.current?.[city]);
               cost = cur?.[sk];
+              if (cost === "x") return;
             }
             if (cost == null || cost === "") {
               if (ci === 0) cost = row.r20[city];

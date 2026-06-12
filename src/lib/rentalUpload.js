@@ -40,8 +40,8 @@ export const buildRentalTemplateRows = (rentalRates, rentalRows, period = "curre
       const bucket = normalizeRentalCityBucket(rentalRates[pol]?.[period]?.[city]);
       const cur = period === "future" ? normalizeRentalCityBucket(rentalRates[pol]?.current?.[city]) : {};
       RENT_COMBO_KEYS.forEach(sk => {
-        const v = bucket[sk] ?? cur[sk];
-        row.push(v == null || v === "" ? "x" : Number(v));
+        const v = isRentalNoService(bucket[sk]) ? "x" : (bucket[sk] ?? (isRentalNoService(cur[sk]) ? "x" : cur[sk]));
+        row.push(v == null || v === "" || v === "x" ? "x" : Number(v));
       });
     });
     rows.push(row);
@@ -69,6 +69,15 @@ const sizeSkOf = (raw) => {
 
 const matchCity = (cityMap, raw) =>
   cityMap[normKey(raw)] || cityMap[normKey(normalizeRentalCityName(raw))] || null;
+
+/** 셀 값: 'x' = 명시적 미서비스(삭제), 빈칸 = 변경 없음(null), 그 외 숫자 */
+const cellVal = (raw) => {
+  if (normKey(raw) === "X") return "x";
+  return num(raw);
+};
+
+/** 저장된 셀이 명시적 미서비스("x")인지 */
+export const isRentalNoService = (v) => v === "x";
 
 /**
  * 그리드 양식 파싱 — "극동 컨테이너 운임.xlsx ③ Rental Fee (업로드용)":
@@ -111,7 +120,7 @@ const parseRentalGridRows = (rows, headerIdx, polCol, cityMap, polMap) => {
     }
     const byCity = {};
     colDefs.forEach(d => {
-      const v = num(row[d.col]); // 'x'·빈칸 → null
+      const v = cellVal(row[d.col]); // 숫자 / 'x'(미서비스) / null(빈칸=변경 없음)
       if (v == null) return;
       (byCity[d.city] ??= {})[d.sk] = v;
     });
@@ -171,7 +180,7 @@ export const parseRentalUploadRows = (rows, rentalRows) => {
       });
       continue;
     }
-    const values = { c20: num(row[c20Col]), c40dv: num(row[dvCol]), c40hc: num(row[hcCol]) };
+    const values = { c20: cellVal(row[c20Col]), c40dv: cellVal(row[dvCol]), c40hc: cellVal(row[hcCol]) };
     if (values.c20 == null && values.c40dv == null && values.c40hc == null) continue; // 매입가 없는 행은 무시
     entries.push({ city, pol, values, row: i + 1 });
   }
@@ -185,9 +194,11 @@ export const parseRentalUploadRows = (rows, rentalRows) => {
 export const buildRentalUploadChanges = (entries, rentalRates, period) => {
   const effOld = (pol, city, sk) => {
     const stored = normalizeRentalCityBucket(rentalRates[pol]?.[period]?.[city]);
+    if (isRentalNoService(stored[sk])) return null; // 명시적 미서비스 — current fallback 안 함
     if (stored[sk] != null && stored[sk] !== "") return Number(stored[sk]);
     if (period === "future") {
       const cur = normalizeRentalCityBucket(rentalRates[pol]?.current?.[city]);
+      if (isRentalNoService(cur[sk])) return null;
       if (cur[sk] != null && cur[sk] !== "") return Number(cur[sk]);
     }
     return null;
@@ -199,37 +210,49 @@ export const buildRentalUploadChanges = (entries, rentalRates, period) => {
       const next = e.values[sk];
       if (next == null) return;
       const old = effOld(e.pol, e.city, sk);
+      if (next === "x") {
+        if (old == null) return; // 이미 값 없음 — 변경 불필요
+        changes.push({
+          pol: e.pol, city: e.city, sk, type: rentComboMarginType(ci),
+          old, next: null, remove: true, row: e.row, bigJump: false, inverted: false,
+        });
+        return;
+      }
       if (old != null && old === next) return; // 변경 없음
       changes.push({
         pol: e.pol, city: e.city, sk, type: rentComboMarginType(ci),
-        old, next, row: e.row,
+        old, next, remove: false, row: e.row,
         bigJump: old != null && old > 0 && Math.abs(next - old) / old >= 0.3,
         inverted: false,
       });
     });
   });
 
-  // 가격 역전: 업로드 반영 후 기준으로 20' > 40'DV 인 셀 경고
+  // 가격 역전: 업로드 반영 후 기준으로 20' > 40'DV 인 셀 경고 ('x'는 제외)
   entries.forEach(e => {
-    const eff = sk => e.values[sk] ?? effOld(e.pol, e.city, sk);
+    const eff = sk => {
+      const v = e.values[sk];
+      if (v === "x") return null;
+      return v ?? effOld(e.pol, e.city, sk);
+    };
     const v20 = eff("c20");
     const vdv = eff("c40dv");
     if (v20 != null && vdv != null && Number(v20) > Number(vdv)) {
       changes.forEach(c => {
-        if (c.pol === e.pol && c.city === e.city && (c.sk === "c20" || c.sk === "c40dv")) c.inverted = true;
+        if (c.pol === e.pol && c.city === e.city && !c.remove && (c.sk === "c20" || c.sk === "c40dv")) c.inverted = true;
       });
     }
   });
   return changes;
 };
 
-/** 변경 셀을 rentalRates 에 반영한 새 객체 반환 (원본 불변) */
+/** 변경 셀을 rentalRates 에 반영한 새 객체 반환 (원본 불변) — 삭제는 "x" 마커 저장 (기본값 fallback 차단) */
 export const applyRentalUploadChanges = (rentalRates, changes, period) => {
   const next = JSON.parse(JSON.stringify(rentalRates || {}));
   changes.forEach(c => {
     if (!next[c.pol]) next[c.pol] = { current: {}, future: {} };
     if (!next[c.pol][period]) next[c.pol][period] = {};
-    next[c.pol][period][c.city] = { ...(next[c.pol][period][c.city] || {}), [c.sk]: c.next };
+    next[c.pol][period][c.city] = { ...(next[c.pol][period][c.city] || {}), [c.sk]: c.remove ? "x" : c.next };
   });
   return next;
 };

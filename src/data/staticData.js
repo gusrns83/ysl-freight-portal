@@ -499,9 +499,9 @@ const countRentalMissingFuture = (rentalRates) => {
     Object.keys(bucket?.current || {}).forEach(city => {
       ["c20", "c40dv", "c40hc"].forEach(sk => {
         const cur = bucket.current[city]?.[sk];
-        if (cur == null || cur === "") return;
+        if (cur == null || cur === "" || cur === "x") return; // "x" = 명시적 미서비스
         const fut = bucket.future?.[city]?.[sk];
-        if (fut == null || fut === "") missing++;
+        if (fut == null || fut === "") missing++; // future "x" 는 입력된 것으로 간주
       });
     });
   });
