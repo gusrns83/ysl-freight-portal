@@ -3217,7 +3217,8 @@ export default function App() {
     setRentalUploadBusy(true);
     try {
       const workbook = await readExcelFile(file);
-      const sheetName = workbook.sheetNames[0];
+      // "③ Rental Fee (업로드용)" 같은 업로드용 시트 우선 선택
+      const sheetName = workbook.sheetNames.find(s => /업로드|rental/i.test(s)) || workbook.sheetNames[0];
       const { entries, errors } = parseRentalUploadRows(workbook.sheets[sheetName] || [], rentalRows);
       const changes = buildRentalUploadChanges(entries, rentalRates, rentalUploadPeriod);
       setRentalUpload({ fileName: workbook.fileName, sheetName, entries, errors, changes });

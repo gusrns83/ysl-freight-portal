@@ -5,8 +5,6 @@ import { PM, RC_LABEL, RENT_CITY_ORDER, normalizeRentalCityName } from "../data/
 import { RENT_COMBO_KEYS, normalizeRentalCityBucket, rentComboMarginType } from "../config.js";
 import { loadXlsx, num } from "./excelParsers.js";
 
-const RENTAL_UPLOAD_HEADER = ["Return City", "AREA", "POL", "20'", "40'DV", "40'HC"];
-
 const normKey = (s) => String(s ?? "").toUpperCase().replace(/[^A-Z0-9]/g, "");
 
 /** 도시 키 매칭 맵 — 내부 키 + 표시 라벨(SPB 등) + 별칭 모두 허용 */
@@ -20,20 +18,33 @@ const buildCityMap = () => {
   return map;
 };
 
-/** 현재 DB의 도시×POL 목록 + 매입가가 채워진 템플릿 행 */
+/**
+ * 템플릿 — "극동 컨테이너 운임.xlsx ③ Rental Fee (업로드용)" 시트와 동일한 그리드 양식.
+ * 1행: 지역 | POL | 도시1 | | | 도시2 | | | …   2행: 20' | 40'DV | 40'HC 반복
+ * 데이터: 행=POL(지역은 그룹 첫 행만), 값=매입가, 미서비스="x"
+ */
 export const buildRentalTemplateRows = (rentalRates, rentalRows, period = "current") => {
-  const rows = [RENTAL_UPLOAD_HEADER];
+  const head1 = ["지역", "POL"];
+  const head2 = [null, null];
   RENT_CITY_ORDER.forEach(city => {
-    rentalRows.forEach(r => {
-      const pol = r.rentalPol;
-      const stored = normalizeRentalCityBucket(rentalRates[pol]?.[period]?.[city]);
+    head1.push(city, null, null);
+    head2.push("20'", "40'DV", "40'HC");
+  });
+  const rows = [head1, head2];
+  let lastArea = null;
+  rentalRows.forEach(r => {
+    const pol = r.rentalPol;
+    const row = [r.area !== lastArea ? r.area || "" : null, pol];
+    lastArea = r.area;
+    RENT_CITY_ORDER.forEach(city => {
+      const bucket = normalizeRentalCityBucket(rentalRates[pol]?.[period]?.[city]);
       const cur = period === "future" ? normalizeRentalCityBucket(rentalRates[pol]?.current?.[city]) : {};
-      const val = sk => {
-        const v = stored[sk] ?? cur[sk];
-        return v == null || v === "" ? null : Number(v);
-      };
-      rows.push([RC_LABEL[city] || city, r.area || "", pol, val("c20"), val("c40dv"), val("c40hc")]);
+      RENT_COMBO_KEYS.forEach(sk => {
+        const v = bucket[sk] ?? cur[sk];
+        row.push(v == null || v === "" ? "x" : Number(v));
+      });
     });
+    rows.push(row);
   });
   return rows;
 };
@@ -47,7 +58,71 @@ export const downloadRentalTemplate = async (rentalRates, rentalRows, period = "
   XLSX.writeFile(wb, `rental-upload-${new Date().toISOString().slice(0, 10)}.xlsx`);
 };
 
-/** 업로드 시트 파싱 — 매칭 실패 행은 errors 로 분리하고 제외 */
+const sizeSkOf = (raw) => {
+  const k = normKey(raw);
+  if (!k) return null;
+  if (k.includes("40DV") || k === "40") return "c40dv";
+  if (k.includes("40HC")) return "c40hc";
+  if (k.includes("20")) return "c20";
+  return null;
+};
+
+const matchCity = (cityMap, raw) =>
+  cityMap[normKey(raw)] || cityMap[normKey(normalizeRentalCityName(raw))] || null;
+
+/**
+ * 그리드 양식 파싱 — "극동 컨테이너 운임.xlsx ③ Rental Fee (업로드용)":
+ * 헤더행(지역|POL|도시…) + 사이즈행(20'|40'DV|40'HC…) + POL행들. 'x'/빈칸은 변경 없음.
+ */
+const parseRentalGridRows = (rows, headerIdx, polCol, cityMap, polMap) => {
+  const header = rows[headerIdx] || [];
+  const sizeRow = rows[headerIdx + 1] || [];
+  const errors = [];
+
+  // 도시 열 구간: 헤더에 도시명이 있는 열부터 다음 도시명 전까지
+  const cityCols = [];
+  for (let c = polCol + 1; c < header.length; c++) {
+    if (header[c] != null && String(header[c]).trim() !== "") cityCols.push(c);
+  }
+  const colDefs = [];
+  cityCols.forEach((c, i) => {
+    const rawCity = header[c];
+    const city = matchCity(cityMap, rawCity);
+    const end = i + 1 < cityCols.length ? cityCols[i + 1] : Math.max(header.length, sizeRow.length);
+    if (!city) {
+      errors.push({ row: headerIdx + 1, city: String(rawCity ?? ""), pol: "", reason: "도시 매칭 실패 (열 전체 제외)" });
+      return;
+    }
+    for (let cc = c; cc < end; cc++) {
+      const sk = sizeSkOf(sizeRow[cc]);
+      if (sk) colDefs.push({ col: cc, city, sk });
+    }
+  });
+
+  const entries = [];
+  for (let i = headerIdx + 2; i < rows.length; i++) {
+    const row = rows[i] || [];
+    const rawPol = row[polCol];
+    if (rawPol == null || String(rawPol).trim() === "") continue;
+    const pol = polMap[normKey(rawPol)];
+    if (!pol) {
+      errors.push({ row: i + 1, city: "", pol: String(rawPol), reason: "POL 매칭 실패" });
+      continue;
+    }
+    const byCity = {};
+    colDefs.forEach(d => {
+      const v = num(row[d.col]); // 'x'·빈칸 → null
+      if (v == null) return;
+      (byCity[d.city] ??= {})[d.sk] = v;
+    });
+    Object.entries(byCity).forEach(([city, values]) => {
+      entries.push({ city, pol, values: { c20: values.c20 ?? null, c40dv: values.c40dv ?? null, c40hc: values.c40hc ?? null }, row: i + 1 });
+    });
+  }
+  return { entries, errors };
+};
+
+/** 업로드 시트 파싱 — 그리드 양식(극동 컨테이너 운임) 자동 감지, 아니면 세로 양식. 매칭 실패는 errors 로 분리 */
 export const parseRentalUploadRows = (rows, rentalRows) => {
   const cityMap = buildCityMap();
   const polMap = {};
@@ -57,9 +132,17 @@ export const parseRentalUploadRows = (rows, rentalRows) => {
   });
 
   let headerIdx = (rows || []).findIndex(r =>
-    (r || []).some(c => normKey(c) === "POL") && (r || []).some(c => /20/.test(String(c ?? ""))));
+    (r || []).some(c => normKey(c) === "POL") && ((r || []).some(c => /20/.test(String(c ?? "")))
+      || ((rows[(rows || []).indexOf(r) + 1] || []).filter(c => sizeSkOf(c)).length >= 3)));
   if (headerIdx < 0) headerIdx = 0;
   const header = rows[headerIdx] || [];
+
+  // 그리드 감지: 헤더 다음 행에 사이즈 토큰(20'/40'DV/40'HC)이 3개 이상이면 그리드 양식
+  const gridPolCol = header.findIndex(c => normKey(c) === "POL");
+  const sizeTokens = (rows[headerIdx + 1] || []).filter(c => sizeSkOf(c)).length;
+  if (gridPolCol >= 0 && sizeTokens >= 3) {
+    return parseRentalGridRows(rows, headerIdx, gridPolCol, cityMap, polMap);
+  }
   const colOf = (pred, fallback) => {
     const i = header.findIndex(c => c != null && pred(String(c)));
     return i >= 0 ? i : fallback;
