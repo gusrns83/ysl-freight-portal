@@ -7,6 +7,7 @@ import { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, F_TO_R, FR, PM, RATE_TYPES
 import { DROP_DB_KEYS, EXCEL_UPLOAD_MAX_MS, MISC_SETTINGS_KEYS, OCEAN_DB_KEYS, RENTAL_DB_KEYS, api, enqueueNetworkWrite, extractPortalOverrides, fetchSettingsInKeys, mergePortalOverridesIntoPolCostO, postSettingsRows, resetNetworkWriteQueue, saveOceanPolCostsBundle, saveOneSettingWithRetry, saveSettingDirect, saveSettingValue, saveSettingsEntries, saveSettingsEntriesDirect, serializeOceanPolCosts, settingsMapFromRows, withTimeout } from "./lib/api.js";
 import { JAPAN_POL_SET, LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, readExcelFile, snkJapanReferenceMargins, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
 import { bootPricingFromCache, buildBuyingGriCosts, buildCopyCurrentToFutureCosts, buildRateHistoryQuery, buildSellingGriSells, copyCarrierDropRatesPeriod, copyCarrierRatesPeriod, deleteRateHistoryByIds, diffRateHistoryRows, displayMarginFromPrices, fetchRateHistoryExcelUploadOcean, flattenRateSnapshot, getPolStoredMargin, griPeriodLabel, marginNowTs, marginNum, mergePolCostODeep, parsePricingFromSettings, pickLatestMargin, pickRateHistoryDuplicatesToRemove, postRateHistoryRows, pricingCacheFromSnapshot, pruneRateHistoryOutsideService, rateHistoryEntryKey, resolveCarrierEffectiveSell, resolveCarrierExplicitSell, resolveMarginCandidates, settingBundleHas, sortRateHistoryRowsByCity, uploadExcelRateHistory } from "./lib/pricing.js";
+import { applyRentalUploadChanges, buildRentalUploadChanges, downloadRentalTemplate, parseRentalUploadRows } from "./lib/rentalUpload.js";
 
 const QUOTE_FN_URL = `${SB_URL}/functions/v1/send-quote-request`;
 const QUOTE_COOLDOWN_MS = 60000;
@@ -548,6 +549,11 @@ export default function App() {
   const [gridEditUnlocked, setGridEditUnlocked] = useState(false);
   const gridEditSnapshotRef = useRef(null);
   const [rentalAdminPeriod, setRentalAdminPeriod] = useState("current");
+  // 렌탈 Excel 업로드 — 기본 반영 대상: 향후 운임
+  const [rentalUploadPeriod, setRentalUploadPeriod] = useState("future");
+  const [rentalUpload, setRentalUpload] = useState(null); // {fileName, entries, errors, changes}
+  const [rentalUploadBusy, setRentalUploadBusy] = useState(false);
+  const [rentalUploadMsg, setRentalUploadMsg] = useState("");
   const [selReturnCity, setSelReturnCity] = useState("");
   const [rentalEditCell, setRentalEditCell] = useState(null);
   const [clients, setClients] = useState([]);
@@ -805,7 +811,7 @@ export default function App() {
   const rentalAdminTabBar = (
     <div style={{ padding: "10px 0 12px", background: "#fff", borderBottom: "1px solid #e5e7eb" }}>
       <div className="carrier-admin-page" style={{ display: "flex", gap: 6, paddingTop: 0, paddingBottom: 0 }}>
-      {[["grid", "현재 운임", "#7c3aed"], ["history", "변경 이력", "#6d28d9"]].map(([id, label, color]) => (
+      {[["grid", "현재 운임", "#7c3aed"], ["upload", "Excel 업로드", "#9333ea"], ["history", "변경 이력", "#6d28d9"]].map(([id, label, color]) => (
         <button
           key={id}
           type="button"
@@ -3198,6 +3204,77 @@ export default function App() {
     writePricingCache(buildPricingCache());
   });
 
+  // ── 렌탈 Excel 업로드 (매입만 갱신 · 마진 유지 → 매출 자동 재계산) ──
+  const rentalUploadMargin = (rentalPol, type) => {
+    const fp = PM[rentalPol] || rentalPol;
+    const area = fMap[fp]?.area || "OTHERS";
+    return { fp, area, margin: getRentalM(fp, area, type) };
+  };
+
+  const handleRentalUploadFile = async (file) => {
+    if (!file) return;
+    setRentalUploadMsg("");
+    setRentalUploadBusy(true);
+    try {
+      const workbook = await readExcelFile(file);
+      const sheetName = workbook.sheetNames[0];
+      const { entries, errors } = parseRentalUploadRows(workbook.sheets[sheetName] || [], rentalRows);
+      const changes = buildRentalUploadChanges(entries, rentalRates, rentalUploadPeriod);
+      setRentalUpload({ fileName: workbook.fileName, sheetName, entries, errors, changes });
+      if (!entries.length) {
+        setRentalUploadMsg("매칭된 행이 없습니다 — 양식 다운로드 후 도시/POL 이름을 그대로 사용해 주세요");
+      } else if (!changes.length) {
+        setRentalUploadMsg(`기존 값과 모두 동일합니다 (${entries.length}행 매칭 · 변경 0건)`);
+      }
+    } catch (e) {
+      setRentalUpload(null);
+      setRentalUploadMsg(`파싱 실패: ${e.message}`);
+    } finally {
+      setRentalUploadBusy(false);
+    }
+  };
+
+  const cancelRentalUpload = () => {
+    setRentalUpload(null);
+    setRentalUploadMsg("");
+  };
+
+  const confirmRentalUpload = () => {
+    if (!rentalUpload?.changes?.length) return;
+    const period = rentalUploadPeriod;
+    const { changes, fileName } = rentalUpload;
+    const next = applyRentalUploadChanges(rentalRates, changes, period);
+    const batchId = (typeof crypto !== "undefined" && crypto.randomUUID)
+      ? crypto.randomUUID()
+      : `rental-${Date.now()}`;
+    const historyRows = changes.map(c => {
+      const { fp, area, margin } = rentalUploadMargin(c.pol, c.type);
+      return {
+        batch_id: batchId, carrier: "RENTAL", area, pol: fp, route: `${fp} > ${c.city}`,
+        rate_type: c.type, period, category: "rental",
+        cost: c.next, sell: c.next + margin, margin,
+        source: "excel-upload",
+        note: `Excel 업로드 (${fileName}): ${c.old ?? "—"} → ${c.next}`,
+      };
+    });
+    cancelPendingPricingSave();
+    skipAutoSaveRef.current = true;
+    setRentalRates(next);
+    setRentalUpload(null);
+    runSave("Rental Excel 업로드", async () => {
+      await saveOneSettingWithRetry("rental_rates_json", JSON.stringify(next));
+      try {
+        await postRateHistoryRows(historyRows);
+      } catch (e) {
+        console.warn("rental upload history skip", e);
+      }
+    })
+      .then(() => {
+        setRentalUploadMsg(`✅ ${changes.length}개 셀 반영 완료 (${period === "future" ? "향후" : "현재"} 운임) · 이력 ${historyRows.length}건 기록`);
+      })
+      .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
+  };
+
   const renderNoticeFile = (fileUrl, title) => {
     if (!fileUrl) return null;
     const ext = fileUrl.split(".").pop().toLowerCase();
@@ -4316,6 +4393,140 @@ export default function App() {
         </td>
       );
     };
+    if (rentalAdminTab === "upload") {
+      const upPeriodLabel = rentalUploadPeriod === "future" ? "향후 운임" : "현재 운임";
+      const upChanges = rentalUpload?.changes || [];
+      const upErrors = rentalUpload?.errors || [];
+      const warnCount = upChanges.filter(c => c.bigJump || c.inverted).length;
+      return (
+        <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}}>
+          {adminSaveToastEl}
+          <div className="portal-sticky-top admin-sticky-top">
+            <div style={{padding:"12px 16px",display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+              <button onClick={()=>{setShowRentalAdmin(false);setRentalAdminTab("grid");}} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
+              <div style={{textAlign:"center"}}>
+                <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
+                <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>Excel 업로드 · 매입만 갱신 · 마진 유지 → 매출 자동 계산</div>
+              </div>
+              <div style={{width:48}}/>
+            </div>
+            {rentalAdminTabBar}
+            {expiryBannerEl}
+          </div>
+          <div className="carrier-admin-page rental-admin-page">
+            <div style={{background:"#fff",border:"1px solid #ddd6fe",borderRadius:10,padding:12,marginBottom:10}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#5b21b6",marginBottom:6}}>반영 대상</div>
+              <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:10}}>
+                {[["current","현재 운임"],["future","향후 운임 (권장)"]].map(([k,l])=>(
+                  <button key={k} type="button"
+                    onClick={()=>{
+                      setRentalUploadPeriod(k);
+                      setRentalUpload(prev => prev
+                        ? { ...prev, changes: buildRentalUploadChanges(prev.entries, rentalRates, k) }
+                        : prev);
+                    }}
+                    style={{flex:1,padding:"8px",fontSize:11,fontWeight:600,borderRadius:8,border:"none",cursor:"pointer",
+                      background:rentalUploadPeriod===k?"#fff":"transparent",
+                      color:rentalUploadPeriod===k?(k==="future"?"#b45309":"#111"):"#9ca3af"}}>
+                    {l}
+                  </button>
+                ))}
+              </div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                <button type="button"
+                  onClick={() => downloadRentalTemplate(rentalRates, rentalRows, rentalUploadPeriod).catch(e => setRentalUploadMsg(`양식 생성 실패: ${e.message}`))}
+                  style={{fontSize:11,fontWeight:700,padding:"8px 12px",borderRadius:8,background:"#ede9fe",color:"#5b21b6",border:"1px solid #ddd6fe",cursor:"pointer"}}>
+                  📥 양식 다운로드 (현재 도시·POL·매입가 포함)
+                </button>
+                <label style={{fontSize:11,fontWeight:700,padding:"8px 12px",borderRadius:8,background:rentalUploadBusy?"#c4b5fd":"#7c3aed",color:"#fff",cursor:rentalUploadBusy?"wait":"pointer"}}>
+                  {rentalUploadBusy ? "읽는 중…" : "📤 Excel 파일 선택"}
+                  <input type="file" accept=".xlsx,.xls" style={{display:"none"}} disabled={rentalUploadBusy}
+                    onChange={e => { handleRentalUploadFile(e.target.files?.[0]); e.target.value = ""; }}/>
+                </label>
+              </div>
+              <div style={{fontSize:9,color:"#9ca3af",marginTop:8}}>
+                컬럼: Return City · AREA · POL · 20&apos; · 40&apos;DV · 40&apos;HC (매입가) — 빈 칸은 변경 없음으로 처리
+              </div>
+            </div>
+            {rentalUploadMsg && (
+              <div style={{marginBottom:10,padding:"8px 12px",borderRadius:8,fontSize:11,fontWeight:600,
+                background:rentalUploadMsg.startsWith("✅")?"#f0fdf4":"#fef2f2",
+                color:rentalUploadMsg.startsWith("✅")?"#166534":"#b91c1c",
+                border:`1px solid ${rentalUploadMsg.startsWith("✅")?"#bbf7d0":"#fecaca"}`}}>
+                {rentalUploadMsg}
+              </div>
+            )}
+            {upErrors.length > 0 && (
+              <div style={{marginBottom:10,background:"#fff7ed",border:"1px solid #fed7aa",borderRadius:10,padding:10}}>
+                <div style={{fontSize:11,fontWeight:700,color:"#c2410c",marginBottom:6}}>매칭 실패 {upErrors.length}행 (반영 제외)</div>
+                {upErrors.slice(0, 10).map((er, i) => (
+                  <div key={i} style={{fontSize:10,color:"#9a3412"}}>
+                    {er.row}행 · {er.city || "—"} / {er.pol || "—"} · {er.reason}
+                  </div>
+                ))}
+                {upErrors.length > 10 && <div style={{fontSize:10,color:"#9a3412"}}>… 외 {upErrors.length - 10}행</div>}
+              </div>
+            )}
+            {rentalUpload && upChanges.length > 0 && (
+              <div style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:10,padding:12,marginBottom:10}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                  <span style={{fontSize:12,fontWeight:700,color:"#111"}}>변경 미리보기 · {upChanges.length}개 셀</span>
+                  <span style={{fontSize:10,color:"#6b7280"}}>{rentalUpload.fileName} → {upPeriodLabel}</span>
+                  {warnCount > 0 && (
+                    <span style={{fontSize:10,fontWeight:700,color:"#b91c1c"}}>⚠️ 경고 {warnCount}건 (±30% 변동 또는 20&apos;&gt;40&apos;DV 역전)</span>
+                  )}
+                </div>
+                <div style={{overflowX:"auto"}}>
+                  <table style={{borderCollapse:"collapse",fontSize:11,width:"100%"}}>
+                    <thead>
+                      <tr style={{color:"#9ca3af",borderBottom:"1px solid #e5e7eb",textAlign:"left"}}>
+                        <th style={{padding:"4px 8px"}}>도시</th>
+                        <th style={{padding:"4px 8px"}}>POL</th>
+                        <th style={{padding:"4px 8px"}}>사이즈</th>
+                        <th style={{padding:"4px 8px",textAlign:"right"}}>기존 매입</th>
+                        <th style={{padding:"4px 8px",textAlign:"right"}}>새 매입</th>
+                        <th style={{padding:"4px 8px",textAlign:"right"}}>새 매출 (마진 유지)</th>
+                        <th style={{padding:"4px 8px"}}>경고</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {upChanges.map((c, i) => {
+                        const { margin } = rentalUploadMargin(c.pol, c.type);
+                        const warn = c.bigJump || c.inverted;
+                        const pct = c.old ? Math.round((c.next - c.old) / c.old * 100) : null;
+                        return (
+                          <tr key={i} style={{borderBottom:"1px solid #f9fafb",background:warn?"#fef2f2":i%2?"#fafafa":"#fff"}}>
+                            <td style={{padding:"4px 8px"}}>{RC_LABEL[c.city] || c.city}</td>
+                            <td style={{padding:"4px 8px"}}>{c.pol}</td>
+                            <td style={{padding:"4px 8px"}}>{c.sk === "c20" ? "20'" : c.sk === "c40dv" ? "40'DV" : "40'HC"}</td>
+                            <td style={{padding:"4px 8px",textAlign:"right",color:"#9ca3af"}}>{c.old != null ? n(c.old) : "—"}</td>
+                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:"#1d4ed8"}}>{n(c.next)}</td>
+                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:"#047857"}}>{n(c.next + margin)} <span style={{fontWeight:400,color:"#9ca3af"}}>(+{n(margin)})</span></td>
+                            <td style={{padding:"4px 8px",fontSize:10,color:"#b91c1c",fontWeight:700}}>
+                              {c.bigJump ? `±30%↑ (${pct > 0 ? "+" : ""}${pct}%)` : ""}{c.bigJump && c.inverted ? " · " : ""}{c.inverted ? "20'>40'DV" : ""}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div style={{display:"flex",gap:8,marginTop:12}}>
+                  <button type="button" onClick={confirmRentalUpload} disabled={saveBusy}
+                    style={{flex:1,padding:"10px",fontSize:12,fontWeight:700,borderRadius:8,border:"none",cursor:saveBusy?"not-allowed":"pointer",background:saveBusy?"#c4b5fd":"#7c3aed",color:"#fff"}}>
+                    {saveBusy ? "저장 중…" : `✓ ${upChanges.length}개 셀 ${upPeriodLabel}에 반영`}
+                  </button>
+                  <button type="button" onClick={cancelRentalUpload}
+                    style={{padding:"10px 16px",fontSize:12,fontWeight:600,borderRadius:8,border:"1px solid #e5e7eb",background:"#fff",color:"#6b7280",cursor:"pointer"}}>
+                    취소
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
     return (
       <div style={{minHeight:"100vh",background:"#f8fafc",fontFamily:ff}} onClick={() => setRentalEditCell(null)}>
         {adminSaveToastEl}
