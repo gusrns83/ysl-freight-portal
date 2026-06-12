@@ -3,10 +3,10 @@ import { createPortal } from "react-dom";
 import { GriAdjustPanel, MarginPanel } from "./components/adminPanels.jsx";
 import { AdminSaveToast, Bg, CarrierPortGuide, FooterAdSlot, Logo, MAIN_TABS, RatesLoading, ValidityPeriodFields } from "./components/common.jsx";
 import { ADMIN_PIN, ADMIN_SAVE_REV, ADMIN_SESSION_KEY, ADMIN_SKIP_PIN, DB_DROP, DB_LABEL, DB_OCEAN, DB_RENTAL, DEFAULT_MARGINS, PRICING_CACHE_KEY, RENT_COMBO_KEYS, RENT_COMBO_SHORT, SAVE_UI_MAX_MS, SB_KEY, SB_URL, mkAds, mkNotices, normalizeRentalCityBucket, parseAdsFromSettings, parseNoticeOn, readStoredPricingCache, rentComboMarginType, rentComboSk, rentSocType } from "./config.js";
-import { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, F_TO_R, FR, PM, RATE_TYPES, RC, RC_LABEL, RENTAL_CITY_ALIASES, RENTAL_EXTRA_CITIES, RENTAL_RATE_TYPES, RENT_CITY_ORDER, RN, VALIDITY_KEYS, addDaysToISO, buildDefaultRentalRates, carrierDropValidityKey, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, defaultValiditySlot, formatValidityCompact, formatValidityDate, formatValiditySlotLabel, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, n, normalizeRentalCityName, normalizeRentalMargins, normalizeValidityCarrier, normalizeValiditySlot, rentalRateLabel, repairValiditySlot, serializeCarrierDropRatesForSave, serializeValidityInfo, syncFromAfterTill } from "./data/staticData.js";
+import { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, F_TO_R, FR, PM, RATE_TYPES, RC, RC_LABEL, RENTAL_CITY_ALIASES, RENTAL_EXTRA_CITIES, RENTAL_RATE_TYPES, RENT_CITY_ORDER, RN, VALIDITY_KEYS, addDaysToISO, buildDefaultRentalRates, carrierDropValidityKey, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, defaultValiditySlot, formatValidityCompact, formatValidityDate, formatValiditySlotLabel, countDropMissingFuture, countOceanMissingFuture, countRentalMissingFuture, isValiditySlotExpired, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, n, normalizeRentalCityName, normalizeRentalMargins, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, rentalRateLabel, repairValiditySlot, serializeCarrierDropRatesForSave, serializeValidityInfo, syncFromAfterTill, validitySlotDaysLeft } from "./data/staticData.js";
 import { DROP_DB_KEYS, EXCEL_UPLOAD_MAX_MS, MISC_SETTINGS_KEYS, OCEAN_DB_KEYS, RENTAL_DB_KEYS, api, enqueueNetworkWrite, extractPortalOverrides, fetchSettingsInKeys, mergePortalOverridesIntoPolCostO, postSettingsRows, resetNetworkWriteQueue, saveOceanPolCostsBundle, saveOneSettingWithRetry, saveSettingDirect, saveSettingValue, saveSettingsEntries, saveSettingsEntriesDirect, serializeOceanPolCosts, settingsMapFromRows, withTimeout } from "./lib/api.js";
-import { JAPAN_POL_SET, LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, snkJapanReferenceMargins, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
-import { bootPricingFromCache, buildBuyingGriCosts, buildCopyCurrentToFutureCosts, buildRateHistoryQuery, buildSellingGriSells, copyCarrierDropRatesPeriod, copyCarrierRatesPeriod, deleteRateHistoryByIds, diffRateHistoryRows, displayMarginFromPrices, fetchRateHistoryExcelUploadOcean, flattenRateSnapshot, getPolStoredMargin, griPeriodLabel, marginNowTs, marginNum, mergePolCostODeep, parsePricingFromSettings, pickLatestMargin, pickRateHistoryDuplicatesToRemove, postRateHistoryRows, pricingCacheFromSnapshot, rateHistoryEntryKey, resolveCarrierEffectiveSell, resolveCarrierExplicitSell, resolveMarginCandidates, settingBundleHas, sortRateHistoryRowsByCity } from "./lib/pricing.js";
+import { JAPAN_POL_SET, LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, readExcelFile, snkJapanReferenceMargins, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
+import { bootPricingFromCache, buildBuyingGriCosts, buildCopyCurrentToFutureCosts, buildRateHistoryQuery, buildSellingGriSells, copyCarrierDropRatesPeriod, copyCarrierRatesPeriod, deleteRateHistoryByIds, diffRateHistoryRows, displayMarginFromPrices, fetchRateHistoryExcelUploadOcean, flattenRateSnapshot, getPolStoredMargin, griPeriodLabel, marginNowTs, marginNum, mergePolCostODeep, parsePricingFromSettings, pickLatestMargin, pickRateHistoryDuplicatesToRemove, postRateHistoryRows, pricingCacheFromSnapshot, pruneRateHistoryOutsideService, rateHistoryEntryKey, resolveCarrierEffectiveSell, resolveCarrierExplicitSell, resolveMarginCandidates, settingBundleHas, sortRateHistoryRowsByCity, uploadExcelRateHistory } from "./lib/pricing.js";
 
 const QUOTE_FN_URL = `${SB_URL}/functions/v1/send-quote-request`;
 const QUOTE_COOLDOWN_MS = 60000;
@@ -830,6 +830,69 @@ export default function App() {
       </div>
     </div>
   );
+
+  // ── Admin 만료 임박 배너 — 선사별 요약, 해상/Drop off/렌탈 구분 ──
+  const expiryAlerts = useMemo(() => {
+    if (!isAdmin) return [];
+    const out = [];
+    const pushAlert = (vKey, name, threshold, missing, target) => {
+      const entry = validityInfo[vKey];
+      const slot = normalizeValiditySlot(entry?.current);
+      if (slot.furtherNotice) return;
+      const d = validitySlotDaysLeft(slot);
+      if (d == null || d > threshold) return;
+      const hasFutureFrom = !!parseValidityToISO(normalizeValiditySlot(entry?.future).from);
+      if (missing === 0 && hasFutureFrom) return; // 차기 운임 입력 완료 → 문제 없음
+      const till = parseValidityToISO(slot.till);
+      const [, mo, dd] = till.split("-");
+      const tillLabel = `${parseInt(mo, 10)}/${parseInt(dd, 10)}`;
+      out.push({
+        key: vKey,
+        target,
+        text: `${name}: ${tillLabel} 만료${d < 0 ? " (지남)" : ""}, 차기 미입력 ${missing}건`,
+      });
+    };
+    CRS.forEach(cr => {
+      pushAlert(cr, `${cr} 해상`, 3, countOceanMissingFuture(polCostO, cr), { type: "ocean", cr });
+      pushAlert(carrierDropValidityKey(cr), `${cr} Drop off`, 3, countDropMissingFuture(carrierDropRates, cr), { type: "dropoff", cr });
+    });
+    pushAlert("RENTAL", "렌탈", 2, countRentalMissingFuture(rentalRates), { type: "rental" });
+    return out;
+  }, [isAdmin, validityInfo, polCostO, carrierDropRates, rentalRates]);
+
+  const openExpiryTarget = (target) => {
+    if (target.type === "rental") {
+      setShowFreightAdmin(false);
+      setShowRentalAdmin(true);
+      setRentalAdminTab("grid");
+      setRentalAdminPeriod("future");
+      return;
+    }
+    setShowRentalAdmin(false);
+    setCarrierAdminCr(target.cr);
+    setCarrierAdminMode(target.type === "dropoff" ? "dropoff" : "ocean");
+    setCarrierAdminPeriod("future");
+    openFreightAdmin("grid");
+  };
+
+  const expiryBannerEl = isAdmin && expiryAlerts.length > 0 ? (
+    <div style={{ padding: "8px 16px 0", background: "#fff" }}>
+      <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 10, padding: "8px 10px", display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
+        <span style={{ fontSize: 13 }} aria-hidden>⚠️</span>
+        {expiryAlerts.map(a => (
+          <button
+            key={a.key}
+            type="button"
+            onClick={() => openExpiryTarget(a.target)}
+            title="클릭하면 해당 운임 목록(향후 운임)으로 이동"
+            style={{ fontSize: 11, fontWeight: 700, color: "#b91c1c", background: "#fff", border: "1px solid #fecaca", borderRadius: 8, padding: "4px 8px", cursor: "pointer" }}
+          >
+            {a.text}
+          </button>
+        ))}
+      </div>
+    </div>
+  ) : null;
 
   const parseExcelWorkbook = (workbook, format, sheetName, period, yslCarrier) => {
     const sheet = sheetName || suggestSheet(format, workbook.sheetNames);
@@ -2675,12 +2738,16 @@ export default function App() {
 
   const getCarrierRate = (row, cr, t, period = ratePeriod) => {
     const p = period === "future" ? "future" : "current";
+    // 고객 화면: validity 종료일이 지난(만료) 현재 운임은 비표시
+    if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo[cr]?.current)) return null;
     const ov = getCarrierCostOverride(row.pol, cr, t, p);
     return ov != null ? ov : row.rates[cr][t];
   };
 
   const getRentalBase = (rPol, city, comboIdx, period = ratePeriod) => {
     const p = period === "future" ? "future" : "current";
+    // 고객 화면: 만료된 렌탈 운임 비표시
+    if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo.RENTAL?.current)) return null;
     const sk = rentComboSk(comboIdx);
     const bucket = normalizeRentalCityBucket(rentalRates[rPol]?.[p]?.[city]);
     if (bucket[sk] != null && bucket[sk] !== "") return Number(bucket[sk]);
@@ -2784,6 +2851,8 @@ export default function App() {
 
   const getCarrierDropAddon = (cr, cityKey, si, period) => {
     const p = period === "future" ? "future" : period === "current" ? "current" : ratePeriod;
+    // 고객 화면: 만료된 Drop off 운임 비표시
+    if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo[carrierDropValidityKey(cr)]?.current)) return null;
     const sk = sz(si);
     const stored = carrierDropRates[cr]?.[p]?.[cityKey]?.[sk];
     if (stored != null && stored !== "") return Number(stored);
@@ -4267,6 +4336,7 @@ export default function App() {
             )}
           </div>
           {rentalAdminTabBar}
+          {expiryBannerEl}
           {rentalAdminTab === "grid" && (
           <div className="carrier-admin-page rental-admin-page" onClick={e => e.stopPropagation()}>
             <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3}}>
@@ -4553,6 +4623,7 @@ export default function App() {
             </button>
           </div>
           {freightAdminTabBar}
+          {expiryBannerEl}
           <div className="carrier-admin-page" onClick={e => e.stopPropagation()}>
             <div style={{display:"flex",background:"#eff6ff",borderRadius:10,padding:3,marginBottom:8}}>
               {CRS.map(k=>(
