@@ -443,5 +443,69 @@ const serializeValidityInfo = (validityInfo) => JSON.stringify(
   ),
 );
 
+/** 모스크바(UTC+3) 기준 오늘 — 만료·전환 판정은 서버(rate-scheduler Edge Function)와 동일 기준 */
+const MSK_OFFSET_MS = 3 * 60 * 60 * 1000;
+const mskTodayISO = () => new Date(Date.now() + MSK_OFFSET_MS).toISOString().slice(0, 10);
 
-export { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, DOC_RC, FR, FURTHER_NOTICE_LABEL, F_TO_R, MONTH_MAP, PM, RATE_TYPES, RC, RC_LABEL, RENTAL_CITY_ALIASES, RENTAL_EXTRA_CITIES, RENTAL_RATE_TYPES, RENT_CITY_ORDER, RN, VALIDITY_KEYS, addDaysToISO, buildDefaultRentalRates, carrierDropValidityKey, compactValidityDatePart, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, defaultValiditySlot, formatValidityCompact, formatValidityDate, formatValiditySlotLabel, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, n, normalizeRentalCityName, normalizeRentalMargins, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, rentalRateLabel, repairValiditySlot, serializeCarrierDropRatesForSave, serializeValidityInfo, syncFromAfterTill };
+/** validity 종료일이 지난 운임 — 고객 화면 비표시 대상 */
+const isValiditySlotExpired = (slot) => {
+  const s = normalizeValiditySlot(slot);
+  if (s.furtherNotice) return false;
+  const till = parseValidityToISO(s.till);
+  return !!till && till < mskTodayISO();
+};
+
+const validitySlotDaysLeft = (slot) => {
+  const s = normalizeValiditySlot(slot);
+  if (s.furtherNotice) return null;
+  const till = parseValidityToISO(s.till);
+  if (!till) return null;
+  return Math.round((Date.parse(till) - Date.parse(mskTodayISO())) / 86400000);
+};
+
+/** 차기(향후) 운임 미입력 건수 — rate-scheduler Edge Function 과 동일 집계 */
+const countOceanMissingFuture = (polCostO, carrier) => {
+  let missing = 0;
+  Object.values(polCostO || {}).forEach(pol => {
+    const c = pol?.carrier?.[carrier];
+    if (!c) return;
+    RATE_TYPES.forEach(t => {
+      const cur = c.current?.[t];
+      if (cur == null || cur === "") return;
+      const fut = c.future?.[t];
+      if (fut == null || fut === "") missing++;
+    });
+  });
+  return missing;
+};
+
+const countDropMissingFuture = (carrierDropRates, carrier) => {
+  let missing = 0;
+  const cr = carrierDropRates?.[carrier];
+  Object.keys(cr?.current || {}).forEach(city => {
+    ["c20", "c40"].forEach(sk => {
+      const cur = cr.current[city]?.[sk];
+      if (cur == null || cur === "") return;
+      const fut = cr.future?.[city]?.[sk];
+      if (fut == null || fut === "") missing++;
+    });
+  });
+  return missing;
+};
+
+const countRentalMissingFuture = (rentalRates) => {
+  let missing = 0;
+  Object.values(rentalRates || {}).forEach(bucket => {
+    Object.keys(bucket?.current || {}).forEach(city => {
+      ["c20", "c40dv", "c40hc"].forEach(sk => {
+        const cur = bucket.current[city]?.[sk];
+        if (cur == null || cur === "") return;
+        const fut = bucket.future?.[city]?.[sk];
+        if (fut == null || fut === "") missing++;
+      });
+    });
+  });
+  return missing;
+};
+
+export { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, DOC_RC, FR, FURTHER_NOTICE_LABEL, F_TO_R, MONTH_MAP, PM, RATE_TYPES, RC, RC_LABEL, RENTAL_CITY_ALIASES, RENTAL_EXTRA_CITIES, RENTAL_RATE_TYPES, RENT_CITY_ORDER, RN, VALIDITY_KEYS, addDaysToISO, buildDefaultRentalRates, carrierDropValidityKey, compactValidityDatePart, countDropMissingFuture, countOceanMissingFuture, countRentalMissingFuture, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, defaultValiditySlot, formatValidityCompact, formatValidityDate, formatValiditySlotLabel, isValiditySlotExpired, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, mskTodayISO, n, normalizeRentalCityName, normalizeRentalMargins, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, rentalRateLabel, repairValiditySlot, serializeCarrierDropRatesForSave, serializeValidityInfo, syncFromAfterTill, validitySlotDaysLeft };
