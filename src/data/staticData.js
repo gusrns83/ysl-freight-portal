@@ -218,26 +218,9 @@ const defaultCarrierRates = () => Object.fromEntries(CRS.map(k => [k, {
   current: { coc20: "", coc40: "", soc20: "", soc40: "" },
   future: { coc20: "", coc40: "", soc20: "", soc40: "" },
 }]));
-const buildDefaultRentalRates = () => {
-  const rates = {};
-  RN.forEach(row => {
-    const pol = row[0];
-    const current = {};
-    RC.forEach((city, i) => {
-      const c20 = row[1 + i];
-      const c40 = row[13 + i];
-      if (c20 != null || c40 != null) {
-        current[city] = {
-          c20: c20 ?? "",
-          c40dv: c40 ?? "",
-          c40hc: c40 ?? "",
-        };
-      }
-    });
-    rates[pol] = { current, future: {} };
-  });
-  return rates;
-};
+// 렌탈 운임은 업로드(저장)된 값만 진실 — 내장 정적표(RN)를 시드하지 않음.
+// (과거엔 RN 정적값을 시드해 저장 시 DB에 구워지며 x 셀에 유령 매출이 생겼음)
+const buildDefaultRentalRates = () => ({});
 const mergeRentalRates = (base, saved) => {
   const next = { ...base };
   Object.entries(saved || {}).forEach(([pol, periods]) => {
