@@ -4167,23 +4167,33 @@ export default function App() {
   );
 
   // 고객 화면: 총 매출가(d.sell)만 노출. rentalSells는 렌탈 매출가(매입+마진) — 매입가/마진은 절대 표시하지 않음
-  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", hideLabels = false, rentalSells = null}) => (
-    <div className={`guest-price-pair guest-rent-triple${hideLabels ? " guest-rent-triple--no-lbl" : ""}`}>
-      {rentalSells && rentalSells.some(v => v != null) && (
-        <div style={{display:"flex",alignItems:"flex-end",fontSize:9,fontWeight:600,color:"#7c3aed",paddingBottom:1}}>Rental</div>
-      )}
-      {[d20, d40dv, d40hc].map((d, i) => (
-        <div key={RENT_COMBO_SHORT[i]} className="guest-price-col">
-          {!hideLabels && (
-            <div className="guest-price-lbl">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
-          )}
-          <div className={`guest-price-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
-          {rentalSells && rentalSells[i] != null && <div style={{fontSize:9,color:"#7c3aed",marginTop:1}}>${n(rentalSells[i])}</div>}
-          {d.cr && <Bg k={d.cr}/>}
-        </div>
-      ))}
-    </div>
-  );
+  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", hideLabels = false, rentalSells = null}) => {
+    const showRental = !!rentalSells && rentalSells.some(v => v != null);
+    const grid = (
+      <div className={`guest-price-pair guest-rent-triple${hideLabels ? " guest-rent-triple--no-lbl" : ""}`}>
+        {[d20, d40dv, d40hc].map((d, i) => (
+          <div key={RENT_COMBO_SHORT[i]} className="guest-price-col">
+            {!hideLabels && (
+              <div className="guest-price-lbl">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
+            )}
+            <div className={`guest-price-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
+            {showRental && (
+              <div className="guest-rent-sub">{rentalSells[i] != null ? `$${n(rentalSells[i])}` : " "}</div>
+            )}
+            {d.cr && <Bg k={d.cr}/>}
+          </div>
+        ))}
+      </div>
+    );
+    // 렌탈 매출 표시 시: "Rental" 라벨을 그리드 밖(왼쪽)에 한 번만 — 3열 정렬이 상단 요약행과 일치하도록
+    if (!showRental) return grid;
+    return (
+      <div className="guest-rent-labeled">
+        <span className="guest-rent-label">Rental</span>
+        {grid}
+      </div>
+    );
+  };
 
   const AdminRentTriple = ({d20, d40dv, d40hc, prefix = "", editable, onCost20, onCost40dv, onCost40hc}) => {
     const combos = [d20, d40dv, d40hc];
@@ -5365,11 +5375,11 @@ export default function App() {
     const d40hc=rentDetail(row.pol,mow,row,2);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
-        <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
+        <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 12px 12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
           <div className={isAdmin?"admin-card-top":"route-card-head"}>
             <RouteCardLabel area={row.area} pol={row.displayPol || row.pol}/>
             {!isAdmin && <GuestRentTriple d20={d20} d40dv={d40dv} d40hc={d40hc}/>}
-            <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
+            <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none",width:12,textAlign:"center"}}>&#8964;</span>
           </div>
           {isAdmin && (
             <div className="admin-card-prices">

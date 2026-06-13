@@ -475,12 +475,15 @@
     padding-right: 16px;
   }
   /* 도시 행: 100px 컬럼 + 8px 간격 = 108px 피치, 오른쪽 끝 32px 오프셋이
-     테이블(쉘 16px + 셀 16px)과 일치해 컬럼이 세로로 정렬됨 */
-  .rent-city-row .guest-price-pair.guest-rent-triple {
+     테이블(쉘 16px + 셀 16px)과 일치해 컬럼이 세로로 정렬됨 ·
+     상단 요약행(route-card-head)도 동일 폭으로 통일해 컬럼 세로 정렬 일치 */
+  .rent-city-row .guest-price-pair.guest-rent-triple,
+  .route-card-head .guest-price-pair.guest-rent-triple {
     grid-template-columns: repeat(3, 100px);
     gap: 8px;
   }
-  .rent-city-row .guest-price-pair.guest-rent-triple .guest-price-col {
+  .rent-city-row .guest-price-pair.guest-rent-triple .guest-price-col,
+  .route-card-head .guest-price-pair.guest-rent-triple .guest-price-col {
     max-width: none;
   }
 }
@@ -1296,6 +1299,31 @@
   grid-template-columns: repeat(3, 54px);
   gap: 3px;
   flex-shrink: 0;
+}
+/* "Rental" 라벨 + 3열 그리드 묶음 — 라벨은 그리드 밖(왼쪽), 그리드는 항상 3열 유지 */
+.guest-rent-labeled {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.guest-rent-label {
+  font-size: 9px;
+  font-weight: 600;
+  color: #7c3aed;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+/* 컬럼별 렌탈 매출 숫자 — 빈 칸도 높이 유지해 행 높이/세로 정렬 일정하게 */
+.guest-rent-sub {
+  font-size: 9px;
+  color: #7c3aed;
+  line-height: 1.15;
+  min-height: 11px;
+  margin-top: 1px;
+  white-space: nowrap;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 /* Drop off GuestPricePair 와 동일 — 1단·2단·3단 각각 가로 행 */
 .guest-rent-triple--rows {
