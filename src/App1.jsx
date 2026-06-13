@@ -3100,7 +3100,9 @@ export default function App() {
         : null;
       return mkPrice(cost, totalSell != null && cost != null ? totalSell - cost : null, b.cr);
     }
-    const margin = fr ? getRentSellMargin(freightPol, rPol, fr.area, comboIdx) : 0;
+    // 매출 산정에 필요한 freight/area 컨텍스트가 없으면, 고객에겐 매입가를 노출하지 말고 "—" 처리
+    if (!fr) return isAdmin ? mkAdminPrice(cost, null, b.cr) : mkPrice(null, 0, b.cr);
+    const margin = getRentSellMargin(freightPol, rPol, fr.area, comboIdx);
     return mkPrice(cost, margin, b.cr);
   };
   const oceanDetail = (row, t) => {
@@ -4154,7 +4156,8 @@ export default function App() {
     </div>
   );
 
-  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", hideLabels = false, rentals = null}) => (
+  // 고객 화면: 매출가(d.sell)만 노출 — 매입가/마진/렌탈 원가는 절대 표시하지 않음
+  const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", hideLabels = false}) => (
     <div className={`guest-price-pair guest-rent-triple${hideLabels ? " guest-rent-triple--no-lbl" : ""}`}>
       {[d20, d40dv, d40hc].map((d, i) => (
         <div key={RENT_COMBO_SHORT[i]} className="guest-price-col">
@@ -4162,7 +4165,6 @@ export default function App() {
             <div className="guest-price-lbl">{prefix ? `${prefix} ${RENT_COMBO_SHORT[i]}` : RENT_COMBO_SHORT[i]}</div>
           )}
           <div className={`guest-price-val${ratePeriod === "future" ? " guest-price-val--future" : ""}`}>{d.sell != null ? `$${n(d.sell)}` : "—"}</div>
-          {rentals && rentals[i] != null && <div style={{fontSize:9,color:"#7c3aed",marginTop:1}}>Rental {n(rentals[i])}</div>}
           {d.cr && <Bg k={d.cr}/>}
         </div>
       ))}
@@ -5385,7 +5387,7 @@ export default function App() {
                   <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 12px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
                     <div className={isAdmin?"admin-card-top":"rent-city-row"} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
                       <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
-                      {!isAdmin && <GuestRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc} rentals={[getRentalBase(row.pol,city,0),getRentalBase(row.pol,city,1),getRentalBase(row.pol,city,2)]}/>}
+                      {!isAdmin && <GuestRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc}/>}
                       <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0,width:12,textAlign:"center"}}>&#8964;</span>
                     </div>
                     {isAdmin && (
