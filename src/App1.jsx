@@ -22,6 +22,7 @@ function QuoteRequestModal({ info, onClose }) {
   const [target, setTarget] = useState("");
   const [etdFrom, setEtdFrom] = useState("");
   const [etdTo, setEtdTo] = useState("");
+  const [comment, setComment] = useState("");
   const [sending, setSending] = useState(false);
   const [status, setStatus] = useState(null); // {type:"ok"|"err", msg}
   const [cooldownUntil, setCooldownUntil] = useState(0);
@@ -65,6 +66,7 @@ function QuoteRequestModal({ info, onClose }) {
         carrier: info.carrier,
         rateType: info.dropCity ? `${info.rateType} · Drop off: ${info.dropCity}` : info.rateType,
         currentRate: info.currentRate,
+        comment: comment.trim(),
         staffEmails,
       };
 
@@ -80,6 +82,7 @@ function QuoteRequestModal({ info, onClose }) {
         current_rate: payload.currentRate || null,
         etd_from: etdFrom || null,
         etd_to: etdTo || null,
+        comment: payload.comment || null,
       };
 
       const [, fnRes] = await Promise.all([
@@ -97,6 +100,7 @@ function QuoteRequestModal({ info, onClose }) {
 
       if (fnRes && (fnRes.id || fnRes.error == null && fnRes.statusCode == null)) {
         setStatus({ type: "ok", msg: "Your quote request has been received. Our team will contact you shortly." });
+        setComment("");
         setCooldownUntil(Date.now() + QUOTE_COOLDOWN_MS);
         setNowTick(Date.now());
       } else {
@@ -153,6 +157,11 @@ function QuoteRequestModal({ info, onClose }) {
               <input type="date" value={etdTo} onChange={e=>setEtdTo(e.target.value)} min={etdFrom || undefined} style={fieldStyle}/>
             </label>
           </div>
+          <label style={labelStyle}>Comment
+            <textarea value={comment} onChange={e=>setComment(e.target.value)} rows={3}
+              placeholder="Any additional requests or notes…"
+              style={{...fieldStyle, resize:"vertical", minHeight:64, lineHeight:1.5}}/>
+          </label>
           {status && (
             <div style={{fontSize:12,padding:10,borderRadius:8,marginBottom:10,
               color: status.type === "ok" ? "#166534" : "#dc2626",
@@ -300,14 +309,14 @@ function QuoteAdminScreen({ onClose, onSaveStaffEmails }) {
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:11,minWidth:820}}>
             <thead>
               <tr style={{background:"#f0fdfa",borderBottom:"1px solid #e5e7eb"}}>
-                {["일시","고객 이메일","POL","POD","선사","수량","화물명","Target","현재운임","상태"].map(h => (
+                {["일시","고객 이메일","POL","POD","선사","수량","화물명","Target","현재운임","Comment","상태"].map(h => (
                   <th key={h} style={{padding:"8px 6px",textAlign:"left",fontWeight:700,color:"#0f766e",whiteSpace:"nowrap"}}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {rows.length === 0 && !loading && (
-                <tr><td colSpan={10} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>견적 요청 없음</td></tr>
+                <tr><td colSpan={11} style={{padding:24,textAlign:"center",color:"#9ca3af"}}>견적 요청 없음</td></tr>
               )}
               {rows.map(r => (
                 <tr key={r.id} style={{borderBottom:"1px solid #f3f4f6",background:r.status==="new"?"#fffbeb":"#fff"}}>
@@ -320,6 +329,7 @@ function QuoteAdminScreen({ onClose, onSaveStaffEmails }) {
                   <td style={{padding:"7px 6px"}}>{r.cargo_name || "—"}</td>
                   <td style={{padding:"7px 6px",textAlign:"right"}}>{r.target_rate || "—"}</td>
                   <td style={{padding:"7px 6px",fontSize:10,color:"#6b7280"}}>{r.current_rate || "—"}</td>
+                  <td style={{padding:"7px 6px",fontSize:10,color:"#374151",maxWidth:200,whiteSpace:"pre-wrap",wordBreak:"break-word"}}>{r.comment || "—"}</td>
                   <td style={{padding:"7px 6px",whiteSpace:"nowrap"}}>
                     {r.status === "new" && (
                       <span style={{display:"inline-block",fontSize:9,fontWeight:700,color:"#fff",background:"#dc2626",padding:"1px 6px",borderRadius:4,marginRight:4}}>NEW</span>

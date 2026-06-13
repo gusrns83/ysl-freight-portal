@@ -14,7 +14,10 @@ serve(async (req) => {
   try {
     const { customerEmail, containerQty, cargoName, targetRate,
             pol, pod, carrier, rateType, currentRate, staffEmails,
-            etdFrom, etdTo } = await req.json();
+            etdFrom, etdTo, comment } = await req.json();
+
+    const escapeHtml = (s: string) =>
+      String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
     // "2026-06-15" → "15.Jun" (이미 문자열이면 그대로 사용)
     const fmtEtd = (v: string) => {
@@ -44,6 +47,7 @@ serve(async (req) => {
         <tr><td><b>컨테이너 수량</b></td><td>${containerQty || "-"}</td></tr>
         <tr><td><b>화물명</b></td><td>${cargoName || "-"}</td></tr>
         <tr><td><b>Target 운임</b></td><td>${targetRate ? `${targetRate} USD` : "-"}</td></tr>
+        <tr><td><b>Comment</b></td><td>${comment ? escapeHtml(comment).replace(/\n/g, "<br>") : "-"}</td></tr>
       </table>
       <p>YSL Freight Portal 자동 발송 메일</p>
     `;
