@@ -5488,11 +5488,13 @@ export default function App() {
                                 ];
                                 return (
                                 <tr key={c.k} style={{borderBottom:"1px solid #ede9fe"}}>
-                                  <td className="cvt-carrier" style={{padding:"8px 0"}}>
-                                    <Bg k={c.k}/>
-                                    {(c.t20||c.t40dv||c.t40hc) && quoteBtnEl({pol:row.pol,pod:city,dropCity:city,carrier:c.k,rateType:"SOC+Rental",currentRate:`20' ${c.t20?`$${n(c.t20)}`:"—"} / 40'DV ${c.t40dv?`$${n(c.t40dv)}`:"—"} / 40'HC ${c.t40hc?`$${n(c.t40hc)}`:"—"}`})}
+                                  <td className="cvt-carrier">
+                                    <div className="cvt-carrier-stack">
+                                      <Bg k={c.k}/>
+                                      {(c.t20||c.t40dv||c.t40hc) && quoteBtnEl({pol:row.pol,pod:city,dropCity:city,carrier:c.k,rateType:"SOC+Rental",currentRate:`20' ${c.t20?`$${n(c.t20)}`:"—"} / 40'DV ${c.t40dv?`$${n(c.t40dv)}`:"—"} / 40'HC ${c.t40hc?`$${n(c.t40hc)}`:"—"}`})}
+                                    </div>
                                   </td>
-                                  <td className="cvt-validity" style={{padding:"8px 0"}}><ValidityCell carrierKey={c.k}/></td>
+                                  <td className="cvt-validity"><ValidityCell carrierKey={c.k}/></td>
                                   {combos.map(({ total, soc, rental, comboIdx }) => (
                                     <td key={comboIdx} className="cvt-price" style={{padding:"8px 0",cursor:total?"pointer":"default",color:total?rentPriceColor:"#d1d5db",textDecoration:total?"underline":"none"}} onClick={()=>total&&setQuoteReq({pol:row.pol,pod:city,dropCity:city,carrier:c.k,rateType:`SOC+Rental (${RENT_COMBO_SHORT[comboIdx]})`,currentRate:`${RENT_COMBO_SHORT[comboIdx]} $${n(total)}`})}>
                                       <div className="cvt-price-main">{total?`$${n(total)}`:"—"}</div>

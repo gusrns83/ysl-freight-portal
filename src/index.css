@@ -273,16 +273,42 @@
 .carrier-rent-table col.cvt-col-price {
   width: 21%;
 }
+/* 드릴다운 선사 행: 배지+Quote 세로 묶음 / 유효기간 박스 / 단가 — 요소 겹침 방지 */
+.carrier-rent-table .cvt-carrier {
+  vertical-align: top;
+  overflow: hidden;
+  padding: 8px 6px 8px 0;
+}
+.carrier-rent-table .cvt-carrier-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+}
+.carrier-rent-table .cvt-carrier-stack > button {
+  margin-top: 0 !important;
+  font-size: 8px;
+  padding: 1px 5px;
+  white-space: nowrap;
+}
 .carrier-rent-table .cvt-validity {
-  overflow: visible;
+  overflow: hidden;
+  vertical-align: middle;
+  padding: 8px 6px 8px 8px;
 }
 .carrier-rent-table .validity-badge {
-  max-width: none !important;
-  overflow: visible !important;
-  text-overflow: clip !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 .carrier-rent-table .cvt-price {
   white-space: normal;
+  vertical-align: middle;
+  padding: 8px 0;
 }
 .carrier-rent-table .cvt-price-main {
   white-space: nowrap;
@@ -379,8 +405,9 @@
   /* 5열 triple 테이블 — 위 4열 rent 규칙보다 우선 */
   .carrier-rent-table.carrier-rent-table--triple thead tr,
   .carrier-rent-table.carrier-rent-table--triple tbody tr {
-    grid-template-columns: 32px minmax(0, 1fr) repeat(3, minmax(0, 1fr));
+    grid-template-columns: 46px minmax(0, 1fr) repeat(3, minmax(0, 1fr));
     column-gap: 4px;
+    align-items: center;
   }
   .carrier-validity-table thead th,
   .carrier-validity-table tbody td {
@@ -409,9 +436,11 @@
     overflow: hidden;
   }
   .carrier-rent-table.carrier-rent-table--triple .cvt-carrier {
-    width: 32px;
-    max-width: 32px;
-    min-width: 32px;
+    width: 46px;
+    max-width: 46px;
+    min-width: 46px;
+    padding: 6px 4px 6px 0;
+    vertical-align: middle;
   }
   .carrier-validity-table .cvt-validity {
     padding-left: 0;
@@ -464,6 +493,9 @@
 /* Rental+Ocean 3단 드릴다운 — 데스크탑: 단가 컬럼 고정폭으로 오른쪽에 모으고
    도시 요약 행(rent-city-row)의 단가와 세로 정렬 (모바일은 위 480px 규칙 그대로) */
 @media (min-width: 640px) {
+  .carrier-rent-table.carrier-rent-table--triple col.cvt-col-carrier {
+    width: 54px;
+  }
   .carrier-rent-table.carrier-rent-table--triple col.cvt-col-validity {
     width: auto;
   }
