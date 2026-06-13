@@ -4639,7 +4639,7 @@ export default function App() {
             <table className="carrier-grid rental-grid">
               <thead>
                 <tr className="cg-carrier-row">
-                  <th colSpan={2} className="cg-rental-sticky-pol"></th>
+                  <th colSpan={2} className="cg-rental-corner"></th>
                   {visibleReturnCities.map(city => (
                     <th key={city} colSpan={3} className="cg-rental-city-head">{RC_LABEL[city] || city}</th>
                   ))}

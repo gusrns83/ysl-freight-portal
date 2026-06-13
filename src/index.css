@@ -1036,8 +1036,17 @@
   background: #f5f3ff;
 }
 
+/* ── 렌탈 운임표: 고정 헤더(상단) + 고정 컬럼(좌측) ──
+   --rental-area-w: AREA 컬럼 폭(POL 좌측 sticky 오프셋과 일치)
+   --rental-head-h: 1행(도시명) 높이(2행 sticky top 오프셋과 일치) */
 .rental-grid-wrap {
+  --rental-area-w: 68px;
+  --rental-head-h: 24px;
+  display: block;
   max-width: 100%;
+  max-height: calc(100vh - 210px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
 }
 .rental-grid .cg-rental-city-head {
   font-size: 10px;
@@ -1050,21 +1059,63 @@
   color: #7c3aed;
   padding: 2px 3px;
 }
+
+/* AREA 컬럼 고정 폭 — POL sticky left 오프셋이 정확히 맞도록 */
+.rental-grid .cg-th-area,
+.rental-grid .cg-area {
+  width: var(--rental-area-w);
+  min-width: var(--rental-area-w);
+  max-width: var(--rental-area-w);
+  padding-left: 3px;
+  padding-right: 3px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 좌측 컬럼 고정 (가로 스크롤 시) — AREA / POL, 헤더·본문 공통 */
 .rental-grid .cg-rental-sticky-area {
   position: sticky;
   left: 0;
   z-index: 4;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.04);
+  box-shadow: 2px 0 5px rgba(76, 29, 149, 0.12);
 }
 .rental-grid .cg-rental-sticky-pol {
   position: sticky;
-  left: 52px;
+  left: var(--rental-area-w);
   z-index: 4;
-  box-shadow: 2px 0 4px rgba(0, 0, 0, 0.04);
+  box-shadow: 2px 0 5px rgba(76, 29, 149, 0.12);
+}
+
+/* 헤더 2줄 고정 (세로 스크롤 시) — 도시명 행 + 컨테이너 타입 행 */
+.rental-grid thead th {
+  position: sticky;
+  z-index: 5;
+}
+.rental-grid .cg-carrier-row th {
+  top: 0;
+  height: var(--rental-head-h);
+  padding: 2px 4px;
+  font-size: 10px;
+  line-height: 1.2;
+  box-sizing: border-box;
+  box-shadow: 0 2px 5px rgba(76, 29, 149, 0.1);
+}
+.rental-grid .cg-head-row th {
+  top: var(--rental-head-h);
+  box-shadow: 0 2px 5px rgba(76, 29, 149, 0.12);
+}
+
+/* 좌상단 교차 영역 — 가로·세로 양쪽 고정 (최상위 z-index) */
+.rental-grid .cg-carrier-row th.cg-rental-corner {
+  position: sticky;
+  left: 0;
+  top: 0;
+  z-index: 7;
+  box-shadow: 2px 2px 5px rgba(76, 29, 149, 0.14);
 }
 .rental-grid thead .cg-rental-sticky-area,
 .rental-grid thead .cg-rental-sticky-pol {
-  z-index: 5;
+  z-index: 6;
 }
 .rental-grid .cg-box {
   min-width: 68px;
@@ -1086,6 +1137,23 @@
 .rental-grid .cg-cell.cg-empty {
   min-width: 36px;
   font-size: 10px;
+}
+
+/* 모바일: 좌측 고정 컬럼 폭·스크롤 영역 축소 (헤더/컬럼 고정 유지) */
+@media (max-width: 480px) {
+  .rental-grid-wrap {
+    --rental-area-w: 52px;
+    max-height: calc(100vh - 168px);
+  }
+  .rental-grid .cg-area,
+  .rental-grid .cg-th-area {
+    font-size: 9px;
+    padding: 3px 2px;
+  }
+  .rental-grid .cg-pol {
+    font-size: 9px;
+    padding: 3px 4px;
+  }
 }
 
 .rent-carrier-line {
