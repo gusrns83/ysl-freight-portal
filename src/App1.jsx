@@ -4169,6 +4169,9 @@ export default function App() {
   // 고객 화면: 총 매출가(d.sell)만 노출. rentalSells는 렌탈 매출가(매입+마진) — 매입가/마진은 절대 표시하지 않음
   const GuestRentTriple = ({d20, d40dv, d40hc, prefix = "", hideLabels = false, rentalSells = null}) => (
     <div className={`guest-price-pair guest-rent-triple${hideLabels ? " guest-rent-triple--no-lbl" : ""}`}>
+      {rentalSells && rentalSells.some(v => v != null) && (
+        <div style={{display:"flex",alignItems:"flex-end",fontSize:9,fontWeight:600,color:"#7c3aed",paddingBottom:1}}>Rental</div>
+      )}
       {[d20, d40dv, d40hc].map((d, i) => (
         <div key={RENT_COMBO_SHORT[i]} className="guest-price-col">
           {!hideLabels && (
@@ -5394,15 +5397,11 @@ export default function App() {
               const cityLabel=RC_LABEL[city]||city;
               const fp=PM[row.pol],fr=fp?fMap[fp]:null;
               const cityRentalSells=[getRentalSell(row.pol,city,0),getRentalSell(row.pol,city,1),getRentalSell(row.pol,city,2)];
-              const hasRentalSell=cityRentalSells.some(v=>v!=null);
               return (
                 <div key={city}>
                   <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 12px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
                     <div className={isAdmin?"admin-card-top":"rent-city-row"} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
-                      <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>
-                        {cityLabel}
-                        {!isAdmin && hasRentalSell && <span style={{fontSize:9,fontWeight:600,color:"#7c3aed",marginLeft:5}}>Rental</span>}
-                      </span>
+                      <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
                       {!isAdmin && <GuestRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc} rentalSells={cityRentalSells}/>}
                       <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0,width:12,textAlign:"center"}}>&#8964;</span>
                     </div>
