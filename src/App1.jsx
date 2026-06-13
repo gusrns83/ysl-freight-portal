@@ -2,7 +2,7 @@ import { Fragment, useState, useMemo, useEffect, useRef, useCallback } from "rea
 import { createPortal } from "react-dom";
 import { GriAdjustPanel, MarginPanel } from "./components/adminPanels.jsx";
 import { AdminSaveToast, Bg, CarrierPortGuide, FooterAdSlot, Logo, MAIN_TABS, RatesLoading, ValidityPeriodFields } from "./components/common.jsx";
-import { ADMIN_PIN, ADMIN_SAVE_REV, ADMIN_SESSION_KEY, ADMIN_SKIP_PIN, DB_DROP, DB_LABEL, DB_OCEAN, DB_RENTAL, DEFAULT_MARGINS, PRICING_CACHE_KEY, RENT_COMBO_KEYS, RENT_COMBO_SHORT, SAVE_UI_MAX_MS, SB_KEY, SB_URL, mkAds, mkNotices, normalizeRentalCityBucket, parseAdsFromSettings, parseNoticeOn, readStoredPricingCache, rentComboMarginType, rentComboSk, rentSocType } from "./config.js";
+import { ADMIN_PIN, ADMIN_SAVE_REV, ADMIN_SESSION_KEY, ADMIN_SKIP_PIN, DB_DROP, DB_LABEL, DB_OCEAN, DB_RENTAL, DEFAULT_MARGINS, PRICING_CACHE_KEY, PUBLIC_RATES_FALLBACK_RAW, PUBLIC_RATES_KEY, RENT_COMBO_KEYS, RENT_COMBO_SHORT, SAVE_UI_MAX_MS, SB_KEY, SB_URL, mkAds, mkNotices, normalizeRentalCityBucket, parseAdsFromSettings, parseNoticeOn, readStoredPricingCache, rentComboMarginType, rentComboSk, rentSocType } from "./config.js";
 import { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, F_TO_R, FR, PM, RATE_TYPES, RC, RC_LABEL, RENTAL_CITY_ALIASES, RENTAL_EXTRA_CITIES, RENTAL_RATE_TYPES, RENT_CITY_ORDER, RN, VALIDITY_KEYS, addDaysToISO, buildDefaultRentalRates, carrierDropValidityKey, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, defaultValiditySlot, formatValidityCompact, formatValidityDate, formatValiditySlotLabel, countDropMissingFuture, countOceanMissingFuture, countRentalMissingFuture, isValiditySlotExpired, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, n, normalizeRentalCityName, normalizeRentalMargins, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, rentalRateLabel, repairValiditySlot, serializeCarrierDropRatesForSave, serializeValidityInfo, syncFromAfterTill, validitySlotDaysLeft } from "./data/staticData.js";
 import { DROP_DB_KEYS, EXCEL_UPLOAD_MAX_MS, MISC_SETTINGS_KEYS, OCEAN_DB_KEYS, RENTAL_DB_KEYS, api, enqueueNetworkWrite, extractPortalOverrides, fetchSettingsInKeys, mergePortalOverridesIntoPolCostO, postSettingsRows, resetNetworkWriteQueue, saveOceanPolCostsBundle, saveOneSettingWithRetry, saveSettingDirect, saveSettingValue, saveSettingsEntries, saveSettingsEntriesDirect, serializeOceanPolCosts, settingsMapFromRows, withTimeout } from "./lib/api.js";
 import { LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, readExcelFile, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
@@ -478,6 +478,7 @@ export default function App() {
   const skipAutoSaveRef = useRef(true);
   const autoSaveTimerRef = useRef(null);
   const autoSaveInFlightRef = useRef(false);
+  const publicRatesAtRef = useRef(0); // 매출 스냅샷 저장 throttle
   const saveQueueRef = useRef(Promise.resolve());
   const pricingSaveRef = useRef({});
   const [dragOverSlot, setDragOverSlot] = useState(null);
@@ -1115,6 +1116,7 @@ export default function App() {
           ? `✅ Rental 저장 완료 · ${validityLabel} (${slotLabel}) · ${Object.keys(parsed.cityRates || parsed.bases || {}).length} POL${rentalRhLogged ? ` · 이력 ${rentalRhLogged}건` : ""}`
           : `✅ 저장 완료 · ${validityLabel} (${slotLabel} 탭) · DB에 validity ${archiveN}구간 누적`,
       );
+      persistPublicRates();
 
       if (parsed.format !== "RENTAL") {
         uploadExcelRateHistory(parsed, period, fData, note, batchId, nextCosts)
@@ -1547,6 +1549,7 @@ export default function App() {
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
         recordRateHistory({ source: "gri", note: `매입 GRI ${griPeriodLabel(period)}` }, { ...pricingSaveRef.current, polCostO: nextCosts });
+        persistPublicRates();
         flashSaveFeedback("success", `✅ 매입 GRI (${griPeriodLabel(period)}) · 저장 완료`);
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -1617,6 +1620,7 @@ export default function App() {
           serverSyncedAt: Date.now(),
         });
         recordRateHistory({ source: "gri", note: `매출 GRI ${griPeriodLabel(period)}` }, { ...pricingSaveRef.current, polCostO: nextCosts });
+        persistPublicRates();
         flashSaveFeedback("success", `✅ 매출 GRI (${griPeriodLabel(period)}) · 저장 완료`);
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
@@ -2247,6 +2251,7 @@ export default function App() {
         serverSyncedAt: Date.now(),
       });
       flashSaveFeedback("success", `✅ ${successLabel} 저장 완료`);
+      persistPublicRates();
       if (!String(successLabel).includes("Excel")) {
         const isRoutinePricingSave = [DB_LABEL[DB_DROP], DB_LABEL[DB_OCEAN], DB_LABEL[DB_RENTAL]].includes(successLabel);
         const recentAutoLog = Date.now() - rateHistoryLastLogAtRef.current < 10000;
@@ -2654,6 +2659,13 @@ export default function App() {
     return () => { cancelled = true; };
   }, []);
 
+  // admin 진입 시 매출 스냅샷 1회 재생성 — 백필 + 누락 저장 경로 안전망
+  useEffect(() => {
+    if (!isAdmin || !settingsLoaded) return undefined;
+    const t = setTimeout(() => { persistPublicRates({ force: true }); }, 1500);
+    return () => clearTimeout(t);
+  }, [isAdmin, settingsLoaded]);
+
   useEffect(() => {
     if (skipAutoSaveRef.current || !isAdmin || saveBusy) return;
     if (showFreightAdmin && freightAdminTab !== "grid") return;
@@ -2686,6 +2698,7 @@ export default function App() {
           } else {
             recordRateHistory({ source: "auto_save", note: "Drop off" });
           }
+          persistPublicRates();
         })
         .catch(err => {
           console.error("auto-save failed", err);
@@ -3047,19 +3060,19 @@ export default function App() {
     });
     return { val: b, cr };
   };
-  const cRent = (rPol, city, rRow) => {
+  const cRent = (rPol, city, rRow, period = ratePeriod) => {
     const fp = PM[rPol];
     if (!fp || !fMap[fp]) return [];
     const fr = fMap[fp];
-    const rentals = RENT_COMBO_KEYS.map((_, ci) => getRentalBase(rPol, city, ci));
+    const rentals = RENT_COMBO_KEYS.map((_, ci) => getRentalBase(rPol, city, ci, period));
     return CRS.map(k => {
-      const s20 = getCarrierRate(fr, k, "soc20");
-      const s40 = getCarrierRate(fr, k, "soc40");
+      const s20 = getCarrierRate(fr, k, "soc20", period);
+      const s40 = getCarrierRate(fr, k, "soc40", period);
       const cost20 = s20 != null && rentals[0] != null ? s20 + rentals[0] : null;
       const cost40dv = s40 != null && rentals[1] != null ? s40 + rentals[1] : null;
       const cost40hc = s40 != null && rentals[2] != null ? s40 + rentals[2] : null;
-      const socSell20 = s20 != null ? getGuestCarrierSell(fp, k, "soc20", ratePeriod, s20, fr.area) : null;
-      const socSell40 = s40 != null ? getGuestCarrierSell(fp, k, "soc40", ratePeriod, s40, fr.area) : null;
+      const socSell20 = s20 != null ? getGuestCarrierSell(fp, k, "soc20", period, s20, fr.area) : null;
+      const socSell40 = s40 != null ? getGuestCarrierSell(fp, k, "soc40", period, s40, fr.area) : null;
       const rentM20 = getRentalM(fp, fr.area, "r20");
       const rentM40dv = getRentalM(fp, fr.area, "r40dv");
       const rentM40hc = getRentalM(fp, fr.area, "r40hc");
@@ -3069,9 +3082,9 @@ export default function App() {
       const t20 = socSell20 != null && rentSell20 != null ? socSell20 + rentSell20 : null;
       const t40dv = socSell40 != null && rentSell40dv != null ? socSell40 + rentSell40dv : null;
       const t40hc = socSell40 != null && rentSell40hc != null ? socSell40 + rentSell40hc : null;
-      const m20 = cost20 != null && t20 != null ? t20 - cost20 : rentM20 + getM(fp, fr.area, "soc20", ratePeriod);
-      const m40dv = cost40dv != null && t40dv != null ? t40dv - cost40dv : rentM40dv + getM(fp, fr.area, "soc40", ratePeriod);
-      const m40hc = cost40hc != null && t40hc != null ? t40hc - cost40hc : rentM40hc + getM(fp, fr.area, "soc40", ratePeriod);
+      const m20 = cost20 != null && t20 != null ? t20 - cost20 : rentM20 + getM(fp, fr.area, "soc20", period);
+      const m40dv = cost40dv != null && t40dv != null ? t40dv - cost40dv : rentM40dv + getM(fp, fr.area, "soc40", period);
+      const m40hc = cost40hc != null && t40hc != null ? t40hc - cost40hc : rentM40hc + getM(fp, fr.area, "soc40", period);
       return {
         k,
         cost20, cost40dv, cost40hc,
@@ -3162,6 +3175,81 @@ export default function App() {
       return mkPrice(cost, (oceanSell - oceanCost) + dropM, cr);
     }
     return mkPrice(cost, getM(row.pol, row.area, t, period) + dropM, cr);
+  };
+
+  // ── 고객용 매출 스냅샷 (public_rates_json) — 매입·마진 없이 매출가만 ──
+  // 모든 값은 기존 고객 매출 함수와 동일하게 산출(period 명시). 빈/미서비스는 생략.
+  const guestDropSell = (row, cityKey, cr, si, period) => {
+    const t = si === 0 ? "coc20" : "coc40";
+    const cost = getCarrierDropTotalCost(row, cr, cityKey, si, period);
+    if (cost == null) return null;
+    const oceanCost = getCarrierRate(row, cr, t, period);
+    const dropM = getDropM(cr, cityKey, si);
+    if (oceanCost != null) {
+      const oceanSell = getGuestCarrierSell(row.pol, cr, t, period, oceanCost, row.area);
+      if (oceanSell == null) return null;
+      return cost + (oceanSell - oceanCost) + dropM;
+    }
+    const m = getM(row.pol, row.area, t, period);
+    return m == null ? null : cost + m + dropM;
+  };
+
+  const buildPublicRatesSnapshot = () => {
+    const periods = ["current", "future"];
+    const ocean = {}, drop = {}, rental = {};
+    const set = (obj, path, val) => {
+      let o = obj;
+      for (let i = 0; i < path.length - 1; i++) { o[path[i]] = o[path[i]] || {}; o = o[path[i]]; }
+      o[path[path.length - 1]] = val;
+    };
+    fData.forEach(row => {
+      CRS.forEach(cr => {
+        periods.forEach(p => {
+          RATE_TYPES.forEach(t => {
+            const cost = getCarrierRate(row, cr, t, p);
+            if (cost == null) return;
+            const sell = getGuestCarrierSell(row.pol, cr, t, p, cost, row.area);
+            if (sell == null) return;
+            set(ocean, [row.pol, cr, p, t], sell);
+          });
+          DOC.forEach(({ k: cityKey }) => {
+            [0, 1].forEach(si => {
+              const sell = guestDropSell(row, cityKey, cr, si, p);
+              if (sell == null) return;
+              set(drop, [row.pol, cr, cityKey, p, si === 0 ? "c20" : "c40"], sell);
+            });
+          });
+        });
+      });
+    });
+    rData.forEach(row => {
+      const rPol = row.pol;
+      periods.forEach(p => {
+        RENT_CITY_ORDER.forEach(city => {
+          cRent(rPol, city, row, p).forEach(c => {
+            [["c20", c.t20], ["c40dv", c.t40dv], ["c40hc", c.t40hc]].forEach(([sk, v]) => {
+              if (v != null) set(rental, [rPol, "carriers", c.k, city, p, sk], v);
+            });
+          });
+          [0, 1, 2].forEach(ci => {
+            const rs = getRentalSell(rPol, city, ci, p);
+            if (rs != null) set(rental, [rPol, "rent", city, p, ci === 0 ? "c20" : ci === 1 ? "c40dv" : "c40hc"], rs);
+          });
+        });
+      });
+    });
+    return { rev: 1, generatedAt: new Date().toISOString(), ocean, drop, rental };
+  };
+
+  const persistPublicRates = async ({ force = false } = {}) => {
+    if (!force && Date.now() - publicRatesAtRef.current < 4000) return; // 잦은 대용량 쓰기 방지
+    publicRatesAtRef.current = Date.now();
+    try {
+      const snap = buildPublicRatesSnapshot();
+      await saveOneSettingWithRetry(PUBLIC_RATES_KEY, JSON.stringify(snap));
+    } catch (e) {
+      console.warn("public_rates 저장 실패", e);
+    }
   };
 
   const filt = useMemo(()=>{ let d=fData; if(areaF!=="ALL")d=d.filter(r=>r.area===areaF); if(search)d=d.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())); return d; },[fData,areaF,search]);
