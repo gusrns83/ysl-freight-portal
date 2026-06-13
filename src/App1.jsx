@@ -2834,11 +2834,8 @@ export default function App() {
       if (cur[sk] === "x") return null;
       if (cur[sk] != null && cur[sk] !== "") return Number(cur[sk]);
     }
-    const row = rData.find(r => r.pol === rPol);
-    if (!row) return null;
-    if (comboIdx === 0) return row.r20[city];
-    if (comboIdx === 1) return row.r40dv?.[city] ?? row.r40[city];
-    return row.r40hc?.[city] ?? row.r40[city];
+    // 정적 기본 운임표(RN) fallback 제거 — 업로드(저장)된 값만 진실. 미입력/미서비스(x)는 가격 없음
+    return null;
   };
 
   // 렌탈 매출가(렌탈 매입 + 렌탈 마진) — 고객 노출용. 매입가 자체는 절대 반환하지 않음
