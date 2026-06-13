@@ -1461,51 +1461,7 @@ function mergePolCostsWithSells(polCostO, netRows, sellRows, carrier, period) {
 }
 
 /** SNK 일본 — SHIMIZU 등 매출 있는 항의 마진(기본 20'+120 / 40'+200) */
-const SNK_JAPAN_DEFAULT_MARGIN = { coc20: 120, coc40: 200, soc20: 120, soc40: 200 };
-
-function snkJapanReferenceMargins(polCostO, period) {
-  const margin = {};
-  JAPAN_PORTS.forEach(pol => {
-    const bucket = polCostO?.[pol]?.carrier?.SNK?.[period];
-    if (!bucket?.sell) return;
-    RATE_TYPES.forEach(t => {
-      if (bucket[t] != null && bucket[t] > 0 && bucket.sell[t] != null) {
-        margin[t] = bucket.sell[t] - bucket[t];
-      }
-    });
-  });
-  RATE_TYPES.forEach(t => {
-    if (margin[t] == null && SNK_JAPAN_DEFAULT_MARGIN[t] != null) {
-      margin[t] = SNK_JAPAN_DEFAULT_MARGIN[t];
-    }
-  });
-  return margin;
-}
-
-function applySnkJapanSellBackfill(polCostO) {
-  const out = JSON.parse(JSON.stringify(polCostO || {}));
-  let filled = 0;
-  ["current", "future"].forEach(period => {
-    const refMargin = snkJapanReferenceMargins(out, period);
-    JAPAN_PORTS.forEach(pol => {
-      const cr = out[pol]?.carrier?.SNK;
-      const bucket = cr?.[period];
-      if (!bucket) return;
-      if (!bucket.sell) bucket.sell = {};
-      RATE_TYPES.forEach(t => {
-        if (bucket[t] == null || bucket[t] <= 0 || bucket.sell[t] != null) return;
-        const m = refMargin[t];
-        if (m == null) return;
-        bucket.sell[t] = bucket[t] + m;
-        filled++;
-      });
-      if (!Object.keys(bucket.sell).length) delete bucket.sell;
-    });
-  });
-  return { polCostO: out, filled };
-}
-
-/** 매입만 있고 매출 없는 셀 보완 — 향후←현재 복사, 동일 POL 마진·전역 마진·SNK 일본 마진 적용 */
+/** 매입만 있고 매출 없는 셀 보완 — 향후←현재 복사, 동일 POL 마진·전역 마진 적용 */
 function backfillPolCostSells(polCostO, { polM, polMFuture, margins } = {}) {
   const out = JSON.parse(JSON.stringify(polCostO || {}));
   let filled = 0;
@@ -1561,9 +1517,7 @@ function backfillPolCostSells(polCostO, { polM, polMFuture, margins } = {}) {
     });
   });
 
-  const japan = applySnkJapanSellBackfill(out);
-  filled += japan.filled;
-  return { polCostO: japan.polCostO, filled };
+  return { polCostO: out, filled };
 }
 
 function mergePolMarginsMap(polM, marginRows) {
@@ -1751,10 +1705,6 @@ function enrichRateHistoryRowsWithCosts(rows, polCostO, period) {
     if (sell == null) {
       sell = resolveCarrierExplicitSell(polCostO, row.pol, row.carrier, row.rate_type, period);
     }
-    if (sell == null && row.carrier === "SNK" && JAPAN_POL_SET.has(row.pol) && row.cost > 0) {
-      const m = snkJapanReferenceMargins(polCostO, period)[row.rate_type];
-      if (m != null) sell = row.cost + m;
-    }
     if (sell == null && row.cost > 0) {
       const m = polCostSiblingMargin(polCostO, row.pol, row.carrier, period, row.rate_type)
         ?? rateHistoryBatchSiblingMargin(list, row);
@@ -1765,7 +1715,7 @@ function enrichRateHistoryRowsWithCosts(rows, polCostO, period) {
   });
 }
 
-/** Rate History 표시 · DB에 매출 없을 때 pol_costs·동일 POL 마진·SNK 일본에서 보완 */
+/** Rate History 표시 · DB에 매출 없을 때 pol_costs·동일 POL 마진에서 보완 */
 function hydrateRateHistoryRowSells(rows, polCostO, polM, polMFuture) {
   const list = rows || [];
   return list.map(row => {
@@ -1778,10 +1728,6 @@ function hydrateRateHistoryRowSells(rows, polCostO, polM, polMFuture) {
     let sell = resolveCarrierEffectiveSell(polCostO, row.pol, row.carrier, row.rate_type, row.period, row.cost, {
       polM, polMFuture, adminMode: true,
     });
-    if (sell == null && row.carrier === "SNK" && JAPAN_POL_SET.has(row.pol)) {
-      const m = snkJapanReferenceMargins(polCostO, row.period)[row.rate_type];
-      if (m != null) sell = row.cost + m;
-    }
     if (sell == null) {
       const m = polCostSiblingMargin(polCostO, row.pol, row.carrier, row.period, row.rate_type)
         ?? rateHistoryBatchSiblingMargin(list, row);
@@ -1877,4 +1823,4 @@ function rateHistoryScopeFromUpload(parsed, period) {
 
 
 
-export { APP_POLS, CK_POL_MAP, CK_POL_MAP_CI, CK_SERVICE_POLS, DY_POL_MAP, DY_POL_MAP_CI, DY_SERVICE_POLS, JAPAN_POL_SET, JAPAN_PORTS, LEGACY_VALIDITY_KEY, PDF_DROP, RENTAL_EXCEL_TO_POL, SNK_JAPAN_DEFAULT_MARGIN, SNK_POL_EXPAND, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, applySnkJapanSellBackfill, backfillPolCostSells, buildDyDropRates, buildPolCostBucket, buildRateHistoryRowsFromUpload, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierBucketHasData, carrierUploadServesRate, cell, ciPolMap, clearCarrierDropPeriod, clearCarrierDropRateCells, clearPolCostRateCells, clearPolCostsCarrier, clearPolCostsCarrierPeriod, clearRentalPeriodRates, clearRentalRateCells, compactRentalRates, countCarrierDropCities, countCarrierDropValidityArchive, countCarrierPeriodPols, countCarrierValidityArchive, countRentalPeriodPols, detectCkColumns, detectDualNetSellGrid, detectRentalUploadGrid, detectSnkColumns, dropCityKeyFromRhLabel, enrichRateHistoryRowsWithCosts, excelUploadCarrierKey, expandSnkPol, filterOceanUploadByFreightService, freightTemplateServesRate, hydrateRateHistoryRowSells, inferSnkSellStart, is20SizeToken, isSnkLegacyTransitSheet, loadXlsx, mapDyPol, mergeCarrierDropRateCell, mergePolCostsCarrier, mergePolCostsUploadByValidity, mergePolCostsWithSells, mergePolMarginsMap, mergeRentalRatesPatch, mergeUploadValidity, normalizePol, num, parseByFormat, parseCkOceanRows, parseCkSheet, parseDySheet, parseOceanNetSellRows, parsePolNetSellGrid, parsePolScanSheet, parseRentalLegacySheet, parseRentalSheet, parseSnkSheet, parseYslCarrierSheet, polCompact, polCostBucketHasRates, polCostSiblingMargin, previewSummary, rateHistoryBatchSiblingMargin, rateHistoryScopeFromUpload, ratesFromCols, reSkipSnk, readCostQuadruple, readExcelFile, readRateQuadruple, rentalBaseToCityBucket, rentalPeriodBucketHasRates, replacePolCostsCarrier, replacePolCostsWithSells, resolveExcelPolList, snkJapanReferenceMargins, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey, xlsxLoadPromise };
+export { APP_POLS, CK_POL_MAP, CK_POL_MAP_CI, CK_SERVICE_POLS, DY_POL_MAP, DY_POL_MAP_CI, DY_SERVICE_POLS, JAPAN_POL_SET, JAPAN_PORTS, LEGACY_VALIDITY_KEY, PDF_DROP, RENTAL_EXCEL_TO_POL, SNK_POL_EXPAND, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildPolCostBucket, buildRateHistoryRowsFromUpload, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierBucketHasData, carrierUploadServesRate, cell, ciPolMap, clearCarrierDropPeriod, clearCarrierDropRateCells, clearPolCostRateCells, clearPolCostsCarrier, clearPolCostsCarrierPeriod, clearRentalPeriodRates, clearRentalRateCells, compactRentalRates, countCarrierDropCities, countCarrierDropValidityArchive, countCarrierPeriodPols, countCarrierValidityArchive, countRentalPeriodPols, detectCkColumns, detectDualNetSellGrid, detectRentalUploadGrid, detectSnkColumns, dropCityKeyFromRhLabel, enrichRateHistoryRowsWithCosts, excelUploadCarrierKey, expandSnkPol, filterOceanUploadByFreightService, freightTemplateServesRate, hydrateRateHistoryRowSells, inferSnkSellStart, is20SizeToken, isSnkLegacyTransitSheet, loadXlsx, mapDyPol, mergeCarrierDropRateCell, mergePolCostsCarrier, mergePolCostsUploadByValidity, mergePolCostsWithSells, mergePolMarginsMap, mergeRentalRatesPatch, mergeUploadValidity, normalizePol, num, parseByFormat, parseCkOceanRows, parseCkSheet, parseDySheet, parseOceanNetSellRows, parsePolNetSellGrid, parsePolScanSheet, parseRentalLegacySheet, parseRentalSheet, parseSnkSheet, parseYslCarrierSheet, polCompact, polCostBucketHasRates, polCostSiblingMargin, previewSummary, rateHistoryBatchSiblingMargin, rateHistoryScopeFromUpload, ratesFromCols, reSkipSnk, readCostQuadruple, readExcelFile, readRateQuadruple, rentalBaseToCityBucket, rentalPeriodBucketHasRates, replacePolCostsCarrier, replacePolCostsWithSells, resolveExcelPolList, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey, xlsxLoadPromise };
