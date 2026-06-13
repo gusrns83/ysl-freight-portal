@@ -2,7 +2,7 @@ import { Fragment, useState, useMemo, useEffect, useRef, useCallback } from "rea
 import { createPortal } from "react-dom";
 import { GriAdjustPanel, MarginPanel } from "./components/adminPanels.jsx";
 import { AdminSaveToast, Bg, CarrierPortGuide, FooterAdSlot, Logo, MAIN_TABS, RatesLoading, ValidityPeriodFields } from "./components/common.jsx";
-import { ADMIN_PIN, ADMIN_SAVE_REV, ADMIN_SESSION_KEY, ADMIN_SKIP_PIN, DB_DROP, DB_LABEL, DB_OCEAN, DB_RENTAL, DEFAULT_MARGINS, PRICING_CACHE_KEY, PUBLIC_RATES_FALLBACK_RAW, PUBLIC_RATES_KEY, RENT_COMBO_KEYS, RENT_COMBO_SHORT, SAVE_UI_MAX_MS, SB_KEY, SB_URL, mkAds, mkNotices, normalizeRentalCityBucket, parseAdsFromSettings, parseNoticeOn, readStoredPricingCache, rentComboMarginType, rentComboSk, rentSocType } from "./config.js";
+import { ADMIN_PIN, ADMIN_SAVE_REV, ADMIN_SESSION_KEY, ADMIN_SKIP_PIN, DB_DROP, DB_LABEL, DB_OCEAN, DB_RENTAL, DEFAULT_MARGINS, PRICING_CACHE_KEY, PUBLIC_RATES_ENABLED, PUBLIC_RATES_FALLBACK_RAW, PUBLIC_RATES_KEY, RENT_COMBO_KEYS, RENT_COMBO_SHORT, SAVE_UI_MAX_MS, SB_KEY, SB_URL, mkAds, mkNotices, normalizeRentalCityBucket, parseAdsFromSettings, parseNoticeOn, readStoredPricingCache, rentComboMarginType, rentComboSk, rentSocType } from "./config.js";
 import { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, F_TO_R, FR, PM, RATE_TYPES, RC, RC_LABEL, RENTAL_CITY_ALIASES, RENTAL_EXTRA_CITIES, RENTAL_RATE_TYPES, RENT_CITY_ORDER, RN, VALIDITY_KEYS, addDaysToISO, buildDefaultRentalRates, carrierDropValidityKey, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, defaultValiditySlot, formatValidityCompact, formatValidityDate, formatValiditySlotLabel, countDropMissingFuture, countOceanMissingFuture, countRentalMissingFuture, isValiditySlotExpired, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, n, normalizeRentalCityName, normalizeRentalMargins, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, rentalRateLabel, repairValiditySlot, serializeCarrierDropRatesForSave, serializeValidityInfo, syncFromAfterTill, validitySlotDaysLeft } from "./data/staticData.js";
 import { DROP_DB_KEYS, EXCEL_UPLOAD_MAX_MS, MISC_SETTINGS_KEYS, OCEAN_DB_KEYS, RENTAL_DB_KEYS, api, enqueueNetworkWrite, extractPortalOverrides, fetchSettingsInKeys, mergePortalOverridesIntoPolCostO, postSettingsRows, resetNetworkWriteQueue, saveOceanPolCostsBundle, saveOneSettingWithRetry, saveSettingDirect, saveSettingValue, saveSettingsEntries, saveSettingsEntriesDirect, serializeOceanPolCosts, settingsMapFromRows, withTimeout } from "./lib/api.js";
 import { LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, readExcelFile, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
@@ -414,6 +414,8 @@ export default function App() {
   // Default margins — localStorage 캐시로 첫 렌더부터 복원 (깜빡임 방지)
   const [pricingBoot] = useState(() => bootPricingFromCache());
   const [settingsLoaded, setSettingsLoaded] = useState(() => !!pricingBoot);
+  // 고객용 매출 스냅샷 (public_rates_json) — 비admin은 raw 대신 이걸로 렌더 (매입·마진 미수신)
+  const [publicRates, setPublicRates] = useState(null);
   const [margins, setMargins] = useState(() => pricingBoot?.margins ?? { ...DEFAULT_MARGINS });
   const [marginTs, setMarginTs] = useState(() => pricingBoot?.marginTs ?? Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])));
   const [areaM, setAreaM] = useState(() => pricingBoot?.areaM ?? {});
@@ -479,6 +481,8 @@ export default function App() {
   const autoSaveTimerRef = useRef(null);
   const autoSaveInFlightRef = useRef(false);
   const publicRatesAtRef = useRef(0); // 매출 스냅샷 저장 throttle
+  const rawLoadedRef = useRef(false); // raw 운임(매입·마진) 로드 여부 — admin 또는 스냅샷 부재 fallback 시에만
+  const backfilledRef = useRef(false); // admin 진입 후 스냅샷 1회 백필 여부
   const saveQueueRef = useRef(Promise.resolve());
   const pricingSaveRef = useRef({});
   const [dragOverSlot, setDragOverSlot] = useState(null);
@@ -575,6 +579,16 @@ export default function App() {
   const isAdmin = mode === "admin";
   const isClient = mode === "client";
   const isGuest = mode === "guest";
+
+  // ── 고객용 매출 스냅샷 조회 (비admin + publicRates 있을 때만 raw 대신 사용) ──
+  const usePublic = PUBLIC_RATES_ENABLED && !isAdmin && !!publicRates;
+  const periodKey = (p) => (p === "future" ? "future" : "current");
+  const pubOcean = (pol, cr, t, p) => publicRates?.ocean?.[pol]?.[cr]?.[periodKey(p)]?.[t] ?? null;
+  const pubDrop = (pol, cr, cityKey, si, p) => publicRates?.drop?.[pol]?.[cr]?.[cityKey]?.[periodKey(p)]?.[si === 0 ? "c20" : "c40"] ?? null;
+  const pubRentTotal = (rPol, cr, city, sk, p) => publicRates?.rental?.[rPol]?.carriers?.[cr]?.[city]?.[periodKey(p)]?.[sk] ?? null;
+  const pubRentSub = (rPol, city, sk, p) => publicRates?.rental?.[rPol]?.rent?.[city]?.[periodKey(p)]?.[sk] ?? null;
+  // 고객용 가격 객체: cost는 화면에 표시되지 않으며 sell과 동일값(매입 미노출). 일부 JSX가 .cost로 행 표시를 판단하므로 sell을 넣음
+  const guestPrice = (sell, cr) => ({ cost: sell ?? null, margin: sell == null ? null : 0, sell: sell ?? null, cr: cr ?? null });
 
   const carrierGridAreaGroups = useMemo(() => {
     const q = carrierAdminPolFilter.trim().toLowerCase();
@@ -1520,12 +1534,14 @@ export default function App() {
   };
 
   /** 게스트·포털: sell 저장값 → POL 마진 → getM() 전체 마진 */
-  const getGuestCarrierSell = (pol, cr, type, period, cost, area) =>
-    resolveCarrierEffectiveSell(polCostO, pol, cr, type, period, cost, {
+  const getGuestCarrierSell = (pol, cr, type, period, cost, area) => {
+    if (usePublic) return pubOcean(pol, cr, type, period);
+    return resolveCarrierEffectiveSell(polCostO, pol, cr, type, period, cost, {
       polM,
       polMFuture,
       fullMargin: getM(pol, area, type, period),
     });
+  };
 
   const applyBuyingGriBulk = (deltas, rows, carrier, period) => {
     if (!rows?.length || !Object.keys(deltas).length) return;
@@ -2500,15 +2516,15 @@ export default function App() {
     applyNoticesAndAdsFromSettings(s);
   };
 
-  useEffect(() => {
-    let cancelled = false;
-
-    const loadSettings = async () => {
-      try {
+  // raw 운임(매입·마진) 로드 — admin 진입 시 또는 (스냅샷 없음 + fallback) 일 때만 호출
+  const loadRawPricing = async () => {
+    if (rawLoadedRef.current) return;
+    rawLoadedRef.current = true;
+    try {
+      {
         const [oceanRows] = await Promise.all([
           fetchSettingsInKeys(OCEAN_DB_KEYS),
         ]);
-        if (cancelled) return;
 
         const priority = {
           ...settingsMapFromRows(oceanRows),
@@ -2638,7 +2654,6 @@ export default function App() {
           fetchSettingsInKeys(RENTAL_DB_KEYS),
           fetchSettingsInKeys(MISC_SETTINGS_KEYS),
         ]);
-        if (cancelled) return;
 
         applySettingsBundle({
           ...settingsMapFromRows(dropRows),
@@ -2648,23 +2663,56 @@ export default function App() {
 
         // Drop/Rental DB 로드 후 baseline
         setTimeout(() => syncRateHistoryBaseline(), 400);
-      } catch (err) {
-        console.error("settings load failed", err);
+      }
+    } catch (err) {
+      console.error("settings load failed", err);
+      setSettingsLoaded(true);
+      skipAutoSaveRef.current = false;
+      rawLoadedRef.current = false; // 실패 시 재시도 허용
+    }
+  };
+
+  // 마운트: 고객용 매출 스냅샷 + validity + 공지/광고만 로드 (매입·마진 미수신)
+  useEffect(() => {
+    let cancelled = false;
+    const loadGuest = async () => {
+      // 마스터 스위치 OFF → 기존처럼 모두 raw 로드·렌더 (전면 롤백)
+      if (!PUBLIC_RATES_ENABLED) { await loadRawPricing(); setSettingsLoaded(true); return; }
+      try {
+        const rows = await fetchSettingsInKeys([PUBLIC_RATES_KEY, "validity_info_json", ...MISC_SETTINGS_KEYS]);
+        if (cancelled) return;
+        const map = settingsMapFromRows(rows);
+        let snap = null;
+        try { snap = map[PUBLIC_RATES_KEY] ? JSON.parse(map[PUBLIC_RATES_KEY]) : null; } catch (e) { snap = null; }
+        setPublicRates(snap);
+        applySettingsBundle(map); // validity + 공지/광고 적용 (pol_costs·마진 키는 없음)
         setSettingsLoaded(true);
         skipAutoSaveRef.current = false;
+        // 스냅샷 없음 + fallback 허용 → raw 로드 (롤아웃 중 화면 정상)
+        if (!snap && PUBLIC_RATES_FALLBACK_RAW) await loadRawPricing();
+      } catch (err) {
+        console.error("public rates load failed", err);
+        if (PUBLIC_RATES_FALLBACK_RAW) { try { await loadRawPricing(); } catch (e2) {} }
+        setSettingsLoaded(true);
       }
     };
-
-    loadSettings();
+    loadGuest();
     return () => { cancelled = true; };
   }, []);
 
-  // admin 진입 시 매출 스냅샷 1회 재생성 — 백필 + 누락 저장 경로 안전망
+  // admin 진입 시 raw(매입·마진) 1회 로드
   useEffect(() => {
-    if (!isAdmin || !settingsLoaded) return undefined;
+    if (isAdmin) loadRawPricing();
+  }, [isAdmin]);
+
+  // admin: raw 로드 완료(polCostO 채워짐) 후 매출 스냅샷 1회 백필 — 누락 저장 경로 안전망
+  useEffect(() => {
+    if (!isAdmin || !settingsLoaded || backfilledRef.current) return undefined;
+    if (!Object.keys(polCostO || {}).length) return undefined; // raw 아직 → 대기
+    backfilledRef.current = true;
     const t = setTimeout(() => { persistPublicRates({ force: true }); }, 1500);
     return () => clearTimeout(t);
-  }, [isAdmin, settingsLoaded]);
+  }, [isAdmin, settingsLoaded, polCostO]);
 
   useEffect(() => {
     if (skipAutoSaveRef.current || !isAdmin || saveBusy) return;
@@ -2763,6 +2811,8 @@ export default function App() {
 
   const getCarrierRate = (row, cr, t, period = ratePeriod) => {
     const p = period === "future" ? "future" : "current";
+    // 고객(스냅샷) 모드: raw 대신 스냅샷 매출 반환 (행 표시 판단·매출 계산에 사용, 매입 미사용)
+    if (usePublic) return pubOcean(row.pol, cr, t, p);
     // 고객 화면: validity 종료일이 지난(만료) 현재 운임은 비표시
     if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo[cr]?.current)) return null;
     const ov = getCarrierCostOverride(row.pol, cr, t, p);
@@ -2791,6 +2841,7 @@ export default function App() {
 
   // 렌탈 매출가(렌탈 매입 + 렌탈 마진) — 고객 노출용. 매입가 자체는 절대 반환하지 않음
   const getRentalSell = (rPol, city, comboIdx, period = ratePeriod) => {
+    if (usePublic) return pubRentSub(rPol, city, comboIdx === 0 ? "c20" : comboIdx === 1 ? "c40dv" : "c40hc", period);
     const base = getRentalBase(rPol, city, comboIdx, period);
     if (base == null) return null;
     const fp = PM[rPol] || rPol;
@@ -3044,6 +3095,11 @@ export default function App() {
   };
 
   const bNet = (row, t) => {
+    if (usePublic) {
+      let b = null, cr = null;
+      CRS.forEach(k => { const v = pubOcean(row.pol, k, t, ratePeriod); if (v != null && (b === null || v < b)) { b = v; cr = k; } });
+      return { val: b, cr };
+    }
     let b = null, cr = null;
     CRS.forEach(k => {
       const v = getCarrierRate(row, k, t);
@@ -3053,6 +3109,11 @@ export default function App() {
   };
   const bDO = (row, city, si, period) => {
     const p = period === "future" ? "future" : period === "current" ? "current" : ratePeriod;
+    if (usePublic) {
+      let b = null, cr = null;
+      CRS.forEach(k => { const v = pubDrop(row.pol, k, city, si, p); if (v != null && (b === null || v < b)) { b = v; cr = k; } });
+      return { val: b, cr };
+    }
     let b = null, cr = null;
     CRS.forEach(k => {
       const tot = getCarrierDropTotalCost(row, k, city, si, p);
@@ -3061,6 +3122,14 @@ export default function App() {
     return { val: b, cr };
   };
   const cRent = (rPol, city, rRow, period = ratePeriod) => {
+    if (usePublic) {
+      return CRS.map(k => ({
+        k,
+        t20: pubRentTotal(rPol, k, city, "c20", period),
+        t40dv: pubRentTotal(rPol, k, city, "c40dv", period),
+        t40hc: pubRentTotal(rPol, k, city, "c40hc", period),
+      })).filter(x => x.t20 != null || x.t40dv != null || x.t40hc != null);
+    }
     const fp = PM[rPol];
     if (!fp || !fMap[fp]) return [];
     const fr = fMap[fp];
@@ -3106,6 +3175,11 @@ export default function App() {
     return { val: b, cr };
   };
   const rentDetail = (rPol, city, rRow, comboIdx) => {
+    if (usePublic) {
+      const b = bRent(rPol, city, rRow, comboIdx);
+      const sk = comboIdx === 0 ? "c20" : comboIdx === 1 ? "c40dv" : "c40hc";
+      return guestPrice(b.cr ? pubRentTotal(rPol, b.cr, city, sk, ratePeriod) : null, b.cr);
+    }
     const fp = PM[rPol];
     const freightPol = fp || rPol;
     const fr = fp ? fMap[fp] : null;
@@ -3136,6 +3210,7 @@ export default function App() {
   };
   const oceanDetail = (row, t) => {
     const b = bNet(row, t);
+    if (usePublic) return guestPrice(b.cr ? pubOcean(row.pol, b.cr, t, ratePeriod) : null, b.cr);
     const cost = b.val;
     const cr = b.cr;
     if (cost != null && cr) {
@@ -3158,6 +3233,7 @@ export default function App() {
     return dropCarrierDetail(row, cityKey, b.cr, si, ratePeriod);
   };
   const dropCarrierDetail = (row, cityKey, cr, si, period = ratePeriod) => {
+    if (usePublic) return guestPrice(pubDrop(row.pol, cr, cityKey, si, period), cr);
     const t = si === 0 ? "coc20" : "coc40";
     const cost = getCarrierDropTotalCost(row, cr, cityKey, si, period);
     if (cost == null) return isAdmin ? mkAdminPrice(null, null, cr) : mkPrice(null, 0, cr);
@@ -3202,16 +3278,21 @@ export default function App() {
       for (let i = 0; i < path.length - 1; i++) { o[path[i]] = o[path[i]] || {}; o = o[path[i]]; }
       o[path[path.length - 1]] = val;
     };
+    // 고객 화면과 동일하게: 만료된 현재 운임은 스냅샷에서 제외 (admin 빌더라 expiry 가드를 명시 적용)
+    const curExpired = (vKey) => isValiditySlotExpired(validityInfo[vKey]?.current);
     fData.forEach(row => {
       CRS.forEach(cr => {
         periods.forEach(p => {
-          RATE_TYPES.forEach(t => {
-            const cost = getCarrierRate(row, cr, t, p);
-            if (cost == null) return;
-            const sell = getGuestCarrierSell(row.pol, cr, t, p, cost, row.area);
-            if (sell == null) return;
-            set(ocean, [row.pol, cr, p, t], sell);
-          });
+          if (p === "current" && curExpired(cr)) { /* 해상 만료 → 스냅샷 제외 */ } else {
+            RATE_TYPES.forEach(t => {
+              const cost = getCarrierRate(row, cr, t, p);
+              if (cost == null) return;
+              const sell = getGuestCarrierSell(row.pol, cr, t, p, cost, row.area);
+              if (sell == null) return;
+              set(ocean, [row.pol, cr, p, t], sell);
+            });
+          }
+          if (p === "current" && curExpired(carrierDropValidityKey(cr))) return; // Drop off 만료 → 제외
           DOC.forEach(({ k: cityKey }) => {
             [0, 1].forEach(si => {
               const sell = guestDropSell(row, cityKey, cr, si, p);
@@ -3225,6 +3306,7 @@ export default function App() {
     rData.forEach(row => {
       const rPol = row.pol;
       periods.forEach(p => {
+        if (p === "current" && curExpired("RENTAL")) return; // 렌탈 만료 → 제외
         RENT_CITY_ORDER.forEach(city => {
           cRent(rPol, city, row, p).forEach(c => {
             [["c20", c.t20], ["c40dv", c.t40dv], ["c40hc", c.t40hc]].forEach(([sk, v]) => {

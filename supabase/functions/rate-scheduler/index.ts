@@ -27,11 +27,12 @@ const LEGACY_VALIDITY_KEY: Record<string, string> = {
   SNK: "validity_snk", DY: "validity_dy", CK: "validity_ck", RENTAL: "validity_rental",
 };
 const STATE_KEY = "auto_transition_state_json";
+const PUBLIC_RATES_KEY = "public_rates_json";
 const SETTINGS_KEYS = [
   "validity_info_json", "pol_costs", "carrier_rates_json",
   "carrier_drop_rates_json", "rental_rates_json",
   "validity_snk", "validity_dy", "validity_ck", "validity_rental",
-  STATE_KEY,
+  PUBLIC_RATES_KEY, STATE_KEY,
 ];
 
 const corsHeaders = {
@@ -143,6 +144,13 @@ function runTransition(settings: Record<string, string>, today: string, dryRun: 
   const changedKeys = new Set<string>();
   const historyRows: Array<Record<string, unknown>> = [];
   const summary: string[] = [];
+  // 고객 매출 스냅샷(public_rates_json) 동기화용 — 어느 선사/카테고리가 전환/만료됐는지 추적
+  const oceanTransitioned = new Set<string>();
+  const dropTransitioned = new Set<string>();
+  let rentalTransitioned = false;
+  const oceanExpired = new Set<string>();
+  const dropExpired = new Set<string>();
+  let rentalExpired = false;
 
   const promoteValidity = (key: string) => {
     const entry = vi[key] || {};
@@ -220,6 +228,7 @@ function runTransition(settings: Record<string, string>, today: string, dryRun: 
     }
     changedKeys.add("pol_costs");
 
+    oceanTransitioned.add(carrier);
     const { oldLabel, newLabel } = promoteValidity(carrier);
     historyRows.push({
       carrier, pol: "ALL", rate_type: "transition", period: "current", category: "ocean",
@@ -243,6 +252,7 @@ function runTransition(settings: Record<string, string>, today: string, dryRun: 
     cr.current = { ...cr.future };
     cr.future = {};
     changedKeys.add("carrier_drop_rates_json");
+    dropTransitioned.add(carrier);
 
     const { oldLabel, newLabel } = promoteValidity(dropKey);
     historyRows.push({
@@ -266,6 +276,7 @@ function runTransition(settings: Record<string, string>, today: string, dryRun: 
         bucket.future = {};
       }
       changedKeys.add("rental_rates_json");
+      rentalTransitioned = true;
       const { oldLabel, newLabel } = promoteValidity("RENTAL");
       historyRows.push({
         carrier: "RENTAL", pol: "ALL", rate_type: "transition", period: "current", category: "rental",
@@ -288,6 +299,9 @@ function runTransition(settings: Record<string, string>, today: string, dryRun: 
     changedKeys.add(STATE_KEY);
     const carrier = key.replace("_DROP", "");
     const category = key === "RENTAL" ? "rental" : key.endsWith("_DROP") ? "dropoff" : "ocean";
+    if (category === "rental") rentalExpired = true;
+    else if (category === "dropoff") dropExpired.add(carrier);
+    else oceanExpired.add(carrier);
     historyRows.push({
       carrier, pol: "ALL", rate_type: "expired", period: "current", category,
       source: "auto-transition",
@@ -296,7 +310,49 @@ function runTransition(settings: Record<string, string>, today: string, dryRun: 
     summary.push(`expired/${key}: till ${tillISO}`);
   }
 
+  // ── 고객 매출 스냅샷(public_rates_json) 동기화 — 가격 재계산 없이 current←future 데이터 이동만 ──
+  const pub = parseJson(settings[PUBLIC_RATES_KEY], null) as
+    | { ocean?: any; drop?: any; rental?: any } | null;
+  const swapNode = (node: any) => {
+    if (!node) return;
+    if (node.future !== undefined) { node.current = node.future; delete node.future; }
+  };
+  const clearCurrent = (node: any) => { if (node) delete node.current; };
+  if (pub && (oceanTransitioned.size || dropTransitioned.size || rentalTransitioned ||
+              oceanExpired.size || dropExpired.size || rentalExpired)) {
+    // 해상
+    for (const pol of Object.keys(pub.ocean || {})) {
+      for (const cr of oceanTransitioned) swapNode(pub.ocean[pol]?.[cr]);
+      for (const cr of oceanExpired) clearCurrent(pub.ocean[pol]?.[cr]);
+    }
+    // Drop off (선사 → 도시별)
+    for (const pol of Object.keys(pub.drop || {})) {
+      for (const cr of dropTransitioned) {
+        const node = pub.drop[pol]?.[cr]; if (!node) continue;
+        for (const city of Object.keys(node)) swapNode(node[city]);
+      }
+      for (const cr of dropExpired) {
+        const node = pub.drop[pol]?.[cr]; if (!node) continue;
+        for (const city of Object.keys(node)) clearCurrent(node[city]);
+      }
+    }
+    // 렌탈 (전 선사 + rent 부분)
+    if (rentalTransitioned || rentalExpired) {
+      const apply = rentalTransitioned ? swapNode : clearCurrent;
+      for (const rPol of Object.keys(pub.rental || {})) {
+        const carriers = pub.rental[rPol]?.carriers || {};
+        for (const cr of Object.keys(carriers)) {
+          for (const city of Object.keys(carriers[cr])) apply(carriers[cr][city]);
+        }
+        const rent = pub.rental[rPol]?.rent || {};
+        for (const city of Object.keys(rent)) apply(rent[city]);
+      }
+    }
+    changedKeys.add(PUBLIC_RATES_KEY);
+  }
+
   const saves: Array<[string, string]> = [];
+  if (changedKeys.has(PUBLIC_RATES_KEY) && pub) saves.push([PUBLIC_RATES_KEY, JSON.stringify(pub)]);
   if (changedKeys.has("validity_info_json")) saves.push(["validity_info_json", JSON.stringify(vi)]);
   for (const legacy of Object.values(LEGACY_VALIDITY_KEY)) {
     if (changedKeys.has(legacy)) saves.push([legacy, settings[legacy]]);
