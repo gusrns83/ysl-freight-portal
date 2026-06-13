@@ -1042,11 +1042,31 @@
 .rental-grid-wrap {
   --rental-area-w: 68px;
   --rental-head-h: 24px;
+  --rental-col-w: 112px;
   display: block;
   max-width: 100%;
   max-height: calc(100vh - 210px);
   overflow: auto;
   -webkit-overflow-scrolling: touch;
+}
+
+/* 표는 컬럼 합계만큼만 차지 → 도시 1개여도 늘어나지 않음, 좁으면 좌측 정렬·우측 여백 */
+.carrier-grid.rental-grid {
+  width: max-content;
+  max-width: none;
+}
+
+/* 운임 셀(20'/40'DV/40'HC) 컬럼 고정 폭 — 도시 수와 무관하게 항상 동일 */
+.rental-grid .cg-cell,
+.rental-grid .cg-cell.cg-empty {
+  width: var(--rental-col-w);
+  min-width: var(--rental-col-w);
+  max-width: var(--rental-col-w);
+}
+/* 편집(셀 클릭) 시에는 폭 제한 해제 — 입력 패널이 잘리지 않도록 */
+.rental-grid .cg-cell.cg-active {
+  width: auto;
+  max-width: none;
 }
 .rental-grid .cg-rental-city-head {
   font-size: 10px;
@@ -1135,7 +1155,6 @@
   padding: 2px 4px;
 }
 .rental-grid .cg-cell.cg-empty {
-  min-width: 36px;
   font-size: 10px;
 }
 
@@ -1143,6 +1162,7 @@
 @media (max-width: 480px) {
   .rental-grid-wrap {
     --rental-area-w: 52px;
+    --rental-col-w: 104px;
     max-height: calc(100vh - 168px);
   }
   .rental-grid .cg-area,
