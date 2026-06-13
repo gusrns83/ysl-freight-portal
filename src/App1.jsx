@@ -583,10 +583,12 @@ export default function App() {
   // ── 고객용 매출 스냅샷 조회 (비admin + publicRates 있을 때만 raw 대신 사용) ──
   const usePublic = PUBLIC_RATES_ENABLED && !isAdmin && !!publicRates;
   const periodKey = (p) => (p === "future" ? "future" : "current");
-  const pubOcean = (pol, cr, t, p) => publicRates?.ocean?.[pol]?.[cr]?.[periodKey(p)]?.[t] ?? null;
-  const pubDrop = (pol, cr, cityKey, si, p) => publicRates?.drop?.[pol]?.[cr]?.[cityKey]?.[periodKey(p)]?.[si === 0 ? "c20" : "c40"] ?? null;
-  const pubRentTotal = (rPol, cr, city, sk, p) => publicRates?.rental?.[rPol]?.carriers?.[cr]?.[city]?.[periodKey(p)]?.[sk] ?? null;
-  const pubRentSub = (rPol, city, sk, p) => publicRates?.rental?.[rPol]?.rent?.[city]?.[periodKey(p)]?.[sk] ?? null;
+  // 스냅샷 생성 이후 만료된 현재 운임은 실시간 validity로 한 번 더 차단 (스케줄러 지연 대비)
+  const curExpiredLive = (vKey, p) => p === "current" && isValiditySlotExpired(validityInfo[vKey]?.current);
+  const pubOcean = (pol, cr, t, p) => (curExpiredLive(cr, periodKey(p)) ? null : publicRates?.ocean?.[pol]?.[cr]?.[periodKey(p)]?.[t] ?? null);
+  const pubDrop = (pol, cr, cityKey, si, p) => (curExpiredLive(carrierDropValidityKey(cr), periodKey(p)) ? null : publicRates?.drop?.[pol]?.[cr]?.[cityKey]?.[periodKey(p)]?.[si === 0 ? "c20" : "c40"] ?? null);
+  const pubRentTotal = (rPol, cr, city, sk, p) => (curExpiredLive("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.carriers?.[cr]?.[city]?.[periodKey(p)]?.[sk] ?? null);
+  const pubRentSub = (rPol, city, sk, p) => (curExpiredLive("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.rent?.[city]?.[periodKey(p)]?.[sk] ?? null);
   // 고객용 가격 객체: cost는 화면에 표시되지 않으며 sell과 동일값(매입 미노출). 일부 JSX가 .cost로 행 표시를 판단하므로 sell을 넣음
   const guestPrice = (sell, cr) => ({ cost: sell ?? null, margin: sell == null ? null : 0, sell: sell ?? null, cr: cr ?? null });
 
