@@ -10,12 +10,14 @@ export const setAuthRefreshHandler = (fn) => { refreshHandler = fn; };
 export const getAuthToken = () => authToken;
 const bearer = () => `Bearer ${authToken || SB_KEY}`;
 
-// 401(JWT 만료) 시 refresh 후 1회 재시도 — admin 세션 끊김 방지
+// 401(JWT 만료)·403(42501 anon 거부) 시 refresh 후 1회 재시도 — admin 세션 끊김/토큰 미설정 방지
+// authToken이 null이어도(마운트 복원 레이스) localStorage refresh_token으로 갱신 시도
 const tryRefresh = async () => {
-  if (!authToken || !refreshHandler) return false;
+  if (!refreshHandler) return false;
   try { const fresh = await refreshHandler(); if (fresh) { authToken = fresh; return true; } } catch (_) {}
   return false;
 };
+const isAuthError = (status) => status === 401 || status === 403;
 
 const api = async (path, opts = {}) => {
   const { headers: optHeaders, timeoutMs = API_TIMEOUT_MS, _retried, ...rest } = opts;
@@ -33,7 +35,7 @@ const api = async (path, opts = {}) => {
         ...optHeaders,
       },
     });
-    if (r.status === 401 && !_retried && await tryRefresh()) {
+    if (isAuthError(r.status) && !_retried && await tryRefresh()) {
       clearTimeout(timer);
       return api(path, { ...opts, _retried: true });
     }
@@ -272,7 +274,7 @@ const saveSettingDirect = async (key, value) => {
         body: JSON.stringify({ key, value: strVal }),
       });
       clearTimeout(timer);
-      if (res.status === 401 && !refreshed && await tryRefresh()) { refreshed = true; continue; }
+      if (isAuthError(res.status) && !refreshed && await tryRefresh()) { refreshed = true; continue; }
       if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
       return;
     } catch (e) {
@@ -320,7 +322,7 @@ const saveSettingValue = async (key, value) => enqueueNetworkWrite(async () => {
         body: JSON.stringify({ key, value: strVal }),
       });
       clearTimeout(timer);
-      if (res.status === 401 && !refreshed && await tryRefresh()) { refreshed = true; continue; }
+      if (isAuthError(res.status) && !refreshed && await tryRefresh()) { refreshed = true; continue; }
       if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
       return;
     } catch (e) {
@@ -357,7 +359,7 @@ const postSettingsRows = async (rows, label) => enqueueNetworkWrite(async () => 
         body: JSON.stringify(rows),
       });
       clearTimeout(timer);
-      if (res.status === 401 && !refreshed && await tryRefresh()) { refreshed = true; continue; }
+      if (isAuthError(res.status) && !refreshed && await tryRefresh()) { refreshed = true; continue; }
       if (!res.ok) throw new Error(await res.text());
       return;
     } catch (e) {
