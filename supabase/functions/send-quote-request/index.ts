@@ -1,6 +1,24 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 
 const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+const SB_URL = Deno.env.get("SUPABASE_URL");
+const SB_SERVICE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SUPABASE_ANON_KEY");
+
+// 직원 수신 이메일을 service role로 직접 조회 (고객/anon에 미노출)
+async function fetchStaffEmails(): Promise<string[]> {
+  try {
+    if (!SB_URL || !SB_SERVICE_KEY) return [];
+    const r = await fetch(`${SB_URL}/rest/v1/settings?select=value&key=eq.quote_staff_emails`, {
+      headers: { apikey: SB_SERVICE_KEY, Authorization: `Bearer ${SB_SERVICE_KEY}` },
+    });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    const raw = rows?.[0]?.value;
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter((e: unknown) => typeof e === "string" && (e as string).trim()) : [];
+  } catch { return []; }
+}
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -13,8 +31,9 @@ serve(async (req) => {
   }
   try {
     const { customerEmail, containerQty, cargoName, targetRate,
-            pol, pod, carrier, rateType, currentRate, staffEmails,
+            pol, pod, carrier, rateType, currentRate,
             etdFrom, etdTo, comment } = await req.json();
+    const staffEmails = await fetchStaffEmails();
 
     const escapeHtml = (s: string) =>
       String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

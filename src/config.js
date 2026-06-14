@@ -5,7 +5,7 @@ const SB_URL = "https://mmswsopevmyreoygovpa.supabase.co";
 const SB_KEY = "sb_publishable_XaUcvApLXTrJ5lRhte7YXQ_Bqmj_IEq";
 const ADMIN_PIN = "0000";
 const ADMIN_SKIP_PIN = false; // APP1: 운영 기본값 false
-const ADMIN_SAVE_REV = "save-v56"; // Admin 저장 로직 버전 (배포 확인용)
+const ADMIN_SAVE_REV = "save-v57"; // Admin 저장 로직 버전 (배포 확인용) · v57: Supabase Auth 로그인
 // 고객용 매출 스냅샷 키 — 매입·마진 없이 매출가만 (보안 B안 Phase 1)
 const PUBLIC_RATES_KEY = "public_rates_json";
 // 마스터 스위치 — false 면 고객도 기존처럼 raw 로드·렌더(즉시 전면 롤백용). 스냅샷 생성은 유지됨

@@ -2,9 +2,36 @@ import { Fragment, useState, useMemo, useEffect, useRef, useCallback } from "rea
 import { createPortal } from "react-dom";
 import { GriAdjustPanel, MarginPanel } from "./components/adminPanels.jsx";
 import { AdminSaveToast, Bg, CarrierPortGuide, FooterAdSlot, Logo, MAIN_TABS, RatesLoading, ValidityPeriodFields } from "./components/common.jsx";
-import { ADMIN_PIN, ADMIN_SAVE_REV, ADMIN_SESSION_KEY, ADMIN_SKIP_PIN, DB_DROP, DB_LABEL, DB_OCEAN, DB_RENTAL, DEFAULT_MARGINS, PRICING_CACHE_KEY, PUBLIC_RATES_ENABLED, PUBLIC_RATES_FALLBACK_RAW, PUBLIC_RATES_KEY, RENT_COMBO_KEYS, RENT_COMBO_SHORT, SAVE_UI_MAX_MS, SB_KEY, SB_URL, mkAds, mkNotices, normalizeRentalCityBucket, parseAdsFromSettings, parseNoticeOn, readStoredPricingCache, rentComboMarginType, rentComboSk, rentSocType } from "./config.js";
+import { ADMIN_SAVE_REV, DB_DROP, DB_LABEL, DB_OCEAN, DB_RENTAL, DEFAULT_MARGINS, PRICING_CACHE_KEY, PUBLIC_RATES_ENABLED, PUBLIC_RATES_FALLBACK_RAW, PUBLIC_RATES_KEY, RENT_COMBO_KEYS, RENT_COMBO_SHORT, SAVE_UI_MAX_MS, SB_KEY, SB_URL, mkAds, mkNotices, normalizeRentalCityBucket, parseAdsFromSettings, parseNoticeOn, readStoredPricingCache, rentComboMarginType, rentComboSk, rentSocType } from "./config.js";
 import { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, F_TO_R, FR, PM, RATE_TYPES, RC, RC_LABEL, RENTAL_CITY_ALIASES, RENTAL_EXTRA_CITIES, RENTAL_RATE_TYPES, RENT_CITY_ORDER, RN, VALIDITY_KEYS, addDaysToISO, buildDefaultRentalRates, carrierDropValidityKey, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, defaultValiditySlot, formatValidityCompact, formatValidityDate, formatValiditySlotLabel, countDropMissingFuture, countOceanMissingFuture, countRentalMissingFuture, isValiditySlotExpired, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, n, normalizeRentalCityName, normalizeRentalMargins, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, rentalRateLabel, repairValiditySlot, serializeCarrierDropRatesForSave, serializeValidityInfo, syncFromAfterTill, validitySlotDaysLeft } from "./data/staticData.js";
-import { DROP_DB_KEYS, EXCEL_UPLOAD_MAX_MS, MISC_SETTINGS_KEYS, OCEAN_DB_KEYS, RENTAL_DB_KEYS, api, enqueueNetworkWrite, extractPortalOverrides, fetchSettingsInKeys, mergePortalOverridesIntoPolCostO, postSettingsRows, resetNetworkWriteQueue, saveOceanPolCostsBundle, saveOneSettingWithRetry, saveSettingDirect, saveSettingValue, saveSettingsEntries, saveSettingsEntriesDirect, serializeOceanPolCosts, settingsMapFromRows, withTimeout } from "./lib/api.js";
+import { DROP_DB_KEYS, EXCEL_UPLOAD_MAX_MS, MISC_SETTINGS_KEYS, OCEAN_DB_KEYS, RENTAL_DB_KEYS, api, enqueueNetworkWrite, extractPortalOverrides, fetchSettingsInKeys, mergePortalOverridesIntoPolCostO, postSettingsRows, resetNetworkWriteQueue, saveOceanPolCostsBundle, saveOneSettingWithRetry, saveSettingDirect, saveSettingValue, saveSettingsEntries, saveSettingsEntriesDirect, serializeOceanPolCosts, setAuthRefreshHandler, setAuthToken, settingsMapFromRows, withTimeout } from "./lib/api.js";
+
+// ── admin Supabase Auth (이메일/비밀번호) ──
+const ADMIN_ACCESS_KEY = "ysl_admin_access";
+const ADMIN_REFRESH_KEY = "ysl_admin_refresh";
+const adminSignIn = async (email, password) => {
+  const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: SB_KEY, "Content-Type": "application/json" },
+    body: JSON.stringify({ email: String(email).trim(), password }),
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok || !d.access_token) throw new Error(d.error_description || d.msg || d.error || "로그인 실패");
+  return d; // { access_token, refresh_token, expires_in, user, ... }
+};
+const adminRefreshToken = async (refresh_token) => {
+  if (!refresh_token) return null;
+  try {
+    const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
+      method: "POST",
+      headers: { apikey: SB_KEY, "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok || !d.access_token) return null;
+    return d;
+  } catch { return null; }
+};
 import { LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, readExcelFile, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
 import { bootPricingFromCache, buildBuyingGriCosts, buildCopyCurrentToFutureCosts, buildRateHistoryQuery, buildSellingGriSells, copyCarrierDropRatesPeriod, copyCarrierRatesPeriod, deleteRateHistoryByIds, diffRateHistoryRows, displayMarginFromPrices, fetchRateHistoryExcelUploadOcean, flattenRateSnapshot, getPolStoredMargin, griPeriodLabel, marginNowTs, marginNum, mergePolCostODeep, parsePricingFromSettings, pickLatestMargin, pickRateHistoryDuplicatesToRemove, postRateHistoryRows, pricingCacheFromSnapshot, pruneRateHistoryOutsideService, rateHistoryEntryKey, resolveCarrierEffectiveSell, resolveCarrierExplicitSell, resolveMarginCandidates, settingBundleHas, sortRateHistoryRowsByCity, uploadExcelRateHistory } from "./lib/pricing.js";
 import { applyRentalUploadChanges, buildRentalUploadChanges, downloadRentalTemplate, parseRentalUploadRows } from "./lib/rentalUpload.js";
@@ -43,17 +70,7 @@ function QuoteRequestModal({ info, onClose }) {
     setSending(true);
     setStatus(null);
     try {
-      // staffEmails: settings.quote_staff_emails (JSON 배열, 없으면 빈 배열)
-      let staffEmails = [];
-      try {
-        const rows = await fetchSettingsInKeys(["quote_staff_emails"]);
-        const raw = rows?.find(r => r.key === "quote_staff_emails")?.value;
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed)) staffEmails = parsed.filter(e => typeof e === "string" && e.trim());
-        }
-      } catch {}
-
+      // 직원 수신 이메일(quote_staff_emails)은 Edge Function이 service role로 직접 조회 — 고객(anon)에 미노출
       const payload = {
         customerEmail: email.trim(),
         containerQty: qty.trim(),
@@ -67,7 +84,6 @@ function QuoteRequestModal({ info, onClose }) {
         rateType: info.dropCity ? `${info.rateType} · Drop off: ${info.dropCity}` : info.rateType,
         currentRate: info.currentRate,
         comment: comment.trim(),
-        staffEmails,
       };
 
       const insertRow = {
@@ -407,7 +423,8 @@ export default function App() {
   const [loginTab, setLoginTab] = useState("client"); // client | admin
   const [email, setEmail] = useState("");
   const [pw, setPw] = useState("");
-  const [pin, setPin] = useState("");
+  const [adminEmail, setAdminEmail] = useState("");
+  const [adminPw, setAdminPw] = useState("");
   const [loginErr, setLoginErr] = useState("");
   const [loginLoading, setLoginLoading] = useState(false);
 
@@ -1436,27 +1453,66 @@ export default function App() {
     setLoginLoading(false);
   };
 
-  const doAdminLogin = () => {
-    if (ADMIN_SKIP_PIN || pin === ADMIN_PIN) {
+  const persistAdminTokens = (d) => {
+    try {
+      sessionStorage.setItem(ADMIN_ACCESS_KEY, d.access_token);
+      sessionStorage.setItem(ADMIN_REFRESH_KEY, d.refresh_token);
+    } catch (_) {}
+  };
+
+  const doAdminLogin = async () => {
+    if (loginLoading) return;
+    setLoginLoading(true); setLoginErr("");
+    try {
+      const d = await adminSignIn(adminEmail, adminPw);
+      setAuthToken(d.access_token);
+      persistAdminTokens(d);
+      rawLoadedRef.current = false; // 새 로그인 → raw 재로드 허용
       setMode("admin");
       setShowLoginModal(false);
-      setPin("");
-      setLoginErr("");
-      try { sessionStorage.setItem(ADMIN_SESSION_KEY, "1"); } catch (_) {}
-    } else { setLoginErr("Wrong PIN"); }
+      setAdminPw("");
+    } catch (e) {
+      setLoginErr("이메일 또는 비밀번호가 올바르지 않습니다");
+    }
+    setLoginLoading(false);
   };
 
   const logout = () => {
     setMode("guest");
     setClient(null);
-    try { sessionStorage.removeItem(ADMIN_SESSION_KEY); } catch (_) {}
+    setAuthToken(null);
+    rawLoadedRef.current = false;
+    try { sessionStorage.removeItem(ADMIN_ACCESS_KEY); sessionStorage.removeItem(ADMIN_REFRESH_KEY); } catch (_) {}
   };
 
+  // 마운트: api.js의 401 refresh 핸들러 등록 + 저장된 admin 세션 복원
   useEffect(() => {
-    if (ADMIN_SKIP_PIN && sessionStorage.getItem(ADMIN_SESSION_KEY) === "1") {
-      setMode("admin");
-    }
+    setAuthRefreshHandler(async () => {
+      let rt = null; try { rt = sessionStorage.getItem(ADMIN_REFRESH_KEY); } catch (_) {}
+      const d = await adminRefreshToken(rt);
+      if (!d) return null;
+      persistAdminTokens(d);
+      return d.access_token;
+    });
+    (async () => {
+      let rt = null; try { rt = sessionStorage.getItem(ADMIN_REFRESH_KEY); } catch (_) {}
+      if (!rt) return;
+      const d = await adminRefreshToken(rt);
+      if (d) { setAuthToken(d.access_token); persistAdminTokens(d); setMode("admin"); }
+      else { try { sessionStorage.removeItem(ADMIN_ACCESS_KEY); sessionStorage.removeItem(ADMIN_REFRESH_KEY); } catch (_) {} }
+    })();
   }, []);
+
+  // admin 세션 유지: JWT 만료(기본 1h) 전 주기적 refresh
+  useEffect(() => {
+    if (!isAdmin) return undefined;
+    const id = setInterval(async () => {
+      let rt = null; try { rt = sessionStorage.getItem(ADMIN_REFRESH_KEY); } catch (_) {}
+      const d = await adminRefreshToken(rt);
+      if (d) { setAuthToken(d.access_token); persistAdminTokens(d); }
+    }, 45 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [isAdmin]);
 
   const loadClients = async () => { const d = await api("clients?select=*&order=created_at.desc"); setClients(d); };
   const saveClient = async () => { await api("clients",{method:"POST",body:JSON.stringify(newC)}); setAddForm(false); setNewC({company_name:"",email:"",password_hash:"",margin_coc20:80,margin_coc40:100,margin_soc20:80,margin_soc40:100,notes:""}); loadClients(); };
@@ -5860,25 +5916,16 @@ export default function App() {
                   {loginLoading?"Checking...":"Login"}
                 </button>
               </div>
-            ) : ADMIN_SKIP_PIN ? (
-              <div>
-                <div style={{fontSize:12,color:"#6b7280",marginBottom:14,textAlign:"center",lineHeight:1.5}}>
-                  검토 모드 · PIN 없이 Admin 진입
-                </div>
-                {loginErr&&<div style={{fontSize:12,color:"#ef4444",marginBottom:10}}>{loginErr}</div>}
-                <button onClick={doAdminLogin}
-                  style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
-                  Admin 바로 들어가기
-                </button>
-              </div>
             ) : (
               <div>
-                <input type="password" placeholder="Admin PIN" value={pin} onChange={e=>setPin(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doAdminLogin()} autoFocus
-                  style={{width:"100%",padding:"11px 14px",fontSize:22,fontWeight:700,letterSpacing:10,textAlign:"center",border:"1px solid #e5e7eb",borderRadius:10,marginBottom:14,boxSizing:"border-box",outline:"none"}}/>
+                <input type="email" placeholder="Admin Email" value={adminEmail} onChange={e=>setAdminEmail(e.target.value)} autoFocus
+                  style={{width:"100%",padding:"11px 14px",fontSize:14,border:"1px solid #e5e7eb",borderRadius:10,marginBottom:10,boxSizing:"border-box",outline:"none"}}/>
+                <input type="password" placeholder="Password" value={adminPw} onChange={e=>setAdminPw(e.target.value)} onKeyDown={e=>e.key==="Enter"&&doAdminLogin()}
+                  style={{width:"100%",padding:"11px 14px",fontSize:14,border:"1px solid #e5e7eb",borderRadius:10,marginBottom:14,boxSizing:"border-box",outline:"none"}}/>
                 {loginErr&&<div style={{fontSize:12,color:"#ef4444",marginBottom:10}}>{loginErr}</div>}
-                <button onClick={doAdminLogin}
-                  style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer"}}>
-                  Admin Login
+                <button onClick={doAdminLogin} disabled={loginLoading}
+                  style={{width:"100%",padding:"12px",fontSize:14,fontWeight:600,color:"#fff",background:"#1D2B4F",border:"none",borderRadius:10,cursor:"pointer",opacity:loginLoading?0.6:1}}>
+                  {loginLoading?"확인 중…":"Admin Login"}
                 </button>
               </div>
             )}

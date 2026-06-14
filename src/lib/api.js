@@ -1,8 +1,24 @@
 import { API_TIMEOUT_MS, SAVE_HEAVY_ATTEMPTS, SAVE_HEAVY_TIMEOUT_MS, SAVE_LIGHT_TIMEOUT_MS, SB_KEY, SB_URL } from "../config.js";
 import { RATE_TYPES } from "../data/staticData.js";
 
+// ── admin 인증 토큰 (Supabase Auth JWT) — 있으면 anon 키 대신 Authorization에 사용 ──
+// apikey는 항상 anon(SB_KEY). authToken 있으면 RLS가 authenticated(admin)로 인식.
+let authToken = null;
+let refreshHandler = null; // async () => 새 access_token | null  (App1에서 등록)
+export const setAuthToken = (t) => { authToken = t || null; };
+export const setAuthRefreshHandler = (fn) => { refreshHandler = fn; };
+export const getAuthToken = () => authToken;
+const bearer = () => `Bearer ${authToken || SB_KEY}`;
+
+// 401(JWT 만료) 시 refresh 후 1회 재시도 — admin 세션 끊김 방지
+const tryRefresh = async () => {
+  if (!authToken || !refreshHandler) return false;
+  try { const fresh = await refreshHandler(); if (fresh) { authToken = fresh; return true; } } catch (_) {}
+  return false;
+};
+
 const api = async (path, opts = {}) => {
-  const { headers: optHeaders, timeoutMs = API_TIMEOUT_MS, ...rest } = opts;
+  const { headers: optHeaders, timeoutMs = API_TIMEOUT_MS, _retried, ...rest } = opts;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
@@ -11,12 +27,16 @@ const api = async (path, opts = {}) => {
       signal: ctrl.signal,
       headers: {
         apikey: SB_KEY,
-        Authorization: `Bearer ${SB_KEY}`,
+        Authorization: bearer(),
         "Content-Type": "application/json",
         Prefer: "return=representation",
         ...optHeaders,
       },
     });
+    if (r.status === 401 && !_retried && await tryRefresh()) {
+      clearTimeout(timer);
+      return api(path, { ...opts, _retried: true });
+    }
     const t = await r.text();
     if (!r.ok) throw new Error(t || `HTTP ${r.status}`);
     return t ? JSON.parse(t) : [];
@@ -233,7 +253,7 @@ const saveSettingDirect = async (key, value) => {
   const isHeavy = HEAVY_SETTING_KEYS.has(key);
   const attempts = isHeavy ? SAVE_HEAVY_ATTEMPTS : 3;
   const timeoutMs = isHeavy ? SAVE_HEAVY_TIMEOUT_MS : SAVE_LIGHT_TIMEOUT_MS;
-  let lastErr;
+  let lastErr; let refreshed = false;
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 1200 * attempt));
@@ -245,13 +265,14 @@ const saveSettingDirect = async (key, value) => {
         signal: ctrl.signal,
         headers: {
           apikey: SB_KEY,
-          Authorization: `Bearer ${SB_KEY}`,
+          Authorization: bearer(),
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates,return=minimal",
         },
         body: JSON.stringify({ key, value: strVal }),
       });
       clearTimeout(timer);
+      if (res.status === 401 && !refreshed && await tryRefresh()) { refreshed = true; continue; }
       if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
       return;
     } catch (e) {
@@ -280,7 +301,7 @@ const saveSettingValue = async (key, value) => enqueueNetworkWrite(async () => {
   const isHeavy = HEAVY_SETTING_KEYS.has(key);
   const attempts = isHeavy ? SAVE_HEAVY_ATTEMPTS : 3;
   const timeoutMs = isHeavy ? SAVE_HEAVY_TIMEOUT_MS : SAVE_LIGHT_TIMEOUT_MS;
-  let lastErr;
+  let lastErr; let refreshed = false;
 
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 1200 * attempt));
@@ -292,13 +313,14 @@ const saveSettingValue = async (key, value) => enqueueNetworkWrite(async () => {
         signal: ctrl.signal,
         headers: {
           apikey: SB_KEY,
-          Authorization: `Bearer ${SB_KEY}`,
+          Authorization: bearer(),
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates,return=minimal",
         },
         body: JSON.stringify({ key, value: strVal }),
       });
       clearTimeout(timer);
+      if (res.status === 401 && !refreshed && await tryRefresh()) { refreshed = true; continue; }
       if (!res.ok) throw new Error(await res.text() || `HTTP ${res.status}`);
       return;
     } catch (e) {
@@ -317,7 +339,7 @@ const saveSettingValue = async (key, value) => enqueueNetworkWrite(async () => {
 
 const postSettingsRows = async (rows, label) => enqueueNetworkWrite(async () => {
   if (!rows.length) return;
-  let lastErr;
+  let lastErr; let refreshed = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     if (attempt > 0) await new Promise(r => setTimeout(r, 800 * attempt));
     const ctrl = new AbortController();
@@ -328,13 +350,14 @@ const postSettingsRows = async (rows, label) => enqueueNetworkWrite(async () => 
         signal: ctrl.signal,
         headers: {
           apikey: SB_KEY,
-          Authorization: `Bearer ${SB_KEY}`,
+          Authorization: bearer(),
           "Content-Type": "application/json",
           Prefer: "resolution=merge-duplicates,return=minimal",
         },
         body: JSON.stringify(rows),
       });
       clearTimeout(timer);
+      if (res.status === 401 && !refreshed && await tryRefresh()) { refreshed = true; continue; }
       if (!res.ok) throw new Error(await res.text());
       return;
     } catch (e) {
