@@ -20,12 +20,14 @@
             if (m) m.setAttribute("href", "/manifest-staff.json");
             var t = document.getElementById("apple-title");
             if (t) t.setAttribute("content", "YSL Staff");
+            var ai = document.getElementById("apple-icon");
+            if (ai) ai.setAttribute("href", "/icon-staff-192.png");
             document.title = "YSL Agency - Staff";
           }
         } catch (e) {}
       })();
     </script>
-    <link rel="apple-touch-icon" href="/icon-192.png" />
+    <link rel="apple-touch-icon" href="/icon-192.png" id="apple-icon" />
     <meta property="og:title" content="YSL Agency Freight Portal" />
     <meta property="og:description" content="한국-러시아 해상운임 실시간 조회" />
     <meta property="og:image" content="/icon-512.png" />
