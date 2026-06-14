@@ -114,8 +114,9 @@ const RN = [
   ["Hongkong","","","","","","","","","","","","","","","","","","","","","","","",""],
   ["Taichung","","","","","","","","","","","","","","","","","","","","","","","",""],
   ["Incheon","","","","","","","","","","","","","","","","","","","","","","","",""],
+  ["Belawan","","","","","","","","","","","","","","","","","","","","","","","",""],
 ];
-const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN","Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK","Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)","Nhava Sheva":"NHAVA SHEVA","Pasir Gudang":"PASIR GUDANG","Nanjing":"NANJING","Hongkong":"HONGKONG","Taichung":"TAICHUNG","Incheon":"INCHEON"};
+const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN","Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK","Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)","Nhava Sheva":"NHAVA SHEVA","Pasir Gudang":"PASIR GUDANG","Nanjing":"NANJING","Hongkong":"HONGKONG","Taichung":"TAICHUNG","Incheon":"INCHEON","Belawan":"BELAWAN"};
 const DO = {
   mow: { SNK: [1100, 1400], DY: [800, 1400], CK: [950, 1300] },
   spb: { SNK: [700, 1000], DY: null, CK: null },
@@ -336,6 +337,10 @@ const RENTAL_CITY_ALIASES = {
   "NOVOROSSIYSK": "Novorossiysk",
   "NIZHNIY NOVGOROD": "Nizhniy Novgorod",
 };
+// 렌탈 POL 별칭 — 선사 엑셀의 POL 표기 차이를 우리 등록 POL명으로 매칭 (key=normKey, value=등록 rentalPol)
+const RENTAL_POL_ALIASES = {
+  "PORTKLANG": "Port Kelang", // 엑셀 'Port Klang'(e 없음) → 등록명 'Port Kelang'
+};
 const normalizeRentalCityName = (raw) => {
   const s = String(raw ?? "").trim();
   if (!s) return "";
@@ -495,4 +500,4 @@ const countRentalMissingFuture = (rentalRates) => {
   return missing;
 };
 
-export { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, DOC_RC, FR, FURTHER_NOTICE_LABEL, F_TO_R, MONTH_MAP, PM, RATE_TYPES, RC, RC_LABEL, RENTAL_CITY_ALIASES, RENTAL_EXTRA_CITIES, RENTAL_RATE_TYPES, RENT_CITY_ORDER, RN, VALIDITY_KEYS, addDaysToISO, buildDefaultRentalRates, carrierDropValidityKey, compactValidityDatePart, countDropMissingFuture, countOceanMissingFuture, countRentalMissingFuture, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, defaultValiditySlot, formatValidityCompact, formatValidityDate, formatValiditySlotLabel, isValiditySlotExpired, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, mskTodayISO, n, normalizeRentalCityName, normalizeRentalMargins, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, rentalRateLabel, repairValiditySlot, serializeCarrierDropRatesForSave, serializeValidityInfo, syncFromAfterTill, validitySlotDaysLeft };
+export { CARRIER_CALL_PORTS, CN, CN_KR, CRS, DO, DOC, DOC_RC, FR, FURTHER_NOTICE_LABEL, F_TO_R, MONTH_MAP, PM, RATE_TYPES, RC, RC_LABEL, RENTAL_CITY_ALIASES, RENTAL_POL_ALIASES, RENTAL_EXTRA_CITIES, RENTAL_RATE_TYPES, RENT_CITY_ORDER, RN, VALIDITY_KEYS, addDaysToISO, buildDefaultRentalRates, carrierDropValidityKey, compactValidityDatePart, countDropMissingFuture, countOceanMissingFuture, countRentalMissingFuture, defaultCarrierDropMargins, defaultCarrierDropRates, defaultCarrierRates, defaultRentalMargins, defaultValidityInfo, defaultValiditySlot, formatValidityCompact, formatValidityDate, formatValiditySlotLabel, isValiditySlotExpired, mergeCarrierDropMargins, mergeCarrierDropRates, mergeRentalRates, mskTodayISO, n, normalizeRentalCityName, normalizeRentalMargins, normalizeValidityCarrier, normalizeValiditySlot, parseValidityToISO, rentalRateLabel, repairValiditySlot, serializeCarrierDropRatesForSave, serializeValidityInfo, syncFromAfterTill, validitySlotDaysLeft };

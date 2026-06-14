@@ -1,7 +1,7 @@
 // 렌탈 운임 Excel 업로드 — 템플릿 생성·파싱·변경 미리보기·반영
 // 양식: 도착도시(Return City) / AREA / POL / 20' 매입 / 40'DV 매입 / 40'HC 매입
 // 매출은 저장하지 않음 — 셀별 기존 마진으로 화면에서 자동 계산되므로 매입만 갱신한다.
-import { PM, RC_LABEL, RENT_CITY_ORDER, normalizeRentalCityName } from "../data/staticData.js";
+import { PM, RC_LABEL, RENT_CITY_ORDER, RENTAL_POL_ALIASES, normalizeRentalCityName } from "../data/staticData.js";
 import { RENT_COMBO_KEYS, normalizeRentalCityBucket, rentComboMarginType } from "../config.js";
 import { loadXlsx, num } from "./excelParsers.js";
 
@@ -138,6 +138,10 @@ export const parseRentalUploadRows = (rows, rentalRows) => {
   rentalRows.forEach(r => {
     polMap[normKey(r.rentalPol)] = r.rentalPol;
     if (PM[r.rentalPol]) polMap[normKey(PM[r.rentalPol])] = r.rentalPol;
+  });
+  // POL 별칭(엑셀 표기 차이) — 등록 POL로 매칭
+  Object.entries(RENTAL_POL_ALIASES).forEach(([aliasKey, rentalPol]) => {
+    if (rentalRows.some(r => r.rentalPol === rentalPol)) polMap[aliasKey] = rentalPol;
   });
 
   let headerIdx = (rows || []).findIndex(r =>
