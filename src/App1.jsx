@@ -1455,8 +1455,8 @@ export default function App() {
 
   const persistAdminTokens = (d) => {
     try {
-      sessionStorage.setItem(ADMIN_ACCESS_KEY, d.access_token);
-      sessionStorage.setItem(ADMIN_REFRESH_KEY, d.refresh_token);
+      localStorage.setItem(ADMIN_ACCESS_KEY, d.access_token);
+      localStorage.setItem(ADMIN_REFRESH_KEY, d.refresh_token);
     } catch (_) {}
   };
 
@@ -1482,24 +1482,24 @@ export default function App() {
     setClient(null);
     setAuthToken(null);
     rawLoadedRef.current = false;
-    try { sessionStorage.removeItem(ADMIN_ACCESS_KEY); sessionStorage.removeItem(ADMIN_REFRESH_KEY); } catch (_) {}
+    try { localStorage.removeItem(ADMIN_ACCESS_KEY); localStorage.removeItem(ADMIN_REFRESH_KEY); } catch (_) {}
   };
 
   // 마운트: api.js의 401 refresh 핸들러 등록 + 저장된 admin 세션 복원
   useEffect(() => {
     setAuthRefreshHandler(async () => {
-      let rt = null; try { rt = sessionStorage.getItem(ADMIN_REFRESH_KEY); } catch (_) {}
+      let rt = null; try { rt = localStorage.getItem(ADMIN_REFRESH_KEY); } catch (_) {}
       const d = await adminRefreshToken(rt);
       if (!d) return null;
       persistAdminTokens(d);
       return d.access_token;
     });
     (async () => {
-      let rt = null; try { rt = sessionStorage.getItem(ADMIN_REFRESH_KEY); } catch (_) {}
+      let rt = null; try { rt = localStorage.getItem(ADMIN_REFRESH_KEY); } catch (_) {}
       if (!rt) return;
       const d = await adminRefreshToken(rt);
       if (d) { setAuthToken(d.access_token); persistAdminTokens(d); setMode("admin"); }
-      else { try { sessionStorage.removeItem(ADMIN_ACCESS_KEY); sessionStorage.removeItem(ADMIN_REFRESH_KEY); } catch (_) {} }
+      else { try { localStorage.removeItem(ADMIN_ACCESS_KEY); localStorage.removeItem(ADMIN_REFRESH_KEY); } catch (_) {} }
     })();
   }, []);
 
@@ -1507,7 +1507,7 @@ export default function App() {
   useEffect(() => {
     if (!isAdmin) return undefined;
     const id = setInterval(async () => {
-      let rt = null; try { rt = sessionStorage.getItem(ADMIN_REFRESH_KEY); } catch (_) {}
+      let rt = null; try { rt = localStorage.getItem(ADMIN_REFRESH_KEY); } catch (_) {}
       const d = await adminRefreshToken(rt);
       if (d) { setAuthToken(d.access_token); persistAdminTokens(d); }
     }, 45 * 60 * 1000);
