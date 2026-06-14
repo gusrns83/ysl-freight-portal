@@ -4,12 +4,27 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YSL Agency - Freight Rate Portal</title>
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="/manifest.json" id="app-manifest" />
     <meta name="theme-color" content="#1D2B4F" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="YSL Portal" />
+    <meta name="apple-mobile-web-app-title" content="YSL Portal" id="apple-title" />
+    <script>
+      // 스태프 주소(hostname에 'staff')면 설치 앱 이름/매니페스트를 스태프용으로 — 고객/스태프 두 개의 설치 앱 구분
+      (function () {
+        try {
+          var h = (location.hostname || "").toLowerCase();
+          if (h.indexOf("staff") !== -1 || h.indexOf("admin") !== -1) {
+            var m = document.getElementById("app-manifest");
+            if (m) m.setAttribute("href", "/manifest-staff.json");
+            var t = document.getElementById("apple-title");
+            if (t) t.setAttribute("content", "YSL Staff");
+            document.title = "YSL Agency - Staff";
+          }
+        } catch (e) {}
+      })();
+    </script>
     <link rel="apple-touch-icon" href="/icon-192.png" />
     <meta property="og:title" content="YSL Agency Freight Portal" />
     <meta property="og:description" content="한국-러시아 해상운임 실시간 조회" />

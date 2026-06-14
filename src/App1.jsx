@@ -19,6 +19,15 @@ const adminSignIn = async (email, password) => {
   if (!r.ok || !d.access_token) throw new Error(d.error_description || d.msg || d.error || "로그인 실패");
   return d; // { access_token, refresh_token, expires_in, user, ... }
 };
+// 스태프 주소에서만 Admin 로그인 노출 (고객 주소엔 미표시) — 보안은 Auth/RLS가 담당, 이건 화면 구분용
+const STAFF_MODE = (() => {
+  try {
+    const h = (window.location.hostname || "").toLowerCase();
+    const q = new URLSearchParams(window.location.search);
+    return h.includes("staff") || h.includes("admin") || h === "localhost" || q.has("staff");
+  } catch { return false; }
+})();
+
 const adminRefreshToken = async (refresh_token) => {
   if (!refresh_token) return null;
   try {
@@ -5898,12 +5907,14 @@ export default function App() {
               <div><div style={{fontSize:16,fontWeight:700,color:"#111"}}>YSL Agency</div><div style={{fontSize:11,color:"#9ca3af"}}>Login</div></div>
               <button onClick={()=>setShowLoginModal(false)} style={{marginLeft:"auto",fontSize:18,color:"#9ca3af",background:"none",border:"none",cursor:"pointer",lineHeight:1}}>&#10005;</button>
             </div>
-            {/* Tab */}
+            {/* Tab — Admin 탭은 스태프 주소에서만 노출 */}
+            {STAFF_MODE && (
             <div style={{display:"flex",background:"#f3f4f6",borderRadius:10,padding:3,marginBottom:16}}>
               {[["client","Client"],["admin","Admin"]].map(([k,l])=>(
                 <button key={k} onClick={()=>{setLoginTab(k);setLoginErr("");}} style={{flex:1,padding:"7px",fontSize:12,fontWeight:600,borderRadius:8,background:loginTab===k?"#fff":"transparent",border:"none",cursor:"pointer",color:loginTab===k?"#111":"#9ca3af"}}>{l}</button>
               ))}
             </div>
+            )}
             {loginTab==="client" ? (
               <div>
                 <input type="email" placeholder="Email" value={email} onChange={e=>setEmail(e.target.value)}
