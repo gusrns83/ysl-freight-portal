@@ -349,8 +349,9 @@ const normalizeRentalCityName = (raw) => {
   return s.split(/\s+/).map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
 };
 const RENTAL_EXTRA_CITIES = [
-  "Barnaul", "Blagoveshensk", "Krasnodar", "Niznekamsk", "Nizhniy Novgorod", "Novokuznetsk",
-  "Novorossiysk", "Omsk", "Penza", "Perm", "Rostov na Donu", "Ulyanovsk", "Ufa",
+  "Barnaul", "Blagoveshensk", "Cherepovets", "Izhevsk", "Kaliningrad", "Krasnodar",
+  "Niznekamsk", "Nizhniy Novgorod", "Novokuznetsk", "Novorossiysk", "Omsk", "Penza",
+  "Perm", "Rostov na Donu", "Ulyanovsk", "Ufa",
 ];
 const RENT_CITY_ORDER = [
   ...DOC.map(d => DOC_RC[d.k]),
