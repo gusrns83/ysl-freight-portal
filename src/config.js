@@ -11,7 +11,8 @@ const PUBLIC_RATES_KEY = "public_rates_json";
 // 마스터 스위치 — false 면 고객도 기존처럼 raw 로드·렌더(즉시 전면 롤백용). 스냅샷 생성은 유지됨
 const PUBLIC_RATES_ENABLED = true;
 // 스냅샷이 없거나 깨졌을 때 raw(매입 포함)로 폴백할지. 롤아웃 중 true → 검증 후 false(안전모드)
-const PUBLIC_RATES_FALLBACK_RAW = true;
+// 검증 완료(스냅샷 정상·렌탈 유령값 제거 확인) → false: 스냅샷 없으면 raw 안 받음(매입 재노출 원천 차단)
+const PUBLIC_RATES_FALLBACK_RAW = false;
 const DB_OCEAN = "ocean";
 const DB_DROP = "dropoff";
 const DB_RENTAL = "rental";
