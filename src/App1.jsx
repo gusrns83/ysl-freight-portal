@@ -2886,10 +2886,35 @@ export default function App() {
     return ov != null ? ov : row.rates[cr][t];
   };
 
+  // 렌탈 차기(향후) 운임 미정 판정 — 해당 POL의 future 데이터가 비어있음(전환 후 비워진 상태 등)
+  // admin=raw(rentalRates), 고객=스냅샷(publicRates) 소스별로 확인
+  const rentalFutureEmpty = (rPol) => {
+    if (usePublic) {
+      const node = publicRates?.rental?.[rPol];
+      if (!node) return true;
+      const slotHasFuture = (slot) => slot?.future && Object.keys(slot.future).length > 0;
+      const carriers = node.carriers || {};
+      for (const cr of Object.keys(carriers)) {
+        for (const city of Object.keys(carriers[cr] || {})) {
+          if (slotHasFuture(carriers[cr][city])) return false;
+        }
+      }
+      const rent = node.rent || {};
+      for (const city of Object.keys(rent)) {
+        if (slotHasFuture(rent[city])) return false;
+      }
+      return true;
+    }
+    const f = rentalRates[rPol]?.future;
+    return !f || Object.keys(f).length === 0;
+  };
+
   const getRentalBase = (rPol, city, comboIdx, period = ratePeriod) => {
     const p = period === "future" ? "future" : "current";
     // 고객 화면: 만료된 렌탈 운임 비표시
     if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo.RENTAL?.current)) return null;
+    // 차기 운임 미정(future 버킷 비어있음) → 현재값 폴백 금지, 금액 미표시("Further notice")
+    if (p === "future" && rentalFutureEmpty(rPol)) return null;
     const sk = rentComboSk(comboIdx);
     const bucket = normalizeRentalCityBucket(rentalRates[rPol]?.[p]?.[city]);
     if (bucket[sk] === "x") return null; // 명시적 미서비스 — 기본값 fallback 차단
@@ -5610,6 +5635,9 @@ export default function App() {
     const open = exp===`r${idx}`;
     const mow="Moscow";
     const freightPol=row.displayPol||PM[row.pol]||row.pol;
+    // 향후 탭 + 차기 렌탈 운임 미정(future 버킷 비어있음) → 금액 숨기고 "Further notice"(빨강) 표시
+    const rentalFutureNotice = ratePeriod === "future" && rentalFutureEmpty(row.pol);
+    const FNTag = ({compact}) => <span style={{fontSize:compact?10:11,fontWeight:700,color:"#dc2626",whiteSpace:"nowrap"}}>Further notice</span>;
     const d20=rentDetail(row.pol,mow,row,0);
     const d40dv=rentDetail(row.pol,mow,row,1);
     const d40hc=rentDetail(row.pol,mow,row,2);
@@ -5618,15 +5646,15 @@ export default function App() {
         <button onClick={()=>{setExp(open?null:`r${idx}`);setCityOpen(null);}} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 12px 12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
           <div className={isAdmin?"admin-card-top":"route-card-head"}>
             <RouteCardLabel area={row.area} pol={row.displayPol || row.pol}/>
-            {!isAdmin && <GuestRentTriple d20={d20} d40dv={d40dv} d40hc={d40hc}/>}
+            {!isAdmin && (rentalFutureNotice ? <FNTag/> : <GuestRentTriple d20={d20} d40dv={d40dv} d40hc={d40hc}/>)}
             <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none",width:12,textAlign:"center"}}>&#8964;</span>
           </div>
           {isAdmin && (
             <div className="admin-card-prices">
-              <AdminRentTriple d20={d20} d40dv={d40dv} d40hc={d40hc} prefix="MOW" editable
+              {rentalFutureNotice ? <FNTag/> : <AdminRentTriple d20={d20} d40dv={d40dv} d40hc={d40hc} prefix="MOW" editable
                 onCost20={v=>applyRentCityCost(freightPol,"Moscow",0,v)}
                 onCost40dv={v=>applyRentCityCost(freightPol,"Moscow",1,v)}
-                onCost40hc={v=>applyRentCityCost(freightPol,"Moscow",2,v)}/>
+                onCost40hc={v=>applyRentCityCost(freightPol,"Moscow",2,v)}/>}
             </div>
           )}
         </button>
@@ -5652,21 +5680,23 @@ export default function App() {
                   <button onClick={()=>setCityOpen(cOpen?null:key)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 12px",background:cOpen?"#faf5ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
                     <div className={isAdmin?"admin-card-top":"rent-city-row"} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
                       <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{cityLabel}</span>
-                      {!isAdmin && <GuestRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc} rentalSells={cityRentalSells}/>}
+                      {!isAdmin && (rentalFutureNotice ? <FNTag/> : <GuestRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc} rentalSells={cityRentalSells}/>)}
                       <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0,width:12,textAlign:"center"}}>&#8964;</span>
                     </div>
                     {isAdmin && (
                       <div className="admin-card-prices">
-                        <AdminRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc} editable
+                        {rentalFutureNotice ? <FNTag/> : <AdminRentTriple d20={cd20} d40dv={cd40dv} d40hc={cd40hc} editable
                           onCost20={v=>applyRentCityCost(freightPol,city,0,v)}
                           onCost40dv={v=>applyRentCityCost(freightPol,city,1,v)}
-                          onCost40hc={v=>applyRentCityCost(freightPol,city,2,v)}/>
+                          onCost40hc={v=>applyRentCityCost(freightPol,city,2,v)}/>}
                       </div>
                     )}
                   </button>
                   {cOpen && (
                     <div style={{background:"#faf5ff",borderBottom:"1px solid #ede9fe"}}>
-                      {isAdmin ? (
+                      {rentalFutureNotice ? (
+                        <div style={{padding:"12px 24px"}}><FNTag/></div>
+                      ) : isAdmin ? (
                         carriers.length===0
                           ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No SOC data</div>
                           : carriers.map(c=>{
