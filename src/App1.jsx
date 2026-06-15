@@ -2867,6 +2867,35 @@ export default function App() {
     sell: sell ?? null,
     cr,
   });
+  // 해상/드롭 차기(향후) 운임 미정 판정 — admin=raw, 고객=스냅샷 소스별
+  const oceanCarrierFutureEmpty = (pol, cr) => {
+    if (usePublic) {
+      const f = publicRates?.ocean?.[pol]?.[cr]?.future;
+      return !f || Object.keys(f).length === 0;
+    }
+    const TS = ["coc20", "coc40", "soc20", "soc40"];
+    const ov = polCostO[pol]?.carrier?.[cr]?.future;
+    if (ov && TS.some(t => ov[t] != null && ov[t] !== "")) return false;
+    const g = carrierRates[cr]?.future;
+    if (g && TS.some(t => g[t] != null && g[t] !== "")) return false;
+    return true;
+  };
+  const oceanFutureEmpty = (pol) => CRS.every(cr => oceanCarrierFutureEmpty(pol, cr));
+  const dropCarrierFutureEmpty = (pol, cr) => {
+    if (usePublic) {
+      const node = publicRates?.drop?.[pol]?.[cr];
+      if (!node) return true;
+      for (const city of Object.keys(node)) {
+        const f = node[city]?.future;
+        if (f && Object.keys(f).length) return false;
+      }
+      return true;
+    }
+    const f = carrierDropRates[cr]?.future;
+    return !f || Object.keys(f).length === 0;
+  };
+  const dropFutureEmpty = (pol) => CRS.every(cr => dropCarrierFutureEmpty(pol, cr));
+
   const getCarrierCostOverride = (pol, cr, t, period) => {
     const c = polCostO[pol]?.carrier?.[cr];
     if (c?.[period]?.[t] != null && c[period][t] !== "") return c[period][t];
@@ -2882,6 +2911,8 @@ export default function App() {
     if (usePublic) return pubOcean(row.pol, cr, t, p);
     // 고객 화면: validity 종료일이 지난(만료) 현재 운임은 비표시
     if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo[cr]?.current)) return null;
+    // 차기 운임 미정(future 데이터 없음) → 정적 운임표(row.rates) 폴백 금지, 금액 미표시("Further notice")
+    if (p === "future" && oceanCarrierFutureEmpty(row.pol, cr)) return null;
     const ov = getCarrierCostOverride(row.pol, cr, t, p);
     return ov != null ? ov : row.rates[cr][t];
   };
@@ -3030,6 +3061,11 @@ export default function App() {
     const p = period === "future" ? "future" : period === "current" ? "current" : ratePeriod;
     // 고객 화면: 만료된 Drop off 운임 비표시
     if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo[carrierDropValidityKey(cr)]?.current)) return null;
+    // 차기 Drop off 미정(future 데이터 없음) → 정적 DO 기본값 폴백 금지
+    if (p === "future") {
+      const fut = carrierDropRates[cr]?.future;
+      if (!fut || Object.keys(fut).length === 0) return null;
+    }
     const sk = sz(si);
     const stored = carrierDropRates[cr]?.[p]?.[cityKey]?.[sk];
     if (stored != null && stored !== "") return Number(stored);
@@ -5412,9 +5448,13 @@ export default function App() {
   }
 
   // ── CARDS ──
+  // 차기 운임 미정 표시 태그 (해상/드롭/렌탈 공용)
+  const FNTag = ({compact}) => <span style={{fontSize:compact?10:11,fontWeight:700,color:"#dc2626",whiteSpace:"nowrap"}}>Further notice</span>;
+
   const OCard = ({row,idx}) => {
     const types = ctype==="coc"?["coc20","coc40"]:["soc20","soc40"];
     const open = exp===`o${idx}`;
+    const oceanFNotice = ratePeriod === "future" && oceanFutureEmpty(row.pol);
     const d20=oceanDetail(row,types[0]),d40=oceanDetail(row,types[1]);
     const t20=types[0],t40=types[1];
     return (
@@ -5422,14 +5462,14 @@ export default function App() {
         <button onClick={()=>setExp(open?null:`o${idx}`)} className={isAdmin?"admin-card-btn":"route-card-btn"} style={{width:"100%",display:"flex",alignItems:"center",justifyContent:"space-between",padding:isAdmin?"10px 12px":"12px 16px",background:"none",border:"none",cursor:"pointer",textAlign:"left",gap:8}}>
           <div className={isAdmin?"admin-card-top":"route-card-head"}>
             <RouteCardLabel area={row.area} pol={row.pol}/>
-            {!isAdmin && <GuestPricePair d20={d20} d40={d40}/>}
+            {!isAdmin && (oceanFNotice ? <FNTag/> : <GuestPricePair d20={d20} d40={d40}/>)}
             <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
           </div>
           {isAdmin && (
             <div className="admin-card-prices">
-              <AdminPriceCols d20={d20} d40={d40} editable
+              {oceanFNotice ? <FNTag/> : <AdminPriceCols d20={d20} d40={d40} editable
                 onCost20={v=>d20.cr&&applyCarrierRate(row.pol,d20.cr,t20,v)}
-                onCost40={v=>d40.cr&&applyCarrierRate(row.pol,d40.cr,t40,v)}/>
+                onCost40={v=>d40.cr&&applyCarrierRate(row.pol,d40.cr,t40,v)}/>}
             </div>
           )}
         </button>
@@ -5467,6 +5507,8 @@ export default function App() {
                     </div>
                   ); })}
               </div>
+            ) : oceanFNotice ? (
+              <div style={{padding:"14px 0 4px"}}><FNTag/></div>
             ) : (
             <table className="carrier-validity-table" style={{marginTop:12,fontSize:12}}>
               <colgroup>
@@ -5510,6 +5552,7 @@ export default function App() {
   const DOCrd = ({row,idx}) => {
     const open = exp===`d${idx}`;
     const doTypes=["coc20","coc40"];
+    const dropFNotice = ratePeriod === "future" && dropFutureEmpty(row.pol);
     const d20=doDetail(row,"mow",0),d40=doDetail(row,"mow",1);
     return (
       <div style={{border:"1px solid #e5e7eb",borderRadius:10,marginBottom:8,background:"#fff",overflow:"hidden"}}>
@@ -5517,14 +5560,14 @@ export default function App() {
           <div className={isAdmin?"admin-card-top":"route-card-head"}>
             <RouteCardLabel area={row.area} pol={row.pol}/>
             <span style={{fontSize:10,fontWeight:700,color:"#fff",background:"#2563eb",padding:"2px 8px",borderRadius:4,flexShrink:0}}>MOW</span>
-            {!isAdmin && d20.sell!=null && <GuestPricePair d20={d20} d40={d40}/>}
+            {!isAdmin && (dropFNotice ? <FNTag/> : (d20.sell!=null && <GuestPricePair d20={d20} d40={d40}/>))}
             <span className="route-card-chevron" style={{transform:open?"rotate(180deg)":"none"}}>&#8964;</span>
           </div>
           {isAdmin && (
             <div className="admin-card-prices">
-              <AdminPriceCols d20={d20} d40={d40} prefix="MOW" editable
+              {dropFNotice ? <FNTag/> : <AdminPriceCols d20={d20} d40={d40} prefix="MOW" editable
                 onCost20={v=>applyDropCityCost(row.pol,"mow",0,v)}
-                onCost40={v=>applyDropCityCost(row.pol,"mow",1,v)}/>
+                onCost40={v=>applyDropCityCost(row.pol,"mow",1,v)}/>}
             </div>
           )}
         </button>
@@ -5551,20 +5594,22 @@ export default function App() {
                   <button onClick={()=>setDoCityOpen(cOpen?null:cityKey)} className={isAdmin?"admin-card-btn":""} style={{width:"100%",display:"flex",alignItems:"center",padding:"7px 12px",background:cOpen?"#f0f9ff":"none",border:"none",borderBottom:"1px solid #f9fafb",cursor:"pointer",textAlign:"left",gap:6}}>
                     <div className={isAdmin?"admin-card-top":undefined} style={isAdmin?undefined:{display:"flex",alignItems:"center",width:"100%",gap:8}}>
                       <span style={{flex:1,fontSize:12,fontWeight:600,color:"#374151",minWidth:0}}>{l}</span>
-                      {!isAdmin && <GuestPricePair d20={cd20} d40={cd40}/>}
+                      {!isAdmin && (dropFNotice ? <FNTag compact/> : <GuestPricePair d20={cd20} d40={cd40}/>)}
                       <span style={{fontSize:12,color:"#9ca3af",transform:cOpen?"rotate(180deg)":"none",display:"inline-block",flexShrink:0}}>&#8964;</span>
                     </div>
                     {isAdmin && (
                       <div className="admin-card-prices">
-                        <AdminPriceCols d20={cd20} d40={cd40} editable
+                        {dropFNotice ? <FNTag compact/> : <AdminPriceCols d20={cd20} d40={cd40} editable
                           onCost20={v=>applyDropCityCost(row.pol,k,0,v)}
-                          onCost40={v=>applyDropCityCost(row.pol,k,1,v)}/>
+                          onCost40={v=>applyDropCityCost(row.pol,k,1,v)}/>}
                       </div>
                     )}
                   </button>
                   {cOpen && (
                     <div style={{background:"#f0f9ff",borderBottom:"1px solid #bae6fd"}}>
-                      {isAdmin ? (
+                      {dropFNotice && !isAdmin ? (
+                        <div style={{padding:"10px 24px"}}><FNTag/></div>
+                      ) : isAdmin ? (
                         carrierRows.length===0
                           ? <div style={{padding:"8px 24px",fontSize:11,color:"#9ca3af",fontStyle:"italic"}}>No service</div>
                           : carrierRows.map(({cr,cdC20,cdC40,fdC20,fdC40})=>(
@@ -5637,7 +5682,6 @@ export default function App() {
     const freightPol=row.displayPol||PM[row.pol]||row.pol;
     // 향후 탭 + 차기 렌탈 운임 미정(future 버킷 비어있음) → 금액 숨기고 "Further notice"(빨강) 표시
     const rentalFutureNotice = ratePeriod === "future" && rentalFutureEmpty(row.pol);
-    const FNTag = ({compact}) => <span style={{fontSize:compact?10:11,fontWeight:700,color:"#dc2626",whiteSpace:"nowrap"}}>Further notice</span>;
     const d20=rentDetail(row.pol,mow,row,0);
     const d40dv=rentDetail(row.pol,mow,row,1);
     const d40hc=rentDetail(row.pol,mow,row,2);
