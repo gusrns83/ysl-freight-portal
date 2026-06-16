@@ -95,33 +95,13 @@ function QuoteRequestModal({ info, onClose }) {
         comment: comment.trim(),
       };
 
-      const insertRow = {
-        customer_email: payload.customerEmail,
-        container_qty: payload.containerQty || null,
-        cargo_name: payload.cargoName || null,
-        target_rate: payload.targetRate || null,
-        pol: payload.pol || null,
-        pod: payload.pod || null,
-        carrier: payload.carrier || null,
-        rate_type: payload.rateType || null,
-        current_rate: payload.currentRate || null,
-        etd_from: etdFrom || null,
-        etd_to: etdTo || null,
-        comment: payload.comment || null,
-      };
-
-      const [, fnRes] = await Promise.all([
-        api("quote_requests", {
-          method: "POST",
-          body: JSON.stringify([insertRow]),
-          headers: { Prefer: "return=minimal" },
-        }),
-        fetch(QUOTE_FN_URL, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        }).then(r => r.json()),
-      ]);
+      // quote_requests 저장은 Edge Function이 service_role 로 수행(검증·레이트리밋 후).
+      // 클라이언트의 anon 직접 INSERT 제거 — 봇 대량 INSERT 차단.
+      const fnRes = await fetch(QUOTE_FN_URL, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }).then(r => r.json());
 
       if (fnRes && (fnRes.id || fnRes.error == null && fnRes.statusCode == null)) {
         setStatus({ type: "ok", msg: "Your quote request has been received. Our team will contact you shortly." });
