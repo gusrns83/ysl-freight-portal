@@ -54,6 +54,31 @@ async function fetchStaffEmails(): Promise<string[]> {
   } catch { return []; }
 }
 
+// 견적 요청을 quote_requests 에 service_role 로 저장 (anon 직접 INSERT 차단 대체)
+async function insertQuote(f: Record<string, string>, customerEmail: string): Promise<void> {
+  try {
+    if (!SB_URL || !SB_SERVICE_KEY) return;
+    await fetch(`${SB_URL}/rest/v1/quote_requests`, {
+      method: "POST",
+      headers: { ...sbHeaders, Prefer: "return=minimal" },
+      body: JSON.stringify({
+        customer_email: customerEmail,
+        container_qty: f.containerQty || null,
+        cargo_name: f.cargoName || null,
+        target_rate: f.targetRate || null,
+        pol: f.pol || null,
+        pod: f.pod || null,
+        carrier: f.carrier || null,
+        rate_type: f.rateType || null,
+        current_rate: f.currentRate || null,
+        etd_from: f.etdFrom || null,
+        etd_to: f.etdTo || null,
+        comment: f.comment || null,
+      }),
+    });
+  } catch { /* 저장 실패해도 메일 발송은 진행 */ }
+}
+
 // IP 레이트리밋 — 윈도 내 건수 초과 시 true(차단). service_role 없으면 fail-open(스킵).
 async function isRateLimited(ip: string): Promise<boolean> {
   try {
@@ -93,7 +118,7 @@ serve(async (req) => {
     if (!isEmail(customerEmail)) return new Response(JSON.stringify({ error: "invalid email" }), { status: 400, headers: { ...cors, "Content-Type": "application/json" } });
     const f = {
       pol: clean(body.pol, 80), pod: clean(body.pod, 80), carrier: clean(body.carrier, 60),
-      rateType: clean(body.rateType, 60), currentRate: clean(body.currentRate, 60),
+      rateType: clean(body.rateType, 120), currentRate: clean(body.currentRate, 60),
       containerQty: clean(body.containerQty, 60), cargoName: clean(body.cargoName, 200),
       targetRate: clean(body.targetRate, 60), comment: clean(body.comment, 2000),
       etdFrom: clean(body.etdFrom, 40), etdTo: clean(body.etdTo, 40),
@@ -104,6 +129,9 @@ serve(async (req) => {
     if (await isRateLimited(ip)) {
       return new Response(JSON.stringify({ error: "too many requests", retryAfterMin: RATE_WINDOW_MS / 60000 }), { status: 429, headers: { ...cors, "Content-Type": "application/json" } });
     }
+
+    // 견적 요청을 DB에 저장 (anon 직접 INSERT 대신 service_role 로 — 검증·레이트리밋 통과분만)
+    await insertQuote(f, customerEmail);
 
     const fmtEtd = (v: string) => {
       if (!v) return "";
