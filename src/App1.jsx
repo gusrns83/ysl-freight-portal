@@ -422,6 +422,8 @@ export default function App() {
   const [settingsLoaded, setSettingsLoaded] = useState(() => !!pricingBoot);
   // 고객용 매출 스냅샷 (public_rates_json) — 비admin은 raw 대신 이걸로 렌더 (매입·마진 미수신)
   const [publicRates, setPublicRates] = useState(null);
+  // 고객: 스냅샷 로드 완료 여부 — 완료 전엔 정적 옛값 대신 로딩 표시(깜빡임 방지)
+  const [guestSnapReady, setGuestSnapReady] = useState(false);
   const [margins, setMargins] = useState(() => pricingBoot?.margins ?? { ...DEFAULT_MARGINS });
   const [marginTs, setMarginTs] = useState(() => pricingBoot?.marginTs ?? Object.fromEntries(RATE_TYPES.map(t => [t, marginNowTs()])));
   const [areaM, setAreaM] = useState(() => pricingBoot?.areaM ?? {});
@@ -2722,10 +2724,12 @@ export default function App() {
         skipAutoSaveRef.current = false;
         // 스냅샷 없음 + fallback 허용 → raw 로드 (롤아웃 중 화면 정상)
         if (!snap && PUBLIC_RATES_FALLBACK_RAW) await loadRawPricing();
+        setGuestSnapReady(true);
       } catch (err) {
         console.error("public rates load failed", err);
         if (PUBLIC_RATES_FALLBACK_RAW) { try { await loadRawPricing(); } catch (e2) {} }
         setSettingsLoaded(true);
+        setGuestSnapReady(true);
       }
     };
     loadGuest();
@@ -5845,7 +5849,7 @@ export default function App() {
       <>
       {/* CONTENT */}
       <div style={{maxWidth:640,margin:"12px auto",padding:"0 16px 24px"}}>
-        {!settingsLoaded ? (
+        {(!settingsLoaded || (!isAdmin && PUBLIC_RATES_ENABLED && !guestSnapReady)) ? (
           <RatesLoading />
         ) : (
           <>
