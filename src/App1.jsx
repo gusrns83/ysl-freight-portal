@@ -3501,13 +3501,13 @@ export default function App() {
       ? crypto.randomUUID()
       : `rental-${Date.now()}`;
     const historyRows = changes.map(c => {
-      const { fp, area, margin } = rentalUploadMargin(c.pol, c.type);
+      const { fp, area } = rentalUploadMargin(c.pol, c.type);
       return {
         batch_id: batchId, carrier: "RENTAL", area, pol: fp, route: `${fp} > ${c.city}`,
         rate_type: c.type, period, category: "rental",
         cost: c.remove ? null : c.next,
-        sell: c.remove ? null : c.next + margin,
-        margin: c.remove ? null : margin,
+        sell: c.remove ? null : c.next,
+        margin: c.remove ? null : 0,
         source: "excel-upload",
         note: c.remove
           ? `Excel 업로드 (${fileName}): ${c.old} → 미서비스(x) 삭제`
@@ -4608,7 +4608,7 @@ export default function App() {
               <button onClick={()=>{setShowRentalAdmin(false);setRentalAdminTab("grid");}} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
               <div style={{textAlign:"center"}}>
                 <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
-                <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>Excel 업로드 · 매입만 갱신 · 마진 유지 → 매출 자동 계산</div>
+                <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>Excel 업로드 · 업로드값이 곧 고객 매출 (자동 마진 없음)</div>
               </div>
               <div style={{width:48}}/>
             </div>
@@ -4690,13 +4690,12 @@ export default function App() {
                         <th style={{padding:"4px 8px"}}>사이즈</th>
                         <th style={{padding:"4px 8px",textAlign:"right"}}>기존 매입</th>
                         <th style={{padding:"4px 8px",textAlign:"right"}}>새 매입</th>
-                        <th style={{padding:"4px 8px",textAlign:"right"}}>새 매출 (마진 유지)</th>
+                        <th style={{padding:"4px 8px",textAlign:"right"}}>새 매출 (= 매입, 마진 없음)</th>
                         <th style={{padding:"4px 8px"}}>경고</th>
                       </tr>
                     </thead>
                     <tbody>
                       {upChanges.map((c, i) => {
-                        const { margin } = rentalUploadMargin(c.pol, c.type);
                         const warn = c.bigJump || c.inverted;
                         const pct = !c.remove && c.old ? Math.round((c.next - c.old) / c.old * 100) : null;
                         return (
@@ -4706,7 +4705,7 @@ export default function App() {
                             <td style={{padding:"4px 8px"}}>{c.sk === "c20" ? "20'" : c.sk === "c40dv" ? "40'DV" : "40'HC"}</td>
                             <td style={{padding:"4px 8px",textAlign:"right",color:"#9ca3af"}}>{c.old != null ? n(c.old) : "—"}</td>
                             <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:c.remove?"#9a3412":"#1d4ed8"}}>{c.remove ? "미서비스(x)" : n(c.next)}</td>
-                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:"#047857"}}>{c.remove ? "—" : <>{n(c.next + margin)} <span style={{fontWeight:400,color:"#9ca3af"}}>(+{n(margin)})</span></>}</td>
+                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:"#047857"}}>{c.remove ? "—" : n(c.next)}</td>
                             <td style={{padding:"4px 8px",fontSize:10,color:c.remove?"#9a3412":"#b91c1c",fontWeight:700}}>
                               {c.remove ? "🗑 삭제" : <>{c.bigJump ? `±30%↑ (${pct > 0 ? "+" : ""}${pct}%)` : ""}{c.bigJump && c.inverted ? " · " : ""}{c.inverted ? "20'>40'DV" : ""}</>}
                             </td>
