@@ -2883,7 +2883,10 @@ export default function App() {
     // 차기 운임 미정(future 데이터 없음) → 정적 운임표(row.rates) 폴백 금지, 금액 미표시("Further notice")
     if (p === "future" && oceanCarrierFutureEmpty(row.pol, cr)) return null;
     const ov = getCarrierCostOverride(row.pol, cr, t, p);
-    return ov != null ? ov : row.rates[cr][t];
+    if (ov != null) return ov;
+    // 업로드(override)·관리 운임이 없는 선사는 내장 정적표(row.rates) 폴백 금지.
+    // admin 편집 그리드에서만 시드값 노출, 고객 화면엔 미표시(업로드한 선사만 노출).
+    return isAdmin ? row.rates[cr][t] : null;
   };
 
   // 렌탈 차기(향후) 운임 미정 판정 — 해당 POL의 future 데이터가 비어있음(전환 후 비워진 상태 등)
@@ -3379,7 +3382,8 @@ export default function App() {
         periods.forEach(p => {
           if (p === "current" && curExpired(cr)) { /* 해상 만료 → 스냅샷 제외 */ } else {
             RATE_TYPES.forEach(t => {
-              const cost = getCarrierRate(row, cr, t, p);
+              // 업로드·관리 운임이 있는 선사만 스냅샷에 포함 — 내장 정적표(row.rates) 폴백 제외
+              const cost = getCarrierCostOverride(row.pol, cr, t, p);
               if (cost == null) return;
               const sell = getGuestCarrierSell(row.pol, cr, t, p, cost, row.area);
               if (sell == null) return;
