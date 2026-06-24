@@ -17,6 +17,7 @@ const FR = [
   ["N.CHINA","LIANYUNGANG",null,null,null,null,1400,1850,1250,1650,1650,2200,1400,1850],
   ["N.CHINA","YANTAI",null,null,null,null,1350,1800,1250,1650,null,null,null,null],
   ["N.CHINA","CHONGQING",1900,2550,1850,2450,null,null,null,null,null,null,null,null],
+  ["N.CHINA","WUHAN",1700,2300,1650,2200,null,null,null,null,null,null,null,null],
   ["S.CHINA","SHEKOU",1350,1800,1300,1650,1450,1900,1350,1750,1470,2000,1420,1950],
   ["S.CHINA","XIAMEN",1350,1800,1300,1650,1450,1900,1350,1750,1470,2000,1420,1850],
   ["S.CHINA","NANSHA",1350,1800,1300,1700,1500,2000,1400,1850,1750,2400,1550,2200],
@@ -116,7 +117,7 @@ const RN = [
   ["Incheon","","","","","","","","","","","","","","","","","","","","","","","",""],
   ["Belawan","","","","","","","","","","","","","","","","","","","","","","","",""],
 ];
-const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN","Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK","Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)","Nhava Sheva":"NHAVA SHEVA","Pasir Gudang":"PASIR GUDANG","Nanjing":"NANJING","Hongkong":"HONGKONG","Taichung":"TAICHUNG","Incheon":"INCHEON","Belawan":"BELAWAN"};
+const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN","Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING","Wuhan":"WUHAN","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK","Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)","Nhava Sheva":"NHAVA SHEVA","Pasir Gudang":"PASIR GUDANG","Nanjing":"NANJING","Hongkong":"HONGKONG","Taichung":"TAICHUNG","Incheon":"INCHEON","Belawan":"BELAWAN"};
 const DO = {
   mow: { SNK: [1100, 1400], DY: [800, 1400], CK: [950, 1300] },
   spb: { SNK: [700, 1000], DY: null, CK: null },
