@@ -1052,11 +1052,7 @@ export default function App() {
       } else if (parsed.format === "DY") {
         // 교체방식: 업로드 전 해당 선사+기간 라이브 값 제거 → 엑셀 빈칸=삭제 (byValidity 아카이브는 보존)
         nextCosts = mergePolCostsUploadByValidity(clearPolCostsCarrierPeriod(baseCosts, "DY", period), parsed.oceanRows, parsed.sellRows, "DY", period, excelValidityDraft);
-        nextCosts = backfillPolCostSells(nextCosts, {
-          polM: pricingSaveRef.current.polM ?? polM,
-          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
-          margins: pricingSaveRef.current.margins ?? margins,
-        }).polCostO;
+        // 자동 마진 backfill 제거 — 업로드한 매출(SELL)만 저장
         const nextDrop = buildDyDropRates(
           JSON.stringify(carrierDropRates),
           parsed.oceanRows,
@@ -1076,11 +1072,7 @@ export default function App() {
         const netRows = parsed.netRows || {};
         // 교체방식: 업로드 전 해당 선사+기간 라이브 값 제거 → 엑셀 빈칸=삭제 (byValidity 아카이브는 보존)
         nextCosts = mergePolCostsUploadByValidity(clearPolCostsCarrierPeriod(baseCosts, cr, period), netRows, parsed.sellRows || {}, cr, period, excelValidityDraft);
-        nextCosts = backfillPolCostSells(nextCosts, {
-          polM: pricingSaveRef.current.polM ?? polM,
-          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
-          margins: pricingSaveRef.current.margins ?? margins,
-        }).polCostO;
+        // 자동 마진 backfill 제거 — 업로드한 매출(SELL)만 저장
         setPolCostO(nextCosts);
         await saveSettingDirect("pol_costs", serializeOceanPolCosts(nextCosts));
         await saveSettingDirect("pol_portal_overrides_json", JSON.stringify(extractPortalOverrides(nextCosts)));
@@ -1560,23 +1552,14 @@ export default function App() {
   /** 선사 Admin 단가표: sell 저장값 → POL 마진 → 동일 POL 마진(형제 타입) */
   const getCarrierAdminSell = (pol, cr, type, period, cost) => {
     if (cost == null) return null;
-    const explicit = resolveCarrierExplicitSell(polCostO, pol, cr, type, period);
-    if (explicit != null) return explicit;
-    const polMargin = getPolStoredMargin(pol, type, period, polM, polMFuture);
-    if (polMargin != null) return cost + polMargin;
-    const sibling = polCostSiblingMargin(polCostO, pol, cr, period, type);
-    if (sibling != null) return cost + sibling;
-    return null;
+    // 자동 마진 제거: 업로드한 매출(SELL)만 사용, 없으면 null(—). POL/sibling 마진 가산 안 함.
+    return resolveCarrierExplicitSell(polCostO, pol, cr, type, period);
   };
 
-  /** 게스트·포털: sell 저장값 → POL 마진 → getM() 전체 마진 */
+  /** 게스트·포털: 업로드한 매출(SELL)만 노출 — 자동 마진 가산 없음 */
   const getGuestCarrierSell = (pol, cr, type, period, cost, area) => {
     if (usePublic) return pubOcean(pol, cr, type, period);
-    return resolveCarrierEffectiveSell(polCostO, pol, cr, type, period, cost, {
-      polM,
-      polMFuture,
-      fullMargin: getM(pol, area, type, period),
-    });
+    return resolveCarrierExplicitSell(polCostO, pol, cr, type, period);
   };
 
   const applyBuyingGriBulk = (deltas, rows, carrier, period) => {
@@ -1978,20 +1961,8 @@ export default function App() {
   };
 
   const getRentalM = (pol, area, type) => {
-    const types = (type === "r40dv" || type === "r40hc") ? [type, "r40"] : [type];
-    const candidates = [];
-    types.forEach(t => {
-      candidates.push({ value: marginNum(rentalMargins[t]), ts: rentalMarginTs[t] ?? 0 });
-      const areaVal = rentalAreaM[area]?.[t];
-      if (areaVal != null && areaVal !== "") {
-        candidates.push({ value: marginNum(areaVal), ts: rentalAreaTs[area]?.[t] ?? 0 });
-      }
-      const polVal = rentalPolM[pol]?.[t];
-      if (polVal != null && polVal !== "") {
-        candidates.push({ value: marginNum(polVal), ts: rentalPolTs[pol]?.[t] ?? 0 });
-      }
-    });
-    return pickLatestMargin(candidates);
+    // 자동 마진 제거 — 렌탈 매출은 업로드(저장)한 값 그대로 사용 (마진 0)
+    return 0;
   };
 
   const applyRentalPolMargin = (pol, type, value) => {
@@ -2936,12 +2907,8 @@ export default function App() {
   // 렌탈 매출가(렌탈 매입 + 렌탈 마진) — 고객 노출용. 매입가 자체는 절대 반환하지 않음
   const getRentalSell = (rPol, city, comboIdx, period = ratePeriod) => {
     if (usePublic) return pubRentSub(rPol, city, comboIdx === 0 ? "c20" : comboIdx === 1 ? "c40dv" : "c40hc", period);
-    const base = getRentalBase(rPol, city, comboIdx, period);
-    if (base == null) return null;
-    const fp = PM[rPol] || rPol;
-    const area = fMap[fp]?.area;
-    if (!area) return null;
-    return base + getRentalM(fp, area, rentComboMarginType(comboIdx));
+    // 자동 마진 제거: 업로드한 렌탈 매출 그대로 노출
+    return getRentalBase(rPol, city, comboIdx, period);
   };
 
   const applyRentalRate = (rPol, city, comboIdx, value, period = "current") => {
@@ -3142,9 +3109,8 @@ export default function App() {
   };
 
   const getRentSellMargin = (freightPol, rPol, area, comboIdx) => {
-    const fp = PM[rPol] || freightPol;
-    if (!fp || !area) return 0;
-    return getM(fp, area, rentSocType(comboIdx), ratePeriod) + getRentalM(fp, area, rentComboMarginType(comboIdx));
+    // 자동 마진 제거 — 렌탈 매출은 업로드값 그대로 (마진 0)
+    return 0;
   };
 
   const applyRentCityCost = (freightPol, city, comboIdx, value) => {
@@ -3241,18 +3207,16 @@ export default function App() {
       const cost40hc = s40 != null && rentals[2] != null ? s40 + rentals[2] : null;
       const socSell20 = s20 != null ? getGuestCarrierSell(fp, k, "soc20", period, s20, fr.area) : null;
       const socSell40 = s40 != null ? getGuestCarrierSell(fp, k, "soc40", period, s40, fr.area) : null;
-      const rentM20 = getRentalM(fp, fr.area, "r20");
-      const rentM40dv = getRentalM(fp, fr.area, "r40dv");
-      const rentM40hc = getRentalM(fp, fr.area, "r40hc");
-      const rentSell20 = rentals[0] != null ? rentals[0] + rentM20 : null;
-      const rentSell40dv = rentals[1] != null ? rentals[1] + rentM40dv : null;
-      const rentSell40hc = rentals[2] != null ? rentals[2] + rentM40hc : null;
+      // 자동 마진 제거: 렌탈 매출 = 업로드값 그대로 (마진 가산 없음)
+      const rentSell20 = rentals[0];
+      const rentSell40dv = rentals[1];
+      const rentSell40hc = rentals[2];
       const t20 = socSell20 != null && rentSell20 != null ? socSell20 + rentSell20 : null;
       const t40dv = socSell40 != null && rentSell40dv != null ? socSell40 + rentSell40dv : null;
       const t40hc = socSell40 != null && rentSell40hc != null ? socSell40 + rentSell40hc : null;
-      const m20 = cost20 != null && t20 != null ? t20 - cost20 : rentM20 + getM(fp, fr.area, "soc20", period);
-      const m40dv = cost40dv != null && t40dv != null ? t40dv - cost40dv : rentM40dv + getM(fp, fr.area, "soc40", period);
-      const m40hc = cost40hc != null && t40hc != null ? t40hc - cost40hc : rentM40hc + getM(fp, fr.area, "soc40", period);
+      const m20 = cost20 != null && t20 != null ? t20 - cost20 : null;
+      const m40dv = cost40dv != null && t40dv != null ? t40dv - cost40dv : null;
+      const m40hc = cost40hc != null && t40hc != null ? t40hc - cost40hc : null;
       return {
         k,
         cost20, cost40dv, cost40hc,
@@ -3291,15 +3255,13 @@ export default function App() {
       const rental = getRentalBase(rPol, city, comboIdx);
       if (isAdmin) {
         const socSell = soc != null ? getCarrierAdminSell(freightPol, b.cr, t, ratePeriod, soc) : null;
-        const totalSell = socSell != null && rental != null
-          ? socSell + rental + getRentalM(freightPol, fr.area, rt)
-          : null;
+        // 자동 마진 제거: 합계 = SOC 매출 + 렌탈 매출(업로드값), 마진 가산 없음
+        const totalSell = socSell != null && rental != null ? socSell + rental : null;
         return mkAdminPrice(cost, totalSell, b.cr);
       }
       const socSell = soc != null ? getGuestCarrierSell(freightPol, b.cr, t, ratePeriod, soc, fr.area) : null;
-      const totalSell = socSell != null && rental != null
-        ? socSell + rental + getRentalM(freightPol, fr.area, rt)
-        : null;
+      // 자동 마진 제거: 합계 = SOC 매출 + 렌탈 매출(업로드값), 마진 가산 없음
+      const totalSell = socSell != null && rental != null ? socSell + rental : null;
       return mkPrice(cost, totalSell != null && cost != null ? totalSell - cost : null, b.cr);
     }
     // 매출 산정에 필요한 freight/area 컨텍스트가 없으면, 고객에겐 매입가를 노출하지 말고 "—" 처리
@@ -5654,9 +5616,9 @@ export default function App() {
                           const cdC40hc=mkPrice(c.cost40hc,c.m40hc,c.k);
                           const socC20=mkAdminPrice(c.soc20, c.soc20 != null ? getCarrierAdminSell(fp,c.k,"soc20",ratePeriod,c.soc20) : null, c.k);
                           const socC40=mkAdminPrice(c.soc40, c.soc40 != null ? getCarrierAdminSell(fp,c.k,"soc40",ratePeriod,c.soc40) : null, c.k);
-                          const rentC20=mkPrice(c.rent20,getRentalM(fp,fr.area,"r20"),c.k);
-                          const rentC40dv=mkPrice(c.rent40dv,getRentalM(fp,fr.area,"r40dv"),c.k);
-                          const rentC40hc=mkPrice(c.rent40hc,getRentalM(fp,fr.area,"r40hc"),c.k);
+                          const rentC20=mkPrice(c.rent20,0,c.k);
+                          const rentC40dv=mkPrice(c.rent40dv,0,c.k);
+                          const rentC40hc=mkPrice(c.rent40hc,0,c.k);
                           return (
                           <div key={c.k} style={{padding:"8px 12px 8px 20px",borderBottom:"1px solid #ede9fe"}}>
                             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>

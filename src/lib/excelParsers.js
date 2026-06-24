@@ -1482,62 +1482,9 @@ function mergePolCostsWithSells(polCostO, netRows, sellRows, carrier, period) {
 
 /** SNK 일본 — SHIMIZU 등 매출 있는 항의 마진(기본 20'+120 / 40'+200) */
 /** 매입만 있고 매출 없는 셀 보완 — 향후←현재 복사, 동일 POL 마진·전역 마진 적용 */
-function backfillPolCostSells(polCostO, { polM, polMFuture, margins } = {}) {
-  const out = JSON.parse(JSON.stringify(polCostO || {}));
-  let filled = 0;
-
-  const polMargin = (pol, t, period) => {
-    const store = period === "future" ? polMFuture : polM;
-    const val = store?.[pol]?.[t];
-    return val != null && val !== "" ? marginNum(val) : null;
-  };
-  const globalMargin = (t) => marginNum(margins?.[t]);
-
-  Object.entries(out).forEach(([pol, polEntry]) => {
-    Object.entries(polEntry.carrier || {}).forEach(([carrier, cr]) => {
-      ["current", "future"].forEach(period => {
-        const bucket = cr[period];
-        if (!bucket) return;
-
-        const inferred = {};
-        RATE_TYPES.forEach(t => {
-          if (bucket.sell?.[t] != null && bucket[t] != null) inferred[t] = bucket.sell[t] - bucket[t];
-        });
-        const siblingMargin = RATE_TYPES.map(t => inferred[t]).find(m => m != null);
-
-        if (!bucket.sell) bucket.sell = {};
-
-        RATE_TYPES.forEach(t => {
-          if (bucket[t] == null || bucket.sell[t] != null) return;
-
-          if (period === "future") {
-            const fromCur = cr.current?.sell?.[t];
-            if (fromCur != null) {
-              bucket.sell[t] = fromCur;
-              filled++;
-              return;
-            }
-          }
-
-          const m = inferred[t]
-            ?? siblingMargin
-            ?? polMargin(pol, t, period)
-            ?? polMargin(pol, "coc20", period)
-            ?? globalMargin(t)
-            ?? globalMargin("coc20");
-
-          if (m != null) {
-            bucket.sell[t] = bucket[t] + m;
-            filled++;
-          }
-        });
-
-        if (!Object.keys(bucket.sell).length) delete bucket.sell;
-      });
-    });
-  });
-
-  return { polCostO: out, filled };
+function backfillPolCostSells(polCostO) {
+  // 자동 마진 기능 제거 — 매출(SELL)은 업로드한 값만 사용. 매입+마진 자동 보완 안 함.
+  return { polCostO: polCostO || {}, filled: 0 };
 }
 
 function mergePolMarginsMap(polM, marginRows) {
