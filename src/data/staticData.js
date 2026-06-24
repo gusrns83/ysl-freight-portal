@@ -116,6 +116,11 @@ const RN = [
   ["Taichung","","","","","","","","","","","","","","","","","","","","","","","",""],
   ["Incheon","","","","","","","","","","","","","","","","","","","","","","","",""],
   ["Belawan","","","","","","","","","","","","","","","","","","","","","","","",""],
+  ["Rizhao","","","","","","","","","","","","","","","","","","","","","","","",""],
+  ["Urumqi","","","","","","","","","","","","","","","","","","","","","","","",""],
+  ["Khorgos","","","","","","","","","","","","","","","","","","","","","","","",""],
+  ["Alashankou","","","","","","","","","","","","","","","","","","","","","","","",""],
+  ["Kashgar","","","","","","","","","","","","","","","","","","","","","","","",""],
 ];
 const PM = {"Shanghai":"SHANGHAI","Ningbo":"NINGBO","Qingdao":"QINGDAO","Tianjin":"TIANJIN","Dalian":"DALIAN","Shenzhen":"SHEKOU","Xiamen":"XIAMEN","Huangpu":"HUANGPU/PRD","Nansha":"NANSHA","Chongqing":"CHONGQING","Wuhan":"WUHAN","Keelung":"KEELUNG","Kaohsiung":"KAOHSIUNG","Busan":"BUSAN","Yokohama":"YOKOHAMA","Kobe":"KOBE","Osaka":"OSAKA","Nagoya":"NAGOYA","Ho Chi Minh":"HOCHIMINH","Haiphong":"HAIPHONG","Jakarta":"JAKARTA","Surabaya":"SURABAYA","Laem Chabang":"LAEM CHABANG","Bangkok":"BANGKOK","Port Kelang":"MALAYSIA (P.KLANG)","Mundra":"INDIA (MUNDRA)","Chennai":"INDIA (CHENNAI)","Nhava Sheva":"NHAVA SHEVA","Pasir Gudang":"PASIR GUDANG","Nanjing":"NANJING","Hongkong":"HONGKONG","Taichung":"TAICHUNG","Incheon":"INCHEON","Belawan":"BELAWAN"};
 const DO = {
