@@ -41,7 +41,7 @@ const adminRefreshToken = async (refresh_token) => {
     return d;
   } catch { return null; }
 };
-import { LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, readExcelFile, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
+import { LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearPolCostsCarrierPeriod, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, readExcelFile, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
 import { bootPricingFromCache, buildBuyingGriCosts, buildCopyCurrentToFutureCosts, buildRateHistoryQuery, buildSellingGriSells, copyCarrierDropRatesPeriod, copyCarrierRatesPeriod, deleteRateHistoryByIds, diffRateHistoryRows, displayMarginFromPrices, fetchRateHistoryExcelUploadOcean, flattenRateSnapshot, getPolStoredMargin, griPeriodLabel, marginNowTs, marginNum, mergePolCostODeep, parsePricingFromSettings, pickLatestMargin, pickRateHistoryDuplicatesToRemove, postRateHistoryRows, pricingCacheFromSnapshot, pruneRateHistoryOutsideService, rateHistoryEntryKey, resolveCarrierEffectiveSell, resolveCarrierExplicitSell, resolveMarginCandidates, settingBundleHas, sortRateHistoryRowsByCity, uploadExcelRateHistory } from "./lib/pricing.js";
 import { applyRentalUploadChanges, buildRentalUploadChanges, downloadRentalTemplate, parseRentalUploadRows } from "./lib/rentalUpload.js";
 
@@ -1050,7 +1050,8 @@ export default function App() {
         );
         rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
       } else if (parsed.format === "DY") {
-        nextCosts = mergePolCostsUploadByValidity(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period, excelValidityDraft);
+        // 교체방식: 업로드 전 해당 선사+기간 라이브 값 제거 → 엑셀 빈칸=삭제 (byValidity 아카이브는 보존)
+        nextCosts = mergePolCostsUploadByValidity(clearPolCostsCarrierPeriod(baseCosts, "DY", period), parsed.oceanRows, parsed.sellRows, "DY", period, excelValidityDraft);
         nextCosts = backfillPolCostSells(nextCosts, {
           polM: pricingSaveRef.current.polM ?? polM,
           polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
@@ -1073,7 +1074,8 @@ export default function App() {
       } else {
         const cr = parsed.carrier || parsed.format;
         const netRows = parsed.netRows || {};
-        nextCosts = mergePolCostsUploadByValidity(baseCosts, netRows, parsed.sellRows || {}, cr, period, excelValidityDraft);
+        // 교체방식: 업로드 전 해당 선사+기간 라이브 값 제거 → 엑셀 빈칸=삭제 (byValidity 아카이브는 보존)
+        nextCosts = mergePolCostsUploadByValidity(clearPolCostsCarrierPeriod(baseCosts, cr, period), netRows, parsed.sellRows || {}, cr, period, excelValidityDraft);
         nextCosts = backfillPolCostSells(nextCosts, {
           polM: pricingSaveRef.current.polM ?? polM,
           polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
