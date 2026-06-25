@@ -41,7 +41,7 @@ const adminRefreshToken = async (refresh_token) => {
     return d;
   } catch { return null; }
 };
-import { LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, readExcelFile, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
+import { LEGACY_VALIDITY_KEY, UPLOAD_FORMATS, applyFreightServiceFilterToUpload, applyRateHistoryDeletesToStores, backfillPolCostSells, buildDyDropRates, buildRentalRatesFromBases, buildRentalRatesFromCityRates, carrierUploadServesRate, cell, clearPolCostsCarrierPeriod, clearRentalPeriodRates, compactRentalRates, countCarrierDropValidityArchive, countCarrierValidityArchive, excelUploadCarrierKey, hydrateRateHistoryRowSells, mergeCarrierDropRateCell, mergePolCostsUploadByValidity, mergeRentalRatesPatch, mergeUploadValidity, parseByFormat, polCostSiblingMargin, previewSummary, readExcelFile, stripPolCostsOutsideFreightService, suggestSheet, suggestYslSheet, validityStorageKey } from "./lib/excelParsers.js";
 import { bootPricingFromCache, buildBuyingGriCosts, buildCopyCurrentToFutureCosts, buildRateHistoryQuery, buildSellingGriSells, copyCarrierDropRatesPeriod, copyCarrierRatesPeriod, deleteRateHistoryByIds, diffRateHistoryRows, displayMarginFromPrices, fetchRateHistoryExcelUploadOcean, flattenRateSnapshot, getPolStoredMargin, griPeriodLabel, marginNowTs, marginNum, mergePolCostODeep, parsePricingFromSettings, pickLatestMargin, pickRateHistoryDuplicatesToRemove, postRateHistoryRows, pricingCacheFromSnapshot, pruneRateHistoryOutsideService, rateHistoryEntryKey, resolveCarrierEffectiveSell, resolveCarrierExplicitSell, resolveMarginCandidates, settingBundleHas, sortRateHistoryRowsByCity, uploadExcelRateHistory } from "./lib/pricing.js";
 import { applyRentalUploadChanges, buildRentalUploadChanges, downloadRentalTemplate, parseRentalUploadRows } from "./lib/rentalUpload.js";
 
@@ -1050,12 +1050,9 @@ export default function App() {
         );
         rateHistoryBaselineRef.current = flattenRateSnapshot({ ...pricingSaveRef.current, fData, rData });
       } else if (parsed.format === "DY") {
-        nextCosts = mergePolCostsUploadByValidity(baseCosts, parsed.oceanRows, parsed.sellRows, "DY", period, excelValidityDraft);
-        nextCosts = backfillPolCostSells(nextCosts, {
-          polM: pricingSaveRef.current.polM ?? polM,
-          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
-          margins: pricingSaveRef.current.margins ?? margins,
-        }).polCostO;
+        // 교체방식: 업로드 전 해당 선사+기간 라이브 값 제거 → 엑셀 빈칸=삭제 (byValidity 아카이브는 보존)
+        nextCosts = mergePolCostsUploadByValidity(clearPolCostsCarrierPeriod(baseCosts, "DY", period), parsed.oceanRows, parsed.sellRows, "DY", period, excelValidityDraft);
+        // 자동 마진 backfill 제거 — 업로드한 매출(SELL)만 저장
         const nextDrop = buildDyDropRates(
           JSON.stringify(carrierDropRates),
           parsed.oceanRows,
@@ -1073,12 +1070,9 @@ export default function App() {
       } else {
         const cr = parsed.carrier || parsed.format;
         const netRows = parsed.netRows || {};
-        nextCosts = mergePolCostsUploadByValidity(baseCosts, netRows, parsed.sellRows || {}, cr, period, excelValidityDraft);
-        nextCosts = backfillPolCostSells(nextCosts, {
-          polM: pricingSaveRef.current.polM ?? polM,
-          polMFuture: pricingSaveRef.current.polMFuture ?? polMFuture,
-          margins: pricingSaveRef.current.margins ?? margins,
-        }).polCostO;
+        // 교체방식: 업로드 전 해당 선사+기간 라이브 값 제거 → 엑셀 빈칸=삭제 (byValidity 아카이브는 보존)
+        nextCosts = mergePolCostsUploadByValidity(clearPolCostsCarrierPeriod(baseCosts, cr, period), netRows, parsed.sellRows || {}, cr, period, excelValidityDraft);
+        // 자동 마진 backfill 제거 — 업로드한 매출(SELL)만 저장
         setPolCostO(nextCosts);
         await saveSettingDirect("pol_costs", serializeOceanPolCosts(nextCosts));
         await saveSettingDirect("pol_portal_overrides_json", JSON.stringify(extractPortalOverrides(nextCosts)));
@@ -1558,23 +1552,14 @@ export default function App() {
   /** 선사 Admin 단가표: sell 저장값 → POL 마진 → 동일 POL 마진(형제 타입) */
   const getCarrierAdminSell = (pol, cr, type, period, cost) => {
     if (cost == null) return null;
-    const explicit = resolveCarrierExplicitSell(polCostO, pol, cr, type, period);
-    if (explicit != null) return explicit;
-    const polMargin = getPolStoredMargin(pol, type, period, polM, polMFuture);
-    if (polMargin != null) return cost + polMargin;
-    const sibling = polCostSiblingMargin(polCostO, pol, cr, period, type);
-    if (sibling != null) return cost + sibling;
-    return null;
+    // 자동 마진 제거: 업로드한 매출(SELL)만 사용, 없으면 null(—). POL/sibling 마진 가산 안 함.
+    return resolveCarrierExplicitSell(polCostO, pol, cr, type, period);
   };
 
-  /** 게스트·포털: sell 저장값 → POL 마진 → getM() 전체 마진 */
+  /** 게스트·포털: 업로드한 매출(SELL)만 노출 — 자동 마진 가산 없음 */
   const getGuestCarrierSell = (pol, cr, type, period, cost, area) => {
     if (usePublic) return pubOcean(pol, cr, type, period);
-    return resolveCarrierEffectiveSell(polCostO, pol, cr, type, period, cost, {
-      polM,
-      polMFuture,
-      fullMargin: getM(pol, area, type, period),
-    });
+    return resolveCarrierExplicitSell(polCostO, pol, cr, type, period);
   };
 
   const applyBuyingGriBulk = (deltas, rows, carrier, period) => {
@@ -1976,20 +1961,8 @@ export default function App() {
   };
 
   const getRentalM = (pol, area, type) => {
-    const types = (type === "r40dv" || type === "r40hc") ? [type, "r40"] : [type];
-    const candidates = [];
-    types.forEach(t => {
-      candidates.push({ value: marginNum(rentalMargins[t]), ts: rentalMarginTs[t] ?? 0 });
-      const areaVal = rentalAreaM[area]?.[t];
-      if (areaVal != null && areaVal !== "") {
-        candidates.push({ value: marginNum(areaVal), ts: rentalAreaTs[area]?.[t] ?? 0 });
-      }
-      const polVal = rentalPolM[pol]?.[t];
-      if (polVal != null && polVal !== "") {
-        candidates.push({ value: marginNum(polVal), ts: rentalPolTs[pol]?.[t] ?? 0 });
-      }
-    });
-    return pickLatestMargin(candidates);
+    // 자동 마진 제거 — 렌탈 매출은 업로드(저장)한 값 그대로 사용 (마진 0)
+    return 0;
   };
 
   const applyRentalPolMargin = (pol, type, value) => {
@@ -2883,7 +2856,10 @@ export default function App() {
     // 차기 운임 미정(future 데이터 없음) → 정적 운임표(row.rates) 폴백 금지, 금액 미표시("Further notice")
     if (p === "future" && oceanCarrierFutureEmpty(row.pol, cr)) return null;
     const ov = getCarrierCostOverride(row.pol, cr, t, p);
-    return ov != null ? ov : row.rates[cr][t];
+    if (ov != null) return ov;
+    // 업로드(override)·관리 운임이 없는 선사는 내장 정적표(row.rates) 폴백 금지.
+    // admin 편집 그리드에서만 시드값 노출, 고객 화면엔 미표시(업로드한 선사만 노출).
+    return isAdmin ? row.rates[cr][t] : null;
   };
 
   // 렌탈 차기(향후) 운임 미정 판정 — 해당 POL의 future 데이터가 비어있음(전환 후 비워진 상태 등)
@@ -2931,12 +2907,8 @@ export default function App() {
   // 렌탈 매출가(렌탈 매입 + 렌탈 마진) — 고객 노출용. 매입가 자체는 절대 반환하지 않음
   const getRentalSell = (rPol, city, comboIdx, period = ratePeriod) => {
     if (usePublic) return pubRentSub(rPol, city, comboIdx === 0 ? "c20" : comboIdx === 1 ? "c40dv" : "c40hc", period);
-    const base = getRentalBase(rPol, city, comboIdx, period);
-    if (base == null) return null;
-    const fp = PM[rPol] || rPol;
-    const area = fMap[fp]?.area;
-    if (!area) return null;
-    return base + getRentalM(fp, area, rentComboMarginType(comboIdx));
+    // 자동 마진 제거: 업로드한 렌탈 매출 그대로 노출
+    return getRentalBase(rPol, city, comboIdx, period);
   };
 
   const applyRentalRate = (rPol, city, comboIdx, value, period = "current") => {
@@ -3137,9 +3109,8 @@ export default function App() {
   };
 
   const getRentSellMargin = (freightPol, rPol, area, comboIdx) => {
-    const fp = PM[rPol] || freightPol;
-    if (!fp || !area) return 0;
-    return getM(fp, area, rentSocType(comboIdx), ratePeriod) + getRentalM(fp, area, rentComboMarginType(comboIdx));
+    // 자동 마진 제거 — 렌탈 매출은 업로드값 그대로 (마진 0)
+    return 0;
   };
 
   const applyRentCityCost = (freightPol, city, comboIdx, value) => {
@@ -3236,18 +3207,16 @@ export default function App() {
       const cost40hc = s40 != null && rentals[2] != null ? s40 + rentals[2] : null;
       const socSell20 = s20 != null ? getGuestCarrierSell(fp, k, "soc20", period, s20, fr.area) : null;
       const socSell40 = s40 != null ? getGuestCarrierSell(fp, k, "soc40", period, s40, fr.area) : null;
-      const rentM20 = getRentalM(fp, fr.area, "r20");
-      const rentM40dv = getRentalM(fp, fr.area, "r40dv");
-      const rentM40hc = getRentalM(fp, fr.area, "r40hc");
-      const rentSell20 = rentals[0] != null ? rentals[0] + rentM20 : null;
-      const rentSell40dv = rentals[1] != null ? rentals[1] + rentM40dv : null;
-      const rentSell40hc = rentals[2] != null ? rentals[2] + rentM40hc : null;
+      // 자동 마진 제거: 렌탈 매출 = 업로드값 그대로 (마진 가산 없음)
+      const rentSell20 = rentals[0];
+      const rentSell40dv = rentals[1];
+      const rentSell40hc = rentals[2];
       const t20 = socSell20 != null && rentSell20 != null ? socSell20 + rentSell20 : null;
       const t40dv = socSell40 != null && rentSell40dv != null ? socSell40 + rentSell40dv : null;
       const t40hc = socSell40 != null && rentSell40hc != null ? socSell40 + rentSell40hc : null;
-      const m20 = cost20 != null && t20 != null ? t20 - cost20 : rentM20 + getM(fp, fr.area, "soc20", period);
-      const m40dv = cost40dv != null && t40dv != null ? t40dv - cost40dv : rentM40dv + getM(fp, fr.area, "soc40", period);
-      const m40hc = cost40hc != null && t40hc != null ? t40hc - cost40hc : rentM40hc + getM(fp, fr.area, "soc40", period);
+      const m20 = cost20 != null && t20 != null ? t20 - cost20 : null;
+      const m40dv = cost40dv != null && t40dv != null ? t40dv - cost40dv : null;
+      const m40hc = cost40hc != null && t40hc != null ? t40hc - cost40hc : null;
       return {
         k,
         cost20, cost40dv, cost40hc,
@@ -3286,15 +3255,13 @@ export default function App() {
       const rental = getRentalBase(rPol, city, comboIdx);
       if (isAdmin) {
         const socSell = soc != null ? getCarrierAdminSell(freightPol, b.cr, t, ratePeriod, soc) : null;
-        const totalSell = socSell != null && rental != null
-          ? socSell + rental + getRentalM(freightPol, fr.area, rt)
-          : null;
+        // 자동 마진 제거: 합계 = SOC 매출 + 렌탈 매출(업로드값), 마진 가산 없음
+        const totalSell = socSell != null && rental != null ? socSell + rental : null;
         return mkAdminPrice(cost, totalSell, b.cr);
       }
       const socSell = soc != null ? getGuestCarrierSell(freightPol, b.cr, t, ratePeriod, soc, fr.area) : null;
-      const totalSell = socSell != null && rental != null
-        ? socSell + rental + getRentalM(freightPol, fr.area, rt)
-        : null;
+      // 자동 마진 제거: 합계 = SOC 매출 + 렌탈 매출(업로드값), 마진 가산 없음
+      const totalSell = socSell != null && rental != null ? socSell + rental : null;
       return mkPrice(cost, totalSell != null && cost != null ? totalSell - cost : null, b.cr);
     }
     // 매출 산정에 필요한 freight/area 컨텍스트가 없으면, 고객에겐 매입가를 노출하지 말고 "—" 처리
@@ -3379,7 +3346,8 @@ export default function App() {
         periods.forEach(p => {
           if (p === "current" && curExpired(cr)) { /* 해상 만료 → 스냅샷 제외 */ } else {
             RATE_TYPES.forEach(t => {
-              const cost = getCarrierRate(row, cr, t, p);
+              // 업로드·관리 운임이 있는 선사만 스냅샷에 포함 — 내장 정적표(row.rates) 폴백 제외
+              const cost = getCarrierCostOverride(row.pol, cr, t, p);
               if (cost == null) return;
               const sell = getGuestCarrierSell(row.pol, cr, t, p, cost, row.area);
               if (sell == null) return;
@@ -3533,13 +3501,13 @@ export default function App() {
       ? crypto.randomUUID()
       : `rental-${Date.now()}`;
     const historyRows = changes.map(c => {
-      const { fp, area, margin } = rentalUploadMargin(c.pol, c.type);
+      const { fp, area } = rentalUploadMargin(c.pol, c.type);
       return {
         batch_id: batchId, carrier: "RENTAL", area, pol: fp, route: `${fp} > ${c.city}`,
         rate_type: c.type, period, category: "rental",
         cost: c.remove ? null : c.next,
-        sell: c.remove ? null : c.next + margin,
-        margin: c.remove ? null : margin,
+        sell: c.remove ? null : c.next,
+        margin: c.remove ? null : 0,
         source: "excel-upload",
         note: c.remove
           ? `Excel 업로드 (${fileName}): ${c.old} → 미서비스(x) 삭제`
@@ -4640,7 +4608,7 @@ export default function App() {
               <button onClick={()=>{setShowRentalAdmin(false);setRentalAdminTab("grid");}} style={{fontSize:13,color:"#6b7280",background:"none",border:"none",cursor:"pointer"}}>← Back</button>
               <div style={{textAlign:"center"}}>
                 <div style={{fontSize:14,fontWeight:700,color:"#7c3aed"}}>컨테이너 Rental 운임</div>
-                <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>Excel 업로드 · 매입만 갱신 · 마진 유지 → 매출 자동 계산</div>
+                <div style={{fontSize:9,color:"#9ca3af",marginTop:2}}>Excel 업로드 · 업로드값이 곧 고객 매출 (자동 마진 없음)</div>
               </div>
               <div style={{width:48}}/>
             </div>
@@ -4722,13 +4690,12 @@ export default function App() {
                         <th style={{padding:"4px 8px"}}>사이즈</th>
                         <th style={{padding:"4px 8px",textAlign:"right"}}>기존 매입</th>
                         <th style={{padding:"4px 8px",textAlign:"right"}}>새 매입</th>
-                        <th style={{padding:"4px 8px",textAlign:"right"}}>새 매출 (마진 유지)</th>
+                        <th style={{padding:"4px 8px",textAlign:"right"}}>새 매출 (= 매입, 마진 없음)</th>
                         <th style={{padding:"4px 8px"}}>경고</th>
                       </tr>
                     </thead>
                     <tbody>
                       {upChanges.map((c, i) => {
-                        const { margin } = rentalUploadMargin(c.pol, c.type);
                         const warn = c.bigJump || c.inverted;
                         const pct = !c.remove && c.old ? Math.round((c.next - c.old) / c.old * 100) : null;
                         return (
@@ -4738,7 +4705,7 @@ export default function App() {
                             <td style={{padding:"4px 8px"}}>{c.sk === "c20" ? "20'" : c.sk === "c40dv" ? "40'DV" : "40'HC"}</td>
                             <td style={{padding:"4px 8px",textAlign:"right",color:"#9ca3af"}}>{c.old != null ? n(c.old) : "—"}</td>
                             <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:c.remove?"#9a3412":"#1d4ed8"}}>{c.remove ? "미서비스(x)" : n(c.next)}</td>
-                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:"#047857"}}>{c.remove ? "—" : <>{n(c.next + margin)} <span style={{fontWeight:400,color:"#9ca3af"}}>(+{n(margin)})</span></>}</td>
+                            <td style={{padding:"4px 8px",textAlign:"right",fontWeight:700,color:"#047857"}}>{c.remove ? "—" : n(c.next)}</td>
                             <td style={{padding:"4px 8px",fontSize:10,color:c.remove?"#9a3412":"#b91c1c",fontWeight:700}}>
                               {c.remove ? "🗑 삭제" : <>{c.bigJump ? `±30%↑ (${pct > 0 ? "+" : ""}${pct}%)` : ""}{c.bigJump && c.inverted ? " · " : ""}{c.inverted ? "20'>40'DV" : ""}</>}
                             </td>
@@ -5648,9 +5615,9 @@ export default function App() {
                           const cdC40hc=mkPrice(c.cost40hc,c.m40hc,c.k);
                           const socC20=mkAdminPrice(c.soc20, c.soc20 != null ? getCarrierAdminSell(fp,c.k,"soc20",ratePeriod,c.soc20) : null, c.k);
                           const socC40=mkAdminPrice(c.soc40, c.soc40 != null ? getCarrierAdminSell(fp,c.k,"soc40",ratePeriod,c.soc40) : null, c.k);
-                          const rentC20=mkPrice(c.rent20,getRentalM(fp,fr.area,"r20"),c.k);
-                          const rentC40dv=mkPrice(c.rent40dv,getRentalM(fp,fr.area,"r40dv"),c.k);
-                          const rentC40hc=mkPrice(c.rent40hc,getRentalM(fp,fr.area,"r40hc"),c.k);
+                          const rentC20=mkPrice(c.rent20,0,c.k);
+                          const rentC40dv=mkPrice(c.rent40dv,0,c.k);
+                          const rentC40hc=mkPrice(c.rent40hc,0,c.k);
                           return (
                           <div key={c.k} style={{padding:"8px 12px 8px 20px",borderBottom:"1px solid #ede9fe"}}>
                             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,flexWrap:"wrap"}}>

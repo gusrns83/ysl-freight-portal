@@ -1,2 +1,5 @@
 .github-token.local
 supabase/.temp/
+node_modules/
+dist/
+package-lock.json
