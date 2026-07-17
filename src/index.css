@@ -1604,6 +1604,25 @@
   color: #059669;
 }
 
+.clear-future-freight-btn {
+  align-self: stretch;
+  padding: 8px 12px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.4;
+  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-radius: 10px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.clear-future-freight-btn:hover {
+  background: #fee2e2;
+  border-color: #f87171;
+}
+
 .import-current-freight-undo {
   align-self: center;
   padding: 8px 12px;
