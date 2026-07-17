@@ -593,10 +593,15 @@ export default function App() {
   const periodKey = (p) => (p === "future" ? "future" : "current");
   // 스냅샷 생성 이후 만료된 현재 운임은 실시간 validity로 한 번 더 차단 (스케줄러 지연 대비)
   const curExpiredLive = (vKey, p) => p === "current" && isValiditySlotExpired(validityInfo[vKey]?.current);
-  const pubOcean = (pol, cr, t, p) => (curExpiredLive(cr, periodKey(p)) ? null : publicRates?.ocean?.[pol]?.[cr]?.[periodKey(p)]?.[t] ?? null);
-  const pubDrop = (pol, cr, cityKey, si, p) => (curExpiredLive(carrierDropValidityKey(cr), periodKey(p)) ? null : publicRates?.drop?.[pol]?.[cr]?.[cityKey]?.[periodKey(p)]?.[si === 0 ? "c20" : "c40"] ?? null);
-  const pubRentTotal = (rPol, cr, city, sk, p) => (curExpiredLive("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.carriers?.[cr]?.[city]?.[periodKey(p)]?.[sk] ?? null);
-  const pubRentSub = (rPol, city, sk, p) => (curExpiredLive("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.rent?.[city]?.[periodKey(p)]?.[sk] ?? null);
+  // 향후 운임인데 향후 validity 시작일(from)이 미입력이면 고객 화면 비표시
+  // (현재→향후 복사 등으로 값만 있고 시행일 미정인 상태의 유령 향후 운임 차단)
+  const futNoFromLive = (vKey, p) =>
+    p === "future" && !parseValidityToISO(normalizeValiditySlot(validityInfo[vKey]?.future).from);
+  const pubBlocked = (vKey, p) => curExpiredLive(vKey, p) || futNoFromLive(vKey, p);
+  const pubOcean = (pol, cr, t, p) => (pubBlocked(cr, periodKey(p)) ? null : publicRates?.ocean?.[pol]?.[cr]?.[periodKey(p)]?.[t] ?? null);
+  const pubDrop = (pol, cr, cityKey, si, p) => (pubBlocked(carrierDropValidityKey(cr), periodKey(p)) ? null : publicRates?.drop?.[pol]?.[cr]?.[cityKey]?.[periodKey(p)]?.[si === 0 ? "c20" : "c40"] ?? null);
+  const pubRentTotal = (rPol, cr, city, sk, p) => (pubBlocked("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.carriers?.[cr]?.[city]?.[periodKey(p)]?.[sk] ?? null);
+  const pubRentSub = (rPol, city, sk, p) => (pubBlocked("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.rent?.[city]?.[periodKey(p)]?.[sk] ?? null);
   // 고객용 가격 객체: cost는 화면에 표시되지 않으며 sell과 동일값(매입 미노출). 일부 JSX가 .cost로 행 표시를 판단하므로 sell을 넣음
   const guestPrice = (sell, cr) => ({ cost: sell ?? null, margin: sell == null ? null : 0, sell: sell ?? null, cr: cr ?? null });
 
@@ -2811,6 +2816,7 @@ export default function App() {
   });
   // 해상/드롭 차기(향후) 운임 미정 판정 — admin=raw, 고객=스냅샷 소스별
   const oceanCarrierFutureEmpty = (pol, cr) => {
+    if (!isAdmin && futNoFromLive(cr, "future")) return true; // 시행일 미정 → 고객엔 미정 취급
     if (usePublic) {
       const f = publicRates?.ocean?.[pol]?.[cr]?.future;
       return !f || Object.keys(f).length === 0;
@@ -2824,6 +2830,7 @@ export default function App() {
   };
   const oceanFutureEmpty = (pol) => CRS.every(cr => oceanCarrierFutureEmpty(pol, cr));
   const dropCarrierFutureEmpty = (pol, cr) => {
+    if (!isAdmin && futNoFromLive(carrierDropValidityKey(cr), "future")) return true; // 시행일 미정 → 고객엔 미정 취급
     if (usePublic) {
       const node = publicRates?.drop?.[pol]?.[cr];
       if (!node) return true;
@@ -2865,6 +2872,7 @@ export default function App() {
   // 렌탈 차기(향후) 운임 미정 판정 — 해당 POL의 future 데이터가 비어있음(전환 후 비워진 상태 등)
   // admin=raw(rentalRates), 고객=스냅샷(publicRates) 소스별로 확인
   const rentalFutureEmpty = (rPol) => {
+    if (!isAdmin && futNoFromLive("RENTAL", "future")) return true; // 시행일 미정 → 고객엔 미정 취급
     if (usePublic) {
       const node = publicRates?.rental?.[rPol];
       if (!node) return true;
@@ -3002,6 +3010,8 @@ export default function App() {
     const p = period === "future" ? "future" : period === "current" ? "current" : ratePeriod;
     // 고객 화면: 만료된 Drop off 운임 비표시
     if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo[carrierDropValidityKey(cr)]?.current)) return null;
+    // 고객 화면: 향후 validity 시행일 미입력 → 향후 Drop off 비표시
+    if (!isAdmin && futNoFromLive(carrierDropValidityKey(cr), p)) return null;
     // 차기 Drop off 미정(future 데이터 없음) → 정적 DO 기본값 폴백 금지
     if (p === "future") {
       const fut = carrierDropRates[cr]?.future;
