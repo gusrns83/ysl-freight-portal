@@ -491,6 +491,7 @@ export default function App() {
   const publicRatesAtRef = useRef(0); // 매출 스냅샷 저장 throttle
   const rawLoadedRef = useRef(false); // raw 운임(매입·마진) 로드 여부 — admin 또는 스냅샷 부재 fallback 시에만
   const backfilledRef = useRef(false); // admin 진입 후 스냅샷 1회 백필 여부
+  const persistPublicRatesRef = useRef(async () => {}); // setState 반영 후 최신 상태로 스냅샷 재발행용
   const saveQueueRef = useRef(Promise.resolve());
   const pricingSaveRef = useRef({});
   const [dragOverSlot, setDragOverSlot] = useState(null);
@@ -593,10 +594,15 @@ export default function App() {
   const periodKey = (p) => (p === "future" ? "future" : "current");
   // 스냅샷 생성 이후 만료된 현재 운임은 실시간 validity로 한 번 더 차단 (스케줄러 지연 대비)
   const curExpiredLive = (vKey, p) => p === "current" && isValiditySlotExpired(validityInfo[vKey]?.current);
-  const pubOcean = (pol, cr, t, p) => (curExpiredLive(cr, periodKey(p)) ? null : publicRates?.ocean?.[pol]?.[cr]?.[periodKey(p)]?.[t] ?? null);
-  const pubDrop = (pol, cr, cityKey, si, p) => (curExpiredLive(carrierDropValidityKey(cr), periodKey(p)) ? null : publicRates?.drop?.[pol]?.[cr]?.[cityKey]?.[periodKey(p)]?.[si === 0 ? "c20" : "c40"] ?? null);
-  const pubRentTotal = (rPol, cr, city, sk, p) => (curExpiredLive("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.carriers?.[cr]?.[city]?.[periodKey(p)]?.[sk] ?? null);
-  const pubRentSub = (rPol, city, sk, p) => (curExpiredLive("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.rent?.[city]?.[periodKey(p)]?.[sk] ?? null);
+  // 향후 운임인데 향후 validity 시작일(from)이 미입력이면 고객 화면 비표시
+  // (현재→향후 복사 등으로 값만 있고 시행일 미정인 상태의 유령 향후 운임 차단)
+  const futNoFromLive = (vKey, p) =>
+    p === "future" && !parseValidityToISO(normalizeValiditySlot(validityInfo[vKey]?.future).from);
+  const pubBlocked = (vKey, p) => curExpiredLive(vKey, p) || futNoFromLive(vKey, p);
+  const pubOcean = (pol, cr, t, p) => (pubBlocked(cr, periodKey(p)) ? null : publicRates?.ocean?.[pol]?.[cr]?.[periodKey(p)]?.[t] ?? null);
+  const pubDrop = (pol, cr, cityKey, si, p) => (pubBlocked(carrierDropValidityKey(cr), periodKey(p)) ? null : publicRates?.drop?.[pol]?.[cr]?.[cityKey]?.[periodKey(p)]?.[si === 0 ? "c20" : "c40"] ?? null);
+  const pubRentTotal = (rPol, cr, city, sk, p) => (pubBlocked("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.carriers?.[cr]?.[city]?.[periodKey(p)]?.[sk] ?? null);
+  const pubRentSub = (rPol, city, sk, p) => (pubBlocked("RENTAL", periodKey(p)) ? null : publicRates?.rental?.[rPol]?.rent?.[city]?.[periodKey(p)]?.[sk] ?? null);
   // 고객용 가격 객체: cost는 화면에 표시되지 않으며 sell과 동일값(매입 미노출). 일부 JSX가 .cost로 행 표시를 판단하므로 sell을 넣음
   const guestPrice = (sell, cr) => ({ cost: sell ?? null, margin: sell == null ? null : 0, sell: sell ?? null, cr: cr ?? null });
 
@@ -1774,7 +1780,7 @@ export default function App() {
         .then(() => {
           writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
           recordRateHistory({ source: "import_undo" }, { ...pricingSaveRef.current, carrierDropRates: restoredDrop });
-          flashSaveFeedback("success", "✅ 기존운임 가져오기 되돌리기 · 저장 완료");
+          flashSaveFeedback("success", "✅ 향후 운임 변경 되돌리기 · 저장 완료");
         })
         .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
         .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
@@ -1796,7 +1802,80 @@ export default function App() {
       .then(() => {
         writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
         recordRateHistory({ source: "import_undo" }, { ...pricingSaveRef.current, polCostO: restoredCosts, carrierRates: restoredRates });
-        flashSaveFeedback("success", "✅ 기존운임 가져오기 되돌리기 · 저장 완료");
+        flashSaveFeedback("success", "✅ 향후 운임 변경 되돌리기 · 저장 완료");
+      })
+      .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+      .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
+  };
+
+  // 향후 운임 전체 비우기 — 해당 선사의 향후 버킷 제거 (byValidity 아카이브·validity 날짜는 보존)
+  const clearFutureFreight = (carrier, dropoffMode) => {
+    if (!window.confirm(`${CN_KR[carrier]} ${dropoffMode ? "Drop off " : ""}향후 운임을 전체 비웁니다.\n고객 화면 Upcoming Rates에서도 제거됩니다. 계속할까요?`)) return;
+    setImportFreightUndo({
+      carrier,
+      dropoffMode,
+      polCostO: JSON.parse(JSON.stringify(polCostO)),
+      carrierRates: JSON.parse(JSON.stringify(carrierRates)),
+      carrierDropRates: JSON.parse(JSON.stringify(carrierDropRates)),
+    });
+    cancelPendingPricingSave();
+    resetSaveQueue();
+    skipAutoSaveRef.current = true;
+    setCarrierEditCell(null);
+
+    if (dropoffMode) {
+      const nextDrop = {
+        ...carrierDropRates,
+        [carrier]: { ...(carrierDropRates[carrier] || {}), future: {} },
+      };
+      setCarrierDropRates(nextDrop);
+      writePricingCache({
+        ...(readStoredPricingCache() || { v: 1 }),
+        v: 1,
+        carrierDropRates: nextDrop,
+        pricingSavedAt: Date.now(),
+      });
+      enqueueSave(async () => {
+        await saveOneSettingWithRetry("carrier_drop_rates_json", JSON.stringify(nextDrop));
+      })
+        .then(() => {
+          writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+          recordRateHistory({ source: "clear_future", note: `${CN_KR[carrier]} Drop off 향후 운임 비우기` }, { ...pricingSaveRef.current, carrierDropRates: nextDrop });
+          persistPublicRatesRef.current({ force: true });
+          flashSaveFeedback("success", `✅ ${CN_KR[carrier]} Drop off · 향후 운임 비우기 완료`);
+        })
+        .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
+        .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
+      return;
+    }
+
+    const nextCosts = clearPolCostsCarrierPeriod(polCostO, carrier, "future");
+    const nextRates = {
+      ...carrierRates,
+      [carrier]: {
+        ...(carrierRates[carrier] || {}),
+        current: { ...(carrierRates[carrier]?.current || {}) },
+        future: { coc20: "", coc40: "", soc20: "", soc40: "" },
+      },
+    };
+    setPolCostO(nextCosts);
+    setCarrierRates(nextRates);
+    writePricingCache({
+      ...(readStoredPricingCache() || { v: 1 }),
+      v: 1,
+      polCostO: nextCosts,
+      carrierRates: nextRates,
+      pricingSavedAt: Date.now(),
+    });
+    enqueueSave(async () => {
+      await saveOceanPolCostsBundle(nextCosts);
+      await saveOneSettingWithRetry("carrier_rates_json", JSON.stringify(nextRates));
+    })
+      .then(() => {
+        writePricingCache({ ...(readStoredPricingCache() || {}), serverSyncedAt: Date.now() });
+        recordRateHistory({ source: "clear_future", note: `${CN_KR[carrier]} 향후 운임 비우기` }, { ...pricingSaveRef.current, polCostO: nextCosts, carrierRates: nextRates });
+        persistPublicRatesRef.current({ force: true });
+        flashSaveFeedback("success", `✅ ${CN_KR[carrier]} · 향후 운임 비우기 완료`);
       })
       .catch(e => flashSaveFeedback("error", `저장 실패: ${e.message}`))
       .finally(() => { setTimeout(() => { skipAutoSaveRef.current = false; }, 2000); });
@@ -2811,6 +2890,7 @@ export default function App() {
   });
   // 해상/드롭 차기(향후) 운임 미정 판정 — admin=raw, 고객=스냅샷 소스별
   const oceanCarrierFutureEmpty = (pol, cr) => {
+    if (!isAdmin && futNoFromLive(cr, "future")) return true; // 시행일 미정 → 고객엔 미정 취급
     if (usePublic) {
       const f = publicRates?.ocean?.[pol]?.[cr]?.future;
       return !f || Object.keys(f).length === 0;
@@ -2824,6 +2904,7 @@ export default function App() {
   };
   const oceanFutureEmpty = (pol) => CRS.every(cr => oceanCarrierFutureEmpty(pol, cr));
   const dropCarrierFutureEmpty = (pol, cr) => {
+    if (!isAdmin && futNoFromLive(carrierDropValidityKey(cr), "future")) return true; // 시행일 미정 → 고객엔 미정 취급
     if (usePublic) {
       const node = publicRates?.drop?.[pol]?.[cr];
       if (!node) return true;
@@ -2865,6 +2946,7 @@ export default function App() {
   // 렌탈 차기(향후) 운임 미정 판정 — 해당 POL의 future 데이터가 비어있음(전환 후 비워진 상태 등)
   // admin=raw(rentalRates), 고객=스냅샷(publicRates) 소스별로 확인
   const rentalFutureEmpty = (rPol) => {
+    if (!isAdmin && futNoFromLive("RENTAL", "future")) return true; // 시행일 미정 → 고객엔 미정 취급
     if (usePublic) {
       const node = publicRates?.rental?.[rPol];
       if (!node) return true;
@@ -3002,6 +3084,8 @@ export default function App() {
     const p = period === "future" ? "future" : period === "current" ? "current" : ratePeriod;
     // 고객 화면: 만료된 Drop off 운임 비표시
     if (!isAdmin && p === "current" && isValiditySlotExpired(validityInfo[carrierDropValidityKey(cr)]?.current)) return null;
+    // 고객 화면: 향후 validity 시행일 미입력 → 향후 Drop off 비표시
+    if (!isAdmin && futNoFromLive(carrierDropValidityKey(cr), p)) return null;
     // 차기 Drop off 미정(future 데이터 없음) → 정적 DO 기본값 폴백 금지
     if (p === "future") {
       const fut = carrierDropRates[cr]?.future;
@@ -3395,6 +3479,7 @@ export default function App() {
       console.warn("public_rates 저장 실패", e);
     }
   };
+  persistPublicRatesRef.current = persistPublicRates;
 
   const filt = useMemo(()=>{ let d=fData; if(areaF!=="ALL")d=d.filter(r=>r.area===areaF); if(search)d=d.filter(r=>r.pol.toLowerCase().includes(search.toLowerCase())); return d; },[fData,areaF,search]);
   const rFilt = useMemo(()=>{
@@ -3703,7 +3788,7 @@ export default function App() {
     };
     const rhSourceLabel = (s) => ({
       admin_save: "Admin 저장", auto_save: "자동 저장", excel_upload: "Excel 업로드", excel_delete: "운임 삭제",
-      history_backfill: "이력 보완", gri: "GRI", import: "기존운임 복사", import_undo: "복사 되돌리기", rental_save: "렌탈 저장",
+      history_backfill: "이력 보완", gri: "GRI", import: "기존운임 복사", import_undo: "복사 되돌리기", clear_future: "향후 비우기", rental_save: "렌탈 저장",
     }[s] || s || "—");
     const rhSourceCell = (row) => {
       const label = rhSourceLabel(row.source);
@@ -5095,8 +5180,16 @@ export default function App() {
                 <span className="import-current-freight-icon">📋</span>
                 <span className="import-current-freight-text">
                   <strong>기존운임 가져오기</strong>
-                  <span>현재 {CN_KR[caCr]} 매입 운임을 향후 운임에 복사 · 이후 GRI로 조정</span>
+                  <span>현재 {CN_KR[caCr]} 매입 운임을 향후 운임에 복사 · 이후 GRI로 조정 · 고객 화면에 게시됨</span>
                 </span>
+              </button>
+              <button
+                type="button"
+                className="clear-future-freight-btn"
+                onClick={() => clearFutureFreight(caCr, false)}
+                title={`${CN_KR[caCr]} 향후 운임 전체 비우기 — 고객 화면 Upcoming Rates에서도 제거`}
+              >
+                🗑 향후 운임<br/>전체 비우기
               </button>
               {importFreightUndo?.carrier === caCr && !importFreightUndo?.dropoffMode && (
                 <button type="button" className="import-current-freight-undo" onClick={undoImportFreight}>
@@ -5273,8 +5366,16 @@ export default function App() {
                     <span className="import-current-freight-icon">📋</span>
                     <span className="import-current-freight-text">
                       <strong>기존운임 가져오기</strong>
-                      <span>현재 Drop off 운임을 향후 운임에 복사</span>
+                      <span>현재 Drop off 운임을 향후 운임에 복사 · 고객 화면에 게시됨</span>
                     </span>
+                  </button>
+                  <button
+                    type="button"
+                    className="clear-future-freight-btn"
+                    onClick={() => clearFutureFreight(caCr, true)}
+                    title={`${CN_KR[caCr]} Drop off 향후 운임 전체 비우기 — 고객 화면 Upcoming Rates에서도 제거`}
+                  >
+                    🗑 향후 운임<br/>전체 비우기
                   </button>
                   {importFreightUndo?.carrier === caCr && importFreightUndo?.dropoffMode && (
                     <button type="button" className="import-current-freight-undo" onClick={undoImportFreight}>
